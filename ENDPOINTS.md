@@ -108,26 +108,26 @@ Base URL `https://data-api.polymarket.com`, spec [`docs/specs/data-v2-openapi.js
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/v2/activity` | [local](docs/api-reference/feeds/list-account-activity.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-account-activity) | |
-| [ ] | `GET` | `/v2/activity/combos` | [local](docs/api-reference/feeds/list-combo-activity.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-combo-activity) | |
-| [ ] | `GET` | `/v2/approvals` | [local](docs/api-reference/wallet/get-wallet-approvals.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-wallet-approvals) | |
-| [ ] | `GET` | `/v2/biggest-winners` | [local](docs/api-reference/boards/list-the-biggest-wins.md) / [online](https://docs.polymarket.com/api-reference/boards/list-the-biggest-wins) | |
-| [ ] | `GET` | `/v2/builders/leaderboard` | [local](docs/api-reference/boards/get-the-builders-leaderboard.md) / [online](https://docs.polymarket.com/api-reference/boards/get-the-builders-leaderboard) | |
-| [ ] | `GET` | `/v2/builders/volume` | [local](docs/api-reference/boards/get-builder-volume-over-time.md) / [online](https://docs.polymarket.com/api-reference/boards/get-builder-volume-over-time) | |
-| [ ] | `GET` | `/v2/holders` | [local](docs/api-reference/markets/list-a-markets-top-holders.md) / [online](https://docs.polymarket.com/api-reference/markets/list-a-markets-top-holders) | |
-| [ ] | `GET` | `/v2/leaderboard` | [local](docs/api-reference/boards/get-the-trader-leaderboard.md) / [online](https://docs.polymarket.com/api-reference/boards/get-the-trader-leaderboard) | |
-| [ ] | `GET` | `/v2/live-volume` | [local](docs/api-reference/markets/get-live-volume-for-an-event.md) / [online](https://docs.polymarket.com/api-reference/markets/get-live-volume-for-an-event) | |
-| [ ] | `GET` | `/v2/oi` | [local](docs/api-reference/markets/get-open-interest.md) / [online](https://docs.polymarket.com/api-reference/markets/get-open-interest) | |
-| [ ] | `GET` | `/v2/positions` | [local](docs/api-reference/wallet/list-positions-for-a-user-or-market.md) / [online](https://docs.polymarket.com/api-reference/wallet/list-positions-for-a-user-or-market) | |
-| [ ] | `GET` | `/v2/positions/combos` | [local](docs/api-reference/wallet/list-combo-positions.md) / [online](https://docs.polymarket.com/api-reference/wallet/list-combo-positions) | |
-| [ ] | `GET` | `/v2/prices-history` | [local](docs/api-reference/markets/get-a-tokens-price-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-a-tokens-price-history) | |
-| [ ] | `GET` | `/v2/resolutions` | [local](docs/api-reference/markets/get-resolution-state.md) / [online](https://docs.polymarket.com/api-reference/markets/get-resolution-state) | |
-| [ ] | `GET` | `/v2/status` | [local](docs/api-reference/service/get-data-freshness.md) / [online](https://docs.polymarket.com/api-reference/service/get-data-freshness) | |
-| [ ] | `GET` | `/v2/trades` | [local](docs/api-reference/feeds/list-trades.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-trades) | |
-| [ ] | `GET` | `/v2/user-pnl` | [local](docs/api-reference/wallet/get-a-users-pnl-series.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-pnl-series) | |
-| [ ] | `GET` | `/v2/user-stats` | [local](docs/api-reference/wallet/get-a-users-profile-stats.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-profile-stats) | |
-| [ ] | `GET` | `/v2/user-volume` | [local](docs/api-reference/wallet/get-a-users-trading-volume.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-trading-volume) | |
-| [ ] | `GET` | `/v2/value` | [local](docs/api-reference/wallet/get-portfolio-value.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-portfolio-value) | |
+| [x] | `GET` | `/v2/activity` | [local](docs/api-reference/feeds/list-account-activity.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-account-activity) | `DataClient::list_activity` |
+| [x] | `GET` | `/v2/activity/combos` | [local](docs/api-reference/feeds/list-combo-activity.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-combo-activity) | `DataClient::list_combo_activity` |
+| [x] | `GET` | `/v2/approvals` | [local](docs/api-reference/wallet/get-wallet-approvals.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-wallet-approvals) | `DataClient::get_approvals` |
+| [x] | `GET` | `/v2/biggest-winners` | [local](docs/api-reference/boards/list-the-biggest-wins.md) / [online](https://docs.polymarket.com/api-reference/boards/list-the-biggest-wins) | `DataClient::list_biggest_winners` |
+| [x] | `GET` | `/v2/builders/leaderboard` | [local](docs/api-reference/boards/get-the-builders-leaderboard.md) / [online](https://docs.polymarket.com/api-reference/boards/get-the-builders-leaderboard) | `DataClient::get_builders_leaderboard` |
+| [x] | `GET` | `/v2/builders/volume` | [local](docs/api-reference/boards/get-builder-volume-over-time.md) / [online](https://docs.polymarket.com/api-reference/boards/get-builder-volume-over-time) | `DataClient::get_builders_volume` |
+| [x] | `GET` | `/v2/holders` | [local](docs/api-reference/markets/list-a-markets-top-holders.md) / [online](https://docs.polymarket.com/api-reference/markets/list-a-markets-top-holders) | `DataClient::list_holders` |
+| [x] | `GET` | `/v2/leaderboard` | [local](docs/api-reference/boards/get-the-trader-leaderboard.md) / [online](https://docs.polymarket.com/api-reference/boards/get-the-trader-leaderboard) | `DataClient::get_leaderboard`, `DataClient::get_leaderboard_standing` (`user=`) |
+| [x] | `GET` | `/v2/live-volume` | [local](docs/api-reference/markets/get-live-volume-for-an-event.md) / [online](https://docs.polymarket.com/api-reference/markets/get-live-volume-for-an-event) | `DataClient::get_live_volume` |
+| [x] | `GET` | `/v2/oi` | [local](docs/api-reference/markets/get-open-interest.md) / [online](https://docs.polymarket.com/api-reference/markets/get-open-interest) | `DataClient::get_open_interest` |
+| [x] | `GET` | `/v2/positions` | [local](docs/api-reference/wallet/list-positions-for-a-user-or-market.md) / [online](https://docs.polymarket.com/api-reference/wallet/list-positions-for-a-user-or-market) | `DataClient::list_positions` |
+| [x] | `GET` | `/v2/positions/combos` | [local](docs/api-reference/wallet/list-combo-positions.md) / [online](https://docs.polymarket.com/api-reference/wallet/list-combo-positions) | `DataClient::list_combo_positions` |
+| [x] | `GET` | `/v2/prices-history` | [local](docs/api-reference/markets/get-a-tokens-price-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-a-tokens-price-history) | `DataClient::get_prices_history` |
+| [x] | `GET` | `/v2/resolutions` | [local](docs/api-reference/markets/get-resolution-state.md) / [online](https://docs.polymarket.com/api-reference/markets/get-resolution-state) | `DataClient::get_resolutions` |
+| [x] | `GET` | `/v2/status` | [local](docs/api-reference/service/get-data-freshness.md) / [online](https://docs.polymarket.com/api-reference/service/get-data-freshness) | `DataClient::get_status` |
+| [x] | `GET` | `/v2/trades` | [local](docs/api-reference/feeds/list-trades.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-trades) | `DataClient::list_trades` |
+| [x] | `GET` | `/v2/user-pnl` | [local](docs/api-reference/wallet/get-a-users-pnl-series.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-pnl-series) | `DataClient::get_user_pnl` |
+| [x] | `GET` | `/v2/user-stats` | [local](docs/api-reference/wallet/get-a-users-profile-stats.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-profile-stats) | `DataClient::get_user_stats` |
+| [x] | `GET` | `/v2/user-volume` | [local](docs/api-reference/wallet/get-a-users-trading-volume.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-a-users-trading-volume) | `DataClient::get_user_volume` |
+| [x] | `GET` | `/v2/value` | [local](docs/api-reference/wallet/get-portfolio-value.md) / [online](https://docs.polymarket.com/api-reference/wallet/get-portfolio-value) | `DataClient::get_portfolio_value` |
 
 ## Relayer API (public endpoints)
 
