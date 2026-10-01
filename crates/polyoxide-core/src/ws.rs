@@ -347,7 +347,7 @@ impl WsConnection {
             )
         })?;
         let connector = if config.url.scheme() == "wss" {
-            Some(tls_connector(service)?)
+            Some(tls_connector(service).await?)
         } else {
             None
         };
@@ -789,9 +789,34 @@ fn ws_error_from(
     ))
 }
 
-/// Builds a rustls connector with an explicit crypto provider (so that no process-wide
+/// The TLS configuration shared by every `wss://` connection, built on first use.
+static TLS_CONFIG: tokio::sync::OnceCell<Arc<rustls::ClientConfig>> =
+    tokio::sync::OnceCell::const_new();
+
+/// A rustls connector for `wss://` URLs.
+///
+/// The configuration is built once per process, on a blocking thread (loading the
+/// platform's root certificates is blocking file I/O), and then shared. A failure is not
+/// cached: the next connection tries again.
+async fn tls_connector(service: Service) -> Result<Connector> {
+    let config = TLS_CONFIG
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(move || tls_config(service))
+                .await
+                .map_err(|e| {
+                    Error::from(ConfigError::with_source(
+                        "failed to load the TLS root certificates",
+                        e,
+                    ))
+                })?
+        })
+        .await?;
+    Ok(Connector::Rustls(Arc::clone(config)))
+}
+
+/// Builds a rustls configuration with an explicit crypto provider (so that no process-wide
 /// default provider is required) and the platform's native root certificates.
-fn tls_connector(service: Service) -> Result<Connector> {
+fn tls_config(service: Service) -> Result<Arc<rustls::ClientConfig>> {
     let mut roots = rustls::RootCertStore::empty();
     let native = rustls_native_certs::load_native_certs();
     for error in &native.errors {
@@ -808,7 +833,7 @@ fn tls_connector(service: Service) -> Result<Connector> {
         .map_err(|e| ConfigError::with_source("failed to configure TLS", e))?
         .with_root_certificates(roots)
         .with_no_client_auth();
-    Ok(Connector::Rustls(Arc::new(config)))
+    Ok(Arc::new(config))
 }
 
 #[cfg(test)]
@@ -1167,6 +1192,20 @@ mod tests {
         conn.close();
         assert!(next(&mut conn).await.is_none());
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn tls_config_is_built_once_and_shared() {
+        let first = tls_connector(Service::PolyBolt).await;
+        let second = tls_connector(Service::MarketChannel).await;
+        match (first, second) {
+            (Ok(Connector::Rustls(a)), Ok(Connector::Rustls(b))) => {
+                assert!(Arc::ptr_eq(&a, &b), "the TLS configuration was rebuilt");
+            }
+            // No native root certificates on this machine: nothing is cached.
+            (Err(Error::Config(_)), Err(Error::Config(_))) => assert!(TLS_CONFIG.get().is_none()),
+            _ => panic!("unexpected TLS connector results"),
+        }
     }
 
     #[test]
