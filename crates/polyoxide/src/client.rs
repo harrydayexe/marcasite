@@ -133,8 +133,8 @@ pub struct PolymarketBuilder {
 }
 
 impl PolymarketBuilder {
-    /// Uses an existing [`HttpClient`]; the timeout, user agent and retry settings of this
-    /// builder are then ignored.
+    /// Uses an existing [`HttpClient`]; the timeout, user agent, retry and response size
+    /// settings of this builder are then ignored.
     pub fn http_client(mut self, http: HttpClient) -> Self {
         self.http = Some(http);
         self
@@ -161,6 +161,13 @@ impl PolymarketBuilder {
     /// Sets the automatic retry policy (default: no retries).
     pub fn retry_policy(mut self, retry: RetryPolicy) -> Self {
         self.http_builder = self.http_builder.retry_policy(retry);
+        self
+    }
+
+    /// Sets the largest response body accepted, in bytes (default 64 MiB); see
+    /// [`HttpClientBuilder::max_response_size`].
+    pub fn max_response_size(mut self, bytes: usize) -> Self {
+        self.http_builder = self.http_builder.max_response_size(bytes);
         self
     }
 

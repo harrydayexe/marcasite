@@ -453,6 +453,8 @@ impl fmt::Display for TransportError {
             f.write_str(" (timed out)")?;
         } else if self.is_connect {
             f.write_str(" (could not connect)")?;
+        } else if self.source.is::<crate::transport::ResponseTooLarge>() {
+            f.write_str(" (response body too large)")?;
         }
         Ok(())
     }

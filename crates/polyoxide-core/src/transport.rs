@@ -384,7 +384,9 @@ async fn execute(
         tracing::debug!(attempt, url = %url, "sending request");
 
         let outcome = match builder.send().await {
-            Ok(response) => read_response(service, &method, response).await,
+            Ok(response) => {
+                read_response(service, &method, response, transport.http.max_response_size).await
+            }
             Err(e) => Err(transport_error(service, &method, &url, e)),
         };
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -433,15 +435,20 @@ async fn read_response(
     service: Service,
     method: &Method,
     response: reqwest::Response,
+    max_size: usize,
 ) -> Result<RawResponse> {
     let status = response.status();
     let headers = response.headers().clone();
     let url = response.url().clone();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|e| transport_error(service, method, &url, e))?
-        .to_vec();
+    let body = read_body(
+        service,
+        method,
+        &url,
+        response,
+        max_size,
+        status.is_success(),
+    )
+    .await?;
     if status.is_success() {
         return Ok(RawResponse {
             service,
@@ -459,6 +466,86 @@ async fn read_response(
         Err(Error::Api(Box::new(api)))
     }
 }
+
+/// Reads a response body chunk by chunk, never holding more than `max_size` bytes.
+///
+/// A successful response (`strict`) whose body exceeds `max_size` fails with
+/// [`Error::Transport`] (source [`ResponseTooLarge`]), rejected up front when its
+/// `Content-Length` says so. An error response's body is only needed for the error message,
+/// so it is cut at `min(max_size, MAX_ERROR_BODY_READ_BYTES)` instead, keeping the status.
+async fn read_body(
+    service: Service,
+    method: &Method,
+    url: &Url,
+    mut response: reqwest::Response,
+    max_size: usize,
+    strict: bool,
+) -> Result<Vec<u8>> {
+    let too_large = || {
+        Error::Transport(Box::new(TransportError {
+            service,
+            method: method.clone(),
+            url: url.to_string(),
+            is_connect: false,
+            is_timeout: false,
+            source: Box::new(ResponseTooLarge { limit: max_size }),
+        }))
+    };
+    let limit = if strict {
+        max_size
+    } else {
+        max_size.min(MAX_ERROR_BODY_READ_BYTES)
+    };
+    if strict
+        && response
+            .content_length()
+            .is_some_and(|length| length > u64::try_from(limit).unwrap_or(u64::MAX))
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| transport_error(service, method, url, e))?
+    {
+        let room = limit.saturating_sub(body.len());
+        if chunk.len() > room {
+            if strict {
+                return Err(too_large());
+            }
+            body.extend_from_slice(chunk.get(..room).unwrap_or_default());
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Bytes of an error response's body read at most (they are only used for the message).
+const MAX_ERROR_BODY_READ_BYTES: usize = 64 * 1024;
+
+/// A successful response body was larger than [`HttpClientBuilder::max_response_size`]
+/// allows.
+///
+/// [`HttpClientBuilder::max_response_size`]: crate::HttpClientBuilder::max_response_size
+#[derive(Debug)]
+pub(crate) struct ResponseTooLarge {
+    limit: usize,
+}
+
+impl std::fmt::Display for ResponseTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the response body exceeds the maximum size of {} bytes \
+             (see `HttpClientBuilder::max_response_size`)",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for ResponseTooLarge {}
 
 fn transport_error(service: Service, method: &Method, url: &Url, err: reqwest::Error) -> Error {
     let is_timeout = err.is_timeout();
@@ -915,6 +1002,115 @@ mod tests {
         assert!(err.is_retryable());
         let err = transport.post(&["c"]).send_raw().await.unwrap_err();
         assert!(err.is_retryable());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn response_size_is_capped() -> Result<()> {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        let body = format!("\"{}\"", "x".repeat(2046));
+        // Not retried.
+        Mock::given(matchers::path("/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body.clone(), "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(matchers::path("/fits"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(body[..1024].to_owned(), "text/plain"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(matchers::path("/error"))
+            .respond_with(
+                ResponseTemplate::new(503).set_body_raw("e".repeat(100_000), "text/plain"),
+            )
+            // The first attempt and two retries.
+            .expect(3)
+            .mount(&server)
+            .await;
+        let http = HttpClient::builder()
+            .max_response_size(1024)
+            .retry_policy(crate::RetryPolicy::new(2).with_initial_backoff(Duration::from_millis(1)))
+            .build()?;
+        assert_eq!(http.max_response_size(), 1024);
+        let transport = Transport::new(http, Service::Data, parse_base_url(&server.uri())?);
+
+        let err = transport.get(&["big"]).send_raw().await.unwrap_err();
+        let Error::Transport(inner) = &err else {
+            panic!("expected a transport error, got {err:?}");
+        };
+        assert!(!inner.is_connect());
+        assert!(!err.is_retryable());
+        assert!(
+            err.to_string()
+                .ends_with("failed (response body too large)"),
+            "{err}"
+        );
+        let cause = std::error::Error::source(&err).unwrap().to_string();
+        assert!(
+            cause.contains("exceeds the maximum size of 1024 bytes"),
+            "{cause}"
+        );
+
+        assert_eq!(
+            transport.get(&["fits"]).send_raw().await?.body().len(),
+            1024
+        );
+
+        // An oversized error body is cut, and the status is kept.
+        let err = transport.get(&["error"]).send_raw().await.unwrap_err();
+        let api = err.api_error().unwrap();
+        assert_eq!(api.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            api.body().len() <= MAX_ERROR_BODY_BYTES + 4,
+            "{}",
+            api.body().len()
+        );
+
+        assert_eq!(
+            HttpClient::new()?.max_response_size(),
+            crate::config::DEFAULT_MAX_RESPONSE_SIZE
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn chunked_bodies_without_a_length_are_capped_too() -> Result<()> {
+        use std::io::{Read as _, Write as _};
+
+        // A server that streams 10 000 bytes with chunked encoding (no `Content-Length`).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n",
+            );
+            for _ in 0..10 {
+                let _ = stream.write_all(format!("3e8\r\n{}\r\n", "1".repeat(1000)).as_bytes());
+            }
+            let _ = stream.write_all(b"0\r\n\r\n");
+        });
+
+        let http = HttpClient::builder().max_response_size(4096).build()?;
+        let transport = Transport::new(
+            http,
+            Service::Gamma,
+            parse_base_url(&format!("http://{addr}"))?,
+        );
+        let err = transport.get(&["stream"]).send_raw().await.unwrap_err();
+        assert!(matches!(err, Error::Transport(_)), "{err:?}");
+        assert!(
+            err.to_string().ends_with("(response body too large)"),
+            "{err}"
+        );
         Ok(())
     }
 

@@ -13,6 +13,9 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 /// The default connection timeout.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The default limit on the size of a response body: 64 MiB.
+pub const DEFAULT_MAX_RESPONSE_SIZE: usize = 64 * 1024 * 1024;
+
 /// When and how to retry failed requests automatically.
 ///
 /// Only requests that are safe to repeat are retried: `GET` requests, and read-only `POST`
@@ -137,6 +140,7 @@ impl Default for RetryPolicy {
 pub struct HttpClient {
     pub(crate) inner: reqwest::Client,
     pub(crate) retry: RetryPolicy,
+    pub(crate) max_response_size: usize,
 }
 
 impl HttpClient {
@@ -159,6 +163,13 @@ impl HttpClient {
     #[must_use]
     pub fn retry_policy(&self) -> RetryPolicy {
         self.retry
+    }
+
+    /// The largest response body accepted, in bytes (see
+    /// [`HttpClientBuilder::max_response_size`]).
+    #[must_use]
+    pub fn max_response_size(&self) -> usize {
+        self.max_response_size
     }
 }
 
@@ -185,6 +196,7 @@ pub struct HttpClientBuilder {
     connect_timeout: Option<Duration>,
     user_agent: String,
     retry: RetryPolicy,
+    max_response_size: usize,
 }
 
 impl Default for HttpClientBuilder {
@@ -194,6 +206,7 @@ impl Default for HttpClientBuilder {
             connect_timeout: Some(DEFAULT_CONNECT_TIMEOUT),
             user_agent: DEFAULT_USER_AGENT.to_owned(),
             retry: RetryPolicy::none(),
+            max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
         }
     }
 }
@@ -229,6 +242,20 @@ impl HttpClientBuilder {
         self
     }
 
+    /// Sets the largest response body accepted, in bytes (default
+    /// [`DEFAULT_MAX_RESPONSE_SIZE`], 64 MiB), so a misbehaving server or proxy cannot
+    /// exhaust memory.
+    ///
+    /// Bodies are read in chunks and never held beyond the limit. A successful response
+    /// whose body is larger fails with [`Error::Transport`](crate::Error::Transport) (whose
+    /// [`source`](std::error::Error::source) says the body was too large); it is not
+    /// retried. The body of an error response is only read up to 64 KiB (or the limit, if
+    /// smaller) and the error keeps its HTTP status.
+    pub fn max_response_size(mut self, bytes: usize) -> Self {
+        self.max_response_size = bytes;
+        self
+    }
+
     /// Builds the client.
     ///
     /// # Errors
@@ -251,6 +278,7 @@ impl HttpClientBuilder {
         Ok(HttpClient {
             inner,
             retry: self.retry,
+            max_response_size: self.max_response_size,
         })
     }
 }
