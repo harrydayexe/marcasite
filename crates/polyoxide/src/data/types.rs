@@ -258,55 +258,6 @@ pub struct ComboLegEvent {
     pub event_image: String,
 }
 
-/// Epoch **microseconds** as `DateTime<Utc>` (no equivalent helper exists in
-/// `polyoxide_core::serde_util` yet).
-pub(crate) mod timestamp_micros {
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize as _, Deserializer, Serializer, de::Error as _};
-
-    pub(crate) fn serialize<S: Serializer>(
-        value: &DateTime<Utc>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_i64(value.timestamp_micros())
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<DateTime<Utc>, D::Error> {
-        let micros = i64::deserialize(deserializer)?;
-        DateTime::from_timestamp_micros(micros)
-            .ok_or_else(|| D::Error::custom(format!("unix timestamp out of range: {micros}")))
-    }
-}
-
-/// Optional variant of [`timestamp_micros`]; `null` becomes `None`.
-pub(crate) mod timestamp_micros_option {
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize as _, Deserializer, Serializer, de::Error as _};
-
-    pub(crate) fn serialize<S: Serializer>(
-        value: &Option<DateTime<Utc>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(v) => serializer.serialize_some(&v.timestamp_micros()),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<DateTime<Utc>>, D::Error> {
-        match Option::<i64>::deserialize(deserializer)? {
-            None => Ok(None),
-            Some(micros) => DateTime::from_timestamp_micros(micros)
-                .map(Some)
-                .ok_or_else(|| D::Error::custom(format!("unix timestamp out of range: {micros}"))),
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------------------
 // Request helpers
 // ---------------------------------------------------------------------------------------
@@ -475,22 +426,6 @@ mod tests {
         assert!(ErrorCode::from("brand_new").is_unknown());
         let validation = Error::from(ValidationError::new("limit", "too big"));
         assert_eq!(ErrorCode::from_error(&validation), None);
-    }
-
-    #[test]
-    fn micros_roundtrip() {
-        #[derive(Debug, PartialEq, Serialize, Deserialize)]
-        struct Wire {
-            #[serde(with = "timestamp_micros")]
-            at: DateTime<Utc>,
-            #[serde(default, with = "timestamp_micros_option")]
-            maybe: Option<DateTime<Utc>>,
-        }
-        let wire: Wire = serde_json::from_str(r#"{"at":1700000000123456,"maybe":null}"#).unwrap();
-        assert_eq!(wire.at.timestamp_micros(), 1_700_000_000_123_456);
-        assert_eq!(wire.maybe, None);
-        let encoded = serde_json::to_string(&wire).unwrap();
-        assert_eq!(serde_json::from_str::<Wire>(&encoded).unwrap(), wire);
     }
 
     #[test]

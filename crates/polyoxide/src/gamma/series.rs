@@ -78,13 +78,13 @@ pub struct Series {
     /// markets), so it is kept exactly as sent.
     pub competitive: Option<String>,
     /// 24-hour volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_24hr: Option<Decimal>,
     /// Volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume: Option<Decimal>,
     /// Liquidity.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub liquidity: Option<Decimal>,
     /// Start date.
     #[serde(default, with = "serde_util::datetime_option")]

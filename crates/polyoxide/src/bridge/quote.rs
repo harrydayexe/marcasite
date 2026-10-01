@@ -1,6 +1,6 @@
 //! Quotes: `POST /quote`.
 
-use polyoxide_core::Result;
+use polyoxide_core::{Result, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -82,10 +82,10 @@ pub struct Quote {
     /// Breakdown of the estimated fees.
     pub est_fee_breakdown: Option<FeeBreakdown>,
     /// `estInputUsd`. The spec describes it as "Estimated token amount received in USD".
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub est_input_usd: Option<Decimal>,
     /// `estOutputUsd`. The spec describes it as "Estimated token amount sent in USD".
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub est_output_usd: Option<Decimal>,
     /// Estimated amount of the destination token received, in its base units (an integer
     /// string).
@@ -105,37 +105,37 @@ pub struct FeeBreakdown {
     /// Label of the app fee, e.g. `"Fun.xyz fee"`.
     pub app_fee_label: Option<String>,
     /// App fees as a percentage of the total amount sent.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub app_fee_percent: Option<Decimal>,
     /// App fees in USD.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub app_fee_usd: Option<Decimal>,
     /// Fill cost as a percentage of the total amount sent.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub fill_cost_percent: Option<Decimal>,
     /// Fill cost in USD.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub fill_cost_usd: Option<Decimal>,
     /// Gas fee in USD.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub gas_usd: Option<Decimal>,
     /// Maximum potential slippage, as a percentage.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub max_slippage: Option<Decimal>,
     /// Amount after factoring in slippage.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub min_received: Option<Decimal>,
     /// Swap impact as a percentage of the total amount sent.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub swap_impact: Option<Decimal>,
     /// Swap impact in USD.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub swap_impact_usd: Option<Decimal>,
     /// Total impact as a percentage of the total amount sent.
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_impact: Option<Decimal>,
     /// Impact cost of the transaction (USD).
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_impact_usd: Option<Decimal>,
 }
 

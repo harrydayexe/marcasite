@@ -20,10 +20,10 @@ pub struct ImageOptimization {
     /// URL of the optimized image.
     pub image_url_optimized: Option<String>,
     /// Size of the source image in KB.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub image_size_kb_source: Option<Decimal>,
     /// Size of the optimized image in KB.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub image_size_kb_optimized: Option<Decimal>,
     /// Whether optimization has completed.
     pub image_optimized_complete: Option<bool>,

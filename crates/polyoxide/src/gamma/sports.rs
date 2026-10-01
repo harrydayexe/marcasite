@@ -18,7 +18,7 @@ polyoxide_core::string_id! {
 #[non_exhaustive]
 pub struct Team {
     /// Team id (an integer on the wire).
-    #[serde(default, with = "crate::gamma::util::integer_id_option")]
+    #[serde(default, with = "serde_util::integer_id_option")]
     pub id: Option<TeamId>,
     /// Team name.
     pub name: Option<String>,

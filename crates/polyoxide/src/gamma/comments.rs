@@ -120,11 +120,7 @@ pub struct Reaction {
     /// Reaction id.
     pub id: Option<String>,
     /// Id of the comment reacted to (wire name `commentID`, an integer).
-    #[serde(
-        rename = "commentID",
-        default,
-        with = "crate::gamma::util::integer_id_option"
-    )]
+    #[serde(rename = "commentID", default, with = "serde_util::integer_id_option")]
     pub comment_id: Option<CommentId>,
     /// Reaction type.
     pub reaction_type: Option<String>,

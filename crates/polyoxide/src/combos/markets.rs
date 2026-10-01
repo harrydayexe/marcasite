@@ -4,6 +4,7 @@ use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError,
     pagination::{CursorPage, cursor_stream},
+    serde_util,
     types::ConditionId,
 };
 use rust_decimal::Decimal;
@@ -54,7 +55,7 @@ pub struct ComboMarket {
     pub image: String,
     /// Market volume (a JSON number on the wire). The catalog is ordered by volume,
     /// descending.
-    #[serde(with = "rust_decimal::serde::float")]
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Tag slugs, e.g. `["sports", "soccer"]`.
     pub tags: Vec<String>,
@@ -281,7 +282,10 @@ mod tests {
         let value = serde_json::to_value(&page).unwrap();
         // Prices stay strings and volume stays a number, as on the wire.
         assert_eq!(value["markets"][0]["outcome_prices"][0], "0.685");
-        assert!(value["markets"][0]["volume"].is_number());
+        assert_eq!(
+            value["markets"][0]["volume"],
+            serde_json::json!(330_327.712_858_007_4)
+        );
         let again: ComboMarketsPage = serde_json::from_value(value).unwrap();
         assert_eq!(again, page);
     }

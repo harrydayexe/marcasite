@@ -69,17 +69,13 @@ pub struct RelatedTag {
     /// Relationship id.
     pub id: Option<String>,
     /// The tag (wire name `tagID`, an integer).
-    #[serde(
-        rename = "tagID",
-        default,
-        with = "crate::gamma::util::integer_id_option"
-    )]
+    #[serde(rename = "tagID", default, with = "serde_util::integer_id_option")]
     pub tag_id: Option<TagId>,
     /// The related tag (wire name `relatedTagID`, an integer).
     #[serde(
         rename = "relatedTagID",
         default,
-        with = "crate::gamma::util::integer_id_option"
+        with = "serde_util::integer_id_option"
     )]
     pub related_tag_id: Option<TagId>,
     /// Rank of the relationship.

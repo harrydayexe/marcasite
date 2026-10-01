@@ -77,13 +77,13 @@ pub struct Event {
     /// Whether the event is restricted.
     pub restricted: Option<bool>,
     /// Liquidity.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub liquidity: Option<Decimal>,
     /// Volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume: Option<Decimal>,
     /// Open interest.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub open_interest: Option<Decimal>,
     /// Sort order of the event's markets.
     pub sort_by: Option<String>,
@@ -112,19 +112,19 @@ pub struct Event {
     /// Whether comments are enabled.
     pub comments_enabled: Option<bool>,
     /// Competitiveness score.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub competitive: Option<Decimal>,
     /// 24-hour volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_24hr: Option<Decimal>,
     /// 1-week volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1wk: Option<Decimal>,
     /// 1-month volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1mo: Option<Decimal>,
     /// 1-year volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1yr: Option<Decimal>,
     /// Featured image URL.
     pub featured_image: Option<String>,
@@ -135,7 +135,7 @@ pub struct Event {
     /// Whether the order book is enabled.
     pub enable_order_book: Option<bool>,
     /// CLOB liquidity.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub liquidity_clob: Option<Decimal>,
     /// Whether the event uses negative risk.
     pub neg_risk: Option<bool>,
@@ -220,10 +220,10 @@ pub struct Event {
     /// Templates (included with `include_template=true`).
     pub templates: Option<Vec<Template>>,
     /// Main spreads line (for sports events).
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub spreads_main_line: Option<Decimal>,
     /// Main totals line (for sports events).
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub totals_main_line: Option<Decimal>,
     /// Carousel map. The spec types this as a plain string.
     pub carousel_map: Option<String>,

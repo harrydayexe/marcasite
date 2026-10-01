@@ -132,20 +132,20 @@ pub struct Market {
     /// Whether the order book is enabled.
     pub enable_order_book: Option<bool>,
     /// Minimum price tick size.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub order_price_min_tick_size: Option<Decimal>,
     /// Minimum order size.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub order_min_size: Option<Decimal>,
     /// UMA resolution status.
     pub uma_resolution_status: Option<String>,
     /// Curation order.
     pub curation_order: Option<i64>,
     /// Volume as a number.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_num: Option<Decimal>,
     /// Liquidity as a number.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub liquidity_num: Option<Decimal>,
     /// End date. The spec types this as a plain string with no format.
     pub end_date_iso: Option<String>,
@@ -160,16 +160,16 @@ pub struct Market {
     /// Whether comments are enabled.
     pub comments_enabled: Option<bool>,
     /// 24-hour volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_24hr: Option<Decimal>,
     /// 1-week volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1wk: Option<Decimal>,
     /// 1-month volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1mo: Option<Decimal>,
     /// 1-year volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1yr: Option<Decimal>,
     /// Game start time. The spec types this as a plain string with no format.
     pub game_start_time: Option<String>,
@@ -193,22 +193,22 @@ pub struct Market {
     /// UMA reward (a string on the wire).
     pub uma_reward: Option<Decimal>,
     /// 24-hour CLOB volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_24hr_clob: Option<Decimal>,
     /// 1-week CLOB volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1wk_clob: Option<Decimal>,
     /// 1-month CLOB volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1mo_clob: Option<Decimal>,
     /// 1-year CLOB volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_1yr_clob: Option<Decimal>,
     /// CLOB volume.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_clob: Option<Decimal>,
     /// CLOB liquidity.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub liquidity_clob: Option<Decimal>,
     /// Maker base fee.
     pub maker_base_fee: Option<i64>,
@@ -250,42 +250,42 @@ pub struct Market {
     #[serde(default, with = "serde_util::datetime_option")]
     pub accepting_orders_timestamp: Option<DateTime<Utc>>,
     /// Competitiveness score.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub competitive: Option<Decimal>,
     /// Minimum size for liquidity rewards.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_min_size: Option<Decimal>,
     /// Maximum spread for liquidity rewards.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_max_spread: Option<Decimal>,
     /// Current spread.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub spread: Option<Decimal>,
     /// Whether the market resolves automatically.
     pub automatically_resolved: Option<bool>,
     /// Price change over one day.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_day_price_change: Option<Decimal>,
     /// Price change over one hour.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_hour_price_change: Option<Decimal>,
     /// Price change over one week.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_week_price_change: Option<Decimal>,
     /// Price change over one month.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_month_price_change: Option<Decimal>,
     /// Price change over one year.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_year_price_change: Option<Decimal>,
     /// Last trade price.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub last_trade_price: Option<Decimal>,
     /// Best bid.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub best_bid: Option<Decimal>,
     /// Best ask.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub best_ask: Option<Decimal>,
     /// Whether the market activates automatically.
     pub automatically_active: Option<bool>,
@@ -311,7 +311,7 @@ pub struct Market {
     /// [`GammaClient::get_sports_market_types`](super::GammaClient::get_sports_market_types)).
     pub sports_market_type: Option<String>,
     /// Line (for sports markets).
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub line: Option<Decimal>,
     /// UMA resolution statuses. The spec types this as a plain string.
     pub uma_resolution_statuses: Option<String>,
@@ -342,15 +342,15 @@ pub struct Market {
 #[non_exhaustive]
 pub struct FeeSchedule {
     /// Exponent.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub exponent: Option<Decimal>,
     /// Rate.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rate: Option<Decimal>,
     /// Whether only takers pay the fee.
     pub taker_only: Option<bool>,
     /// Rebate rate.
-    #[serde(default, with = "crate::gamma::util::number_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rebate_rate: Option<Decimal>,
 }
 
@@ -981,22 +981,22 @@ struct MarketsInformationBody {
     condition_ids: Vec<ConditionId>,
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::gamma::util::number_option"
+        with = "serde_util::decimal_number_option"
     )]
     liquidity_num_min: Option<Decimal>,
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::gamma::util::number_option"
+        with = "serde_util::decimal_number_option"
     )]
     liquidity_num_max: Option<Decimal>,
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::gamma::util::number_option"
+        with = "serde_util::decimal_number_option"
     )]
     volume_num_min: Option<Decimal>,
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::gamma::util::number_option"
+        with = "serde_util::decimal_number_option"
     )]
     volume_num_max: Option<Decimal>,
     #[serde(
@@ -1033,7 +1033,7 @@ struct MarketsInformationBody {
     sports_market_types: Vec<String>,
     #[serde(
         skip_serializing_if = "Option::is_none",
-        with = "crate::gamma::util::number_option"
+        with = "serde_util::decimal_number_option"
     )]
     rewards_min_size: Option<Decimal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

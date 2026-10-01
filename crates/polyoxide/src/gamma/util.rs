@@ -3,44 +3,6 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use polyoxide_core::{Query, Result, ValidationError};
 
-/// Serde helper for `type: number` fields modelled as `Option<Decimal>`.
-///
-/// Deserializes from a JSON number (or a numeric string, which `Decimal` also accepts) and
-/// serializes back to a JSON number, like the wire format: integral values as integers,
-/// others as floats.
-///
-/// Use with `#[serde(default, with = "crate::gamma::util::number_option")]`.
-pub(crate) mod number_option {
-    use rust_decimal::{Decimal, prelude::ToPrimitive as _};
-    use serde::{Deserialize, Deserializer, Serializer, ser::Error as _};
-
-    pub(crate) fn serialize<S: Serializer>(
-        value: &Option<Decimal>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let Some(value) = value else {
-            return serializer.serialize_none();
-        };
-        if value.fract().is_zero()
-            && let Some(integer) = value.to_i64()
-        {
-            return serializer.serialize_some(&integer);
-        }
-        match value.to_f64() {
-            Some(float) => serializer.serialize_some(&float),
-            None => Err(S::Error::custom(format!(
-                "decimal {value} cannot be represented as a JSON number"
-            ))),
-        }
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Decimal>, D::Error> {
-        Option::<Decimal>::deserialize(deserializer)
-    }
-}
-
 /// Generates builder setter methods on a request builder whose optional parameters live in
 /// a `params` field.
 ///
@@ -121,35 +83,6 @@ pub(crate) fn rfc3339(value: &DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 }
 
-/// Serde helper for optional identifier newtypes whose wire type is `integer`.
-///
-/// Deserializes through the newtype (which accepts a JSON integer or string) and serializes
-/// back to a JSON integer when the id is numeric, so a round trip preserves the wire format.
-///
-/// Use with `#[serde(default, with = "crate::gamma::util::integer_id_option")]`.
-pub(crate) mod integer_id_option {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub(crate) fn serialize<T: AsRef<str>, S: Serializer>(
-        value: &Option<T>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value.as_ref().map(AsRef::as_ref) {
-            None => serializer.serialize_none(),
-            Some(id) => match id.parse::<i64>() {
-                Ok(number) => serializer.serialize_some(&number),
-                Err(_) => serializer.serialize_some(id),
-            },
-        }
-    }
-
-    pub(crate) fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<T>, D::Error> {
-        Option::<T>::deserialize(deserializer)
-    }
-}
-
 /// Parses an identifier that the API types as `integer` (e.g. in a JSON request body).
 ///
 /// # Errors
@@ -203,31 +136,6 @@ mod tests {
         assert!(validate_keyset_limit(Some(100)).is_ok());
         assert!(validate_keyset_limit(Some(0)).is_err());
         assert!(validate_keyset_limit(Some(101)).is_err());
-    }
-
-    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    struct Numbers {
-        #[serde(default, with = "number_option")]
-        value: Option<rust_decimal::Decimal>,
-    }
-
-    #[test]
-    fn numbers_roundtrip_as_json_numbers() {
-        for json in [
-            r#"{"value":3}"#,
-            r#"{"value":-2}"#,
-            r#"{"value":12.5}"#,
-            r#"{"value":0.001}"#,
-            r#"{"value":null}"#,
-        ] {
-            let parsed: Numbers = serde_json::from_str(json).unwrap();
-            assert_eq!(serde_json::to_string(&parsed).unwrap(), json);
-        }
-        let missing: Numbers = serde_json::from_str("{}").unwrap();
-        assert_eq!(missing.value, None);
-        let from_string: Numbers = serde_json::from_str(r#"{"value":"0.1"}"#).unwrap();
-        assert_eq!(from_string.value, Some(rust_decimal::Decimal::new(1, 1)));
-        assert!(serde_json::from_str::<Numbers>(r#"{"value":"abc"}"#).is_err());
     }
 
     #[test]

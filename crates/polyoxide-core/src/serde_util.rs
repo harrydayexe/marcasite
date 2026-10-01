@@ -6,12 +6,14 @@
 //! encoding change does not break deserialization of a whole response.
 //!
 //! Decimal values ([`rust_decimal::Decimal`]) need no helper to deserialize: they accept
-//! both JSON strings and JSON numbers. To *serialize* a decimal as a JSON number use
-//! `rust_decimal::serde::float`; the default serialization is a string.
+//! both JSON strings and JSON numbers. Their default serialization is a JSON string; for
+//! fields the API sends as JSON **numbers**, use [`decimal_number`] /
+//! [`decimal_number_option`], which serialize back to a JSON number (integers as integers).
 
 use std::{fmt::Display, str::FromStr};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use rust_decimal::{Decimal, prelude::ToPrimitive as _};
 use serde::{Deserialize, Deserializer, Serializer, de::DeserializeOwned, de::Error as _};
 use serde_json::Value;
 
@@ -230,6 +232,84 @@ pub mod timestamp_millis_option {
                     .map(Some)
                     .ok_or_else(|| {
                         D::Error::custom(format!("unix timestamp out of range: {millis}"))
+                    })
+            }
+        }
+    }
+}
+
+/// Unix timestamps in **microseconds** (JSON number or numeric string) as `DateTime<Utc>`.
+///
+/// Serializes as a JSON integer.
+pub mod timestamp_micros {
+    use super::*;
+
+    /// Serializes as integer microseconds.
+    ///
+    /// # Errors
+    ///
+    /// Propagates serializer errors.
+    pub fn serialize<S: Serializer>(
+        value: &DateTime<Utc>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_i64(value.timestamp_micros())
+    }
+
+    /// Deserializes from integer microseconds or a numeric string.
+    ///
+    /// # Errors
+    ///
+    /// Fails on non-numeric input or an out-of-range timestamp.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<DateTime<Utc>, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        let micros = integer_from_value::<D::Error>(&value, "unix timestamp (microseconds)")?;
+        DateTime::from_timestamp_micros(micros)
+            .ok_or_else(|| D::Error::custom(format!("unix timestamp out of range: {micros}")))
+    }
+}
+
+/// Optional variant of [`timestamp_micros`]; `null`, a missing field and `""` become `None`.
+///
+/// Use with `#[serde(default, with = "...")]`.
+pub mod timestamp_micros_option {
+    use super::*;
+
+    /// Serializes `Some` as integer microseconds and `None` as `null`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates serializer errors.
+    pub fn serialize<S: Serializer>(
+        value: &Option<DateTime<Utc>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(v) => serializer.serialize_some(&v.timestamp_micros()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    /// Deserializes from integer microseconds, a numeric string, `""` or `null`.
+    ///
+    /// # Errors
+    ///
+    /// Fails on non-numeric input or an out-of-range timestamp.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<DateTime<Utc>>, D::Error> {
+        match Value::deserialize(deserializer)? {
+            Value::Null => Ok(None),
+            Value::String(s) if s.trim().is_empty() => Ok(None),
+            value => {
+                let micros =
+                    integer_from_value::<D::Error>(&value, "unix timestamp (microseconds)")?;
+                DateTime::from_timestamp_micros(micros)
+                    .map(Some)
+                    .ok_or_else(|| {
+                        D::Error::custom(format!("unix timestamp out of range: {micros}"))
                     })
             }
         }
@@ -468,6 +548,175 @@ pub mod string_or_number_option {
     }
 }
 
+/// Serializes a decimal as a JSON number: an integral value as an integer, any other value
+/// as a float.
+struct DecimalAsNumber<'a>(&'a Decimal);
+
+impl serde::Serialize for DecimalAsNumber<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let value = self.0;
+        if value.fract().is_zero() {
+            if let Some(integer) = value.to_i64() {
+                return serializer.serialize_i64(integer);
+            }
+            if let Some(integer) = value.to_u64() {
+                return serializer.serialize_u64(integer);
+            }
+        }
+        match value.to_f64() {
+            Some(float) => serializer.serialize_f64(float),
+            None => Err(serde::ser::Error::custom(format!(
+                "decimal {value} cannot be represented as a JSON number"
+            ))),
+        }
+    }
+}
+
+/// A [`Decimal`] that the API sends as a JSON **number** (`type: number`).
+///
+/// Deserializes from a JSON number or a numeric string (like `Decimal` itself) and
+/// serializes back to a JSON number, as on the wire: integral values as integers (`3`, not
+/// `3.0`), others as floats. Unlike `rust_decimal::serde::float`, which always writes a
+/// float, a round trip therefore preserves the wire representation of integers.
+pub mod decimal_number {
+    use super::*;
+
+    /// Serializes as a JSON number (integers as integers).
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value cannot be represented as a JSON number; propagates serializer
+    /// errors.
+    pub fn serialize<S: Serializer>(value: &Decimal, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&DecimalAsNumber(value), serializer)
+    }
+
+    /// Deserializes from a JSON number or a numeric string.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value is not a valid decimal.
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Decimal, D::Error> {
+        <Decimal as Deserialize>::deserialize(deserializer)
+    }
+}
+
+/// Optional variant of [`decimal_number`]; `null` and a missing field become `None`.
+///
+/// Use with `#[serde(default, with = "...")]`.
+pub mod decimal_number_option {
+    use super::*;
+
+    /// Serializes `Some` as a JSON number (integers as integers) and `None` as `null`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value cannot be represented as a JSON number; propagates serializer
+    /// errors.
+    pub fn serialize<S: Serializer>(
+        value: &Option<Decimal>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(v) => serializer.serialize_some(&DecimalAsNumber(v)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    /// Deserializes from a JSON number, a numeric string or `null`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a non-null value is not a valid decimal.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Decimal>, D::Error> {
+        Option::<Decimal>::deserialize(deserializer)
+    }
+}
+
+/// Writes a string identifier as a JSON integer when it is one, otherwise as a string.
+fn serialize_integer_id<S: Serializer>(id: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    match id.parse::<i64>() {
+        Ok(number) => serializer.serialize_i64(number),
+        Err(_) => serializer.serialize_str(id),
+    }
+}
+
+/// Identifier newtypes (see [`string_id!`](crate::string_id)) whose wire type is
+/// `integer`.
+///
+/// Deserializes through the newtype, which accepts a JSON integer or string, and serializes
+/// back to a JSON integer when the id is numeric (otherwise as a string), so a round trip
+/// preserves the wire format.
+pub mod integer_id {
+    use super::*;
+
+    /// Serializes as a JSON integer if the id parses as `i64`, otherwise as a string.
+    ///
+    /// # Errors
+    ///
+    /// Propagates serializer errors.
+    pub fn serialize<T: AsRef<str>, S: Serializer>(
+        value: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serialize_integer_id(value.as_ref(), serializer)
+    }
+
+    /// Deserializes with `T`'s own `Deserialize`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value is not a valid `T`.
+    pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        T::deserialize(deserializer)
+    }
+}
+
+/// Optional variant of [`integer_id`]; `null` and a missing field become `None`.
+///
+/// Use with `#[serde(default, with = "...")]`.
+pub mod integer_id_option {
+    use super::*;
+
+    /// Serializes `Some` like [`integer_id`] and `None` as `null`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates serializer errors.
+    pub fn serialize<T: AsRef<str>, S: Serializer>(
+        value: &Option<T>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        struct IntegerId<'a>(&'a str);
+
+        impl serde::Serialize for IntegerId<'_> {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serialize_integer_id(self.0, serializer)
+            }
+        }
+
+        match value {
+            Some(id) => serializer.serialize_some(&IntegerId(id.as_ref())),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    /// Deserializes with `Option<T>`'s own `Deserialize`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a non-null value is not a valid `T`.
+    pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<T>, D::Error> {
+        Option::<T>::deserialize(deserializer)
+    }
+}
+
 /// Deserializes an `Option<T>` where the API sends `""` to mean "absent".
 ///
 /// Use with `#[serde(default, deserialize_with = "...")]`.
@@ -490,7 +739,6 @@ where
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone as _;
-    use rust_decimal::Decimal;
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -563,6 +811,101 @@ mod tests {
         assert_eq!(d.to_string(), "0.1");
         let d: Decimal = serde_json::from_str("45159.4653").unwrap();
         assert_eq!(d.to_string(), "45159.4653");
+    }
+
+    #[test]
+    fn micros_roundtrip() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Micros {
+            #[serde(with = "timestamp_micros")]
+            at: DateTime<Utc>,
+            #[serde(default, with = "timestamp_micros_option")]
+            maybe: Option<DateTime<Utc>>,
+        }
+        let wire: Micros = serde_json::from_str(r#"{"at":1700000000123456,"maybe":null}"#).unwrap();
+        assert_eq!(wire.at.timestamp_micros(), 1_700_000_000_123_456);
+        assert_eq!(wire.maybe, None);
+        let encoded = serde_json::to_string(&wire).unwrap();
+        assert_eq!(encoded, r#"{"at":1700000000123456,"maybe":null}"#);
+        assert_eq!(serde_json::from_str::<Micros>(&encoded).unwrap(), wire);
+
+        let lenient: Micros =
+            serde_json::from_str(r#"{"at":"1700000000123456","maybe":"7"}"#).unwrap();
+        assert_eq!(lenient.at, wire.at);
+        assert_eq!(lenient.maybe.map(|d| d.timestamp_micros()), Some(7));
+        let missing: Micros = serde_json::from_str(r#"{"at":0,"maybe":""}"#).unwrap();
+        assert_eq!(missing.maybe, None);
+        assert!(serde_json::from_str::<Micros>(r#"{"at":"soon"}"#).is_err());
+        assert!(serde_json::from_str::<Micros>(r#"{"at":true}"#).is_err());
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Numbers {
+        #[serde(with = "decimal_number")]
+        required: Decimal,
+        #[serde(default, with = "decimal_number_option")]
+        value: Option<Decimal>,
+    }
+
+    #[test]
+    fn decimal_numbers_roundtrip_as_json_numbers() {
+        for json in [
+            r#"{"required":3,"value":-2}"#,
+            r#"{"required":12.5,"value":0.001}"#,
+            r#"{"required":0,"value":null}"#,
+            r#"{"required":330327.7128580074,"value":45}"#,
+            r#"{"required":18446744073709551615,"value":-9223372036854775808}"#,
+        ] {
+            let parsed: Numbers = serde_json::from_str(json).unwrap();
+            assert_eq!(serde_json::to_string(&parsed).unwrap(), json);
+        }
+        // Integral values written with a scale stay integers.
+        let scaled = Numbers {
+            required: Decimal::new(300, 2),
+            value: Some(Decimal::new(-1500, 3)),
+        };
+        assert_eq!(
+            serde_json::to_string(&scaled).unwrap(),
+            r#"{"required":3,"value":-1.5}"#
+        );
+        let missing: Numbers = serde_json::from_str(r#"{"required":"1"}"#).unwrap();
+        assert_eq!(missing.required, Decimal::ONE);
+        assert_eq!(missing.value, None);
+        let from_string: Numbers =
+            serde_json::from_str(r#"{"required":"0.1","value":"0.1"}"#).unwrap();
+        assert_eq!(from_string.value, Some(Decimal::new(1, 1)));
+        assert!(serde_json::from_str::<Numbers>(r#"{"required":"abc"}"#).is_err());
+        assert!(serde_json::from_str::<Numbers>(r#"{"required":1,"value":"abc"}"#).is_err());
+        assert!(serde_json::from_str::<Numbers>(r#"{"required":1,"value":[]}"#).is_err());
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct Ids {
+        #[serde(with = "integer_id")]
+        id: crate::types::TokenId,
+        #[serde(default, with = "integer_id_option")]
+        other: Option<crate::types::TokenId>,
+    }
+
+    #[test]
+    fn integer_ids_roundtrip_as_integers() {
+        let ids: Ids = serde_json::from_str(r#"{"id":42,"other":"7"}"#).unwrap();
+        assert_eq!(ids.id, "42");
+        assert_eq!(
+            serde_json::to_string(&ids).unwrap(),
+            r#"{"id":42,"other":7}"#
+        );
+        let non_numeric = Ids {
+            id: "abc".into(),
+            other: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&non_numeric).unwrap(),
+            r#"{"id":"abc","other":null}"#
+        );
+        let missing: Ids = serde_json::from_str(r#"{"id":"1"}"#).unwrap();
+        assert_eq!(missing.other, None);
+        assert!(serde_json::from_str::<Ids>(r#"{"id":[1]}"#).is_err());
     }
 
     #[test]

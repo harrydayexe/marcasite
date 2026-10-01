@@ -11,7 +11,7 @@ use super::{
     DataClient,
     types::{
         ComboLeg, FilterType, Page, SortDirection, check_limit, check_list, collect_ids, distinct,
-        page_stream, timestamp_micros, timestamp_micros_option,
+        page_stream,
     },
 };
 use crate::types::{Address, ConditionId, EventId, TokenId};
@@ -221,7 +221,7 @@ pub struct ComboPosition {
     pub first_entry_at: DateTime<Utc>,
     /// `first_entry_at` at microsecond precision (`first_entry_at_micros`); `None` on the
     /// null tail.
-    #[serde(default, with = "timestamp_micros_option")]
+    #[serde(default, with = "serde_util::timestamp_micros_option")]
     pub first_entry_at_micros: Option<DateTime<Utc>>,
     /// Number of legs in the combo.
     pub legs_total: i32,
@@ -238,7 +238,7 @@ pub struct ComboPosition {
     #[serde(with = "serde_util::datetime")]
     pub updated_at: DateTime<Utc>,
     /// `updated_at` at microsecond precision (`updated_at_micros`).
-    #[serde(with = "timestamp_micros")]
+    #[serde(with = "serde_util::timestamp_micros")]
     pub updated_at_micros: DateTime<Utc>,
 }
 

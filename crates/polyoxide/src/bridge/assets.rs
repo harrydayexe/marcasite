@@ -1,6 +1,6 @@
 //! Supported assets: `GET /supported-assets`.
 
-use polyoxide_core::Result;
+use polyoxide_core::{Result, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,7 @@ pub struct SupportedAsset {
     /// The token.
     pub token: Option<Token>,
     /// Minimum amount in USD for deposits and withdrawals (a JSON number on the wire).
-    #[serde(default, with = "rust_decimal::serde::float_option")]
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub min_checkout_usd: Option<Decimal>,
 }
 
@@ -123,9 +123,12 @@ mod tests {
         assert_eq!(token.symbol.as_deref(), Some("USDC"));
         assert_eq!(token.decimals, Some(6));
 
-        // Numbers stay numbers when re-serialized.
+        // Numbers stay numbers when re-serialized, and integers stay integers.
         let value = serde_json::to_value(&assets).unwrap();
-        assert_eq!(value["supportedAssets"][0]["minCheckoutUsd"], 45.0);
+        assert_eq!(
+            value["supportedAssets"][0]["minCheckoutUsd"],
+            serde_json::json!(45)
+        );
     }
 
     #[test]
