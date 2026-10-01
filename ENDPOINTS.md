@@ -162,13 +162,14 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-o
 
 ## WebSocket channels (public)
 
-Feature `ws`, module `polyoxide::ws`.
+Feature `ws`, module `polyoxide::ws`. Each channel type is a `Stream` of typed events; URLs are
+defaults (override with `*ChannelBuilder::url`).
 
 | Status | Channel | URL | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | Market channel | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | [local](docs/api-reference/wss/market.md) / [online](https://docs.polymarket.com/api-reference/wss/market), spec `docs/specs/asyncapi.json` | |
-| [ ] | Sports channel | `wss://sports-api.polymarket.com/ws` | [local](docs/api-reference/wss/sports.md) / [online](https://docs.polymarket.com/api-reference/wss/sports), spec `docs/specs/asyncapi-sports.json` | |
-| [ ] | PolyBolt `price.polymarket` (public channel only) | `wss://ws-live-v2.polymarket.com/ws` | [local](docs/api-reference/wss/polybolt.md) / [online](https://docs.polymarket.com/api-reference/wss/polybolt), spec `docs/specs/polybolt-asyncapi.json` | |
+| [x] | Market channel | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | [local](docs/api-reference/wss/market.md) / [online](https://docs.polymarket.com/api-reference/wss/market), spec `docs/specs/asyncapi.json` | `MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)` |
+| [x] | Sports channel | `wss://sports-api.polymarket.com/ws` | [local](docs/api-reference/wss/sports.md) / [online](https://docs.polymarket.com/api-reference/wss/sports), spec `docs/specs/asyncapi-sports.json` | `SportsChannel::connect()` → `Stream<Item = Result<SportsEvent>>` |
+| [x] | PolyBolt `price.polymarket` (public channel only) | `wss://ws-live-v2.polymarket.com/ws` | [local](docs/api-reference/wss/polybolt.md) / [online](https://docs.polymarket.com/api-reference/wss/polybolt), spec `docs/specs/polybolt-asyncapi.json` | `PolyBoltChannel::connect()` → `Stream<Item = Result<PolyBoltEvent>>`; `subscribe` / `unsubscribe(PolyBoltSubscription::price_polymarket(..))`, `ping` |
 
 ## Out of scope (requires authentication)
 
