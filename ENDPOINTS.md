@@ -66,41 +66,41 @@ Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](do
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/time` | [local](docs/api-reference/data/get-server-time.md) / [online](https://docs.polymarket.com/api-reference/data/get-server-time) | |
-| [ ] | `GET` | `/midpoint` | [local](docs/api-reference/data/get-midpoint-price.md) / [online](https://docs.polymarket.com/api-reference/data/get-midpoint-price) | |
-| [ ] | `GET` | `/midpoints` | [local](docs/api-reference/market-data/get-midpoint-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-query-parameters) | |
-| [ ] | `POST` | `/midpoints` | [local](docs/api-reference/market-data/get-midpoint-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-request-body) | |
-| [ ] | `GET` | `/spread` | [local](docs/api-reference/market-data/get-spread.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-spread) | |
-| [ ] | `POST` | `/spreads` | [local](docs/api-reference/market-data/get-spreads.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-spreads) | |
-| [ ] | `GET` | `/last-trade-price` | [local](docs/api-reference/market-data/get-last-trade-price.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-price) | |
-| [ ] | `GET` | `/last-trades-prices` | [local](docs/api-reference/market-data/get-last-trade-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-query-parameters) | |
-| [ ] | `POST` | `/last-trades-prices` | [local](docs/api-reference/market-data/get-last-trade-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-request-body) | |
-| [ ] | `GET` | `/fee-rate` | [local](docs/api-reference/market-data/get-fee-rate.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-fee-rate) | |
-| [ ] | `GET` | `/fee-rate/{token_id}` | [local](docs/api-reference/market-data/get-fee-rate-by-path-parameter.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-fee-rate-by-path-parameter) | |
-| [ ] | `GET` | `/tick-size` | [local](docs/api-reference/market-data/get-tick-size.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-tick-size) | |
-| [ ] | `GET` | `/tick-size/{token_id}` | [local](docs/api-reference/market-data/get-tick-size-by-path-parameter.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-tick-size-by-path-parameter) | |
-| [ ] | `GET` | `/neg-risk` | spec only (`getNegRisk`) | |
-| [ ] | `GET` | `/neg-risk/{token_id}` | spec only (`getNegRiskByPath`) | |
-| [ ] | `GET` | `/price` | [local](docs/api-reference/market-data/get-market-price.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-price) | |
-| [ ] | `GET` | `/prices` | [local](docs/api-reference/market-data/get-market-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-prices-query-parameters) | |
-| [ ] | `POST` | `/prices` | [local](docs/api-reference/market-data/get-market-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-prices-request-body) | |
-| [ ] | `GET` | `/book` | [local](docs/api-reference/market-data/get-order-book.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-book) | |
-| [ ] | `GET` | `/books` | spec only (`getBooksGet`) | |
-| [ ] | `POST` | `/books` | [local](docs/api-reference/market-data/get-order-books-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body) | |
-| [ ] | `GET` | `/simplified-markets` | [local](docs/api-reference/markets/get-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-simplified-markets) | |
-| [ ] | `GET` | `/sampling-markets` | [local](docs/api-reference/markets/get-sampling-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-markets) | |
-| [ ] | `GET` | `/sampling-simplified-markets` | [local](docs/api-reference/markets/get-sampling-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-simplified-markets) | |
-| [ ] | `GET` | `/clob-markets/{condition_id}` | [local](docs/api-reference/markets/get-clob-market-info.md) / [online](https://docs.polymarket.com/api-reference/markets/get-clob-market-info) | |
-| [ ] | `GET` | `/markets-by-token/{token_id}` | [local](docs/api-reference/markets/get-market-by-token.md) / [online](https://docs.polymarket.com/api-reference/markets/get-market-by-token) | |
-| [ ] | `POST` | `/markets/live-activity` | spec only (`getMarketsLiveActivity`) | |
-| [ ] | `GET` | `/markets/live-activity/{condition_id}` | spec only (`getMarketLiveActivity`) | |
-| [ ] | `GET` | `/prices-history` | [local](docs/api-reference/markets/get-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-prices-history) | |
-| [ ] | `POST` | `/batch-prices-history` | [local](docs/api-reference/markets/get-batch-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-batch-prices-history) | |
-| [ ] | `GET` | `/rewards/markets/current` | [local](docs/api-reference/rewards/get-current-active-rewards-configurations.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-current-active-rewards-configurations) | |
-| [ ] | `GET` | `/rewards/markets/{condition_id}` | [local](docs/api-reference/rewards/get-raw-rewards-for-a-specific-market.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-raw-rewards-for-a-specific-market) | |
-| [ ] | `GET` | `/rewards/markets/multi` | [local](docs/api-reference/rewards/get-multiple-markets-with-rewards.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-multiple-markets-with-rewards) | |
-| [ ] | `GET` | `/rebates/current` | [local](docs/api-reference/rebates/get-current-rebated-fees-for-a-maker.md) / [online](https://docs.polymarket.com/api-reference/rebates/get-current-rebated-fees-for-a-maker) | |
-| [ ] | `GET` | `/builder/trades` | [local](docs/api-reference/trade/get-builder-trades.md) / [online](https://docs.polymarket.com/api-reference/trade/get-builder-trades) | |
+| [x] | `GET` | `/time` | [local](docs/api-reference/data/get-server-time.md) / [online](https://docs.polymarket.com/api-reference/data/get-server-time) | `ClobClient::get_server_time` |
+| [x] | `GET` | `/midpoint` | [local](docs/api-reference/data/get-midpoint-price.md) / [online](https://docs.polymarket.com/api-reference/data/get-midpoint-price) | `ClobClient::get_midpoint` |
+| [x] | `GET` | `/midpoints` | [local](docs/api-reference/market-data/get-midpoint-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-query-parameters) | `ClobClient::get_midpoints` |
+| [x] | `POST` | `/midpoints` | [local](docs/api-reference/market-data/get-midpoint-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-request-body) | `ClobClient::get_midpoints_by_body` |
+| [x] | `GET` | `/spread` | [local](docs/api-reference/market-data/get-spread.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-spread) | `ClobClient::get_spread` |
+| [x] | `POST` | `/spreads` | [local](docs/api-reference/market-data/get-spreads.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-spreads) | `ClobClient::get_spreads` |
+| [x] | `GET` | `/last-trade-price` | [local](docs/api-reference/market-data/get-last-trade-price.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-price) | `ClobClient::get_last_trade_price` |
+| [x] | `GET` | `/last-trades-prices` | [local](docs/api-reference/market-data/get-last-trade-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-query-parameters) | `ClobClient::get_last_trade_prices` |
+| [x] | `POST` | `/last-trades-prices` | [local](docs/api-reference/market-data/get-last-trade-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-request-body) | `ClobClient::get_last_trade_prices_by_body` |
+| [x] | `GET` | `/fee-rate` | [local](docs/api-reference/market-data/get-fee-rate.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-fee-rate) | `ClobClient::get_fee_rate` |
+| [x] | `GET` | `/fee-rate/{token_id}` | [local](docs/api-reference/market-data/get-fee-rate-by-path-parameter.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-fee-rate-by-path-parameter) | `ClobClient::get_fee_rate_by_path` |
+| [x] | `GET` | `/tick-size` | [local](docs/api-reference/market-data/get-tick-size.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-tick-size) | `ClobClient::get_tick_size` |
+| [x] | `GET` | `/tick-size/{token_id}` | [local](docs/api-reference/market-data/get-tick-size-by-path-parameter.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-tick-size-by-path-parameter) | `ClobClient::get_tick_size_by_path` |
+| [x] | `GET` | `/neg-risk` | spec only (`getNegRisk`) | `ClobClient::get_neg_risk` |
+| [x] | `GET` | `/neg-risk/{token_id}` | spec only (`getNegRiskByPath`) | `ClobClient::get_neg_risk_by_path` |
+| [x] | `GET` | `/price` | [local](docs/api-reference/market-data/get-market-price.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-price) | `ClobClient::get_price` |
+| [x] | `GET` | `/prices` | [local](docs/api-reference/market-data/get-market-prices-query-parameters.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-prices-query-parameters) | `ClobClient::get_prices` |
+| [x] | `POST` | `/prices` | [local](docs/api-reference/market-data/get-market-prices-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-market-prices-request-body) | `ClobClient::get_prices_by_body` |
+| [x] | `GET` | `/book` | [local](docs/api-reference/market-data/get-order-book.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-book) | `ClobClient::get_order_book` |
+| [x] | `GET` | `/books` | spec only (`getBooksGet`) | `ClobClient::get_order_books` |
+| [x] | `POST` | `/books` | [local](docs/api-reference/market-data/get-order-books-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body) | `ClobClient::get_order_books_by_body` |
+| [x] | `GET` | `/simplified-markets` | [local](docs/api-reference/markets/get-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-simplified-markets) | `ClobClient::get_simplified_markets` |
+| [x] | `GET` | `/sampling-markets` | [local](docs/api-reference/markets/get-sampling-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-markets) | `ClobClient::get_sampling_markets` |
+| [x] | `GET` | `/sampling-simplified-markets` | [local](docs/api-reference/markets/get-sampling-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-simplified-markets) | `ClobClient::get_sampling_simplified_markets` |
+| [x] | `GET` | `/clob-markets/{condition_id}` | [local](docs/api-reference/markets/get-clob-market-info.md) / [online](https://docs.polymarket.com/api-reference/markets/get-clob-market-info) | `ClobClient::get_clob_market_info` |
+| [x] | `GET` | `/markets-by-token/{token_id}` | [local](docs/api-reference/markets/get-market-by-token.md) / [online](https://docs.polymarket.com/api-reference/markets/get-market-by-token) | `ClobClient::get_market_by_token` |
+| [x] | `POST` | `/markets/live-activity` | spec only (`getMarketsLiveActivity`) | `ClobClient::get_markets_live_activity` |
+| [x] | `GET` | `/markets/live-activity/{condition_id}` | spec only (`getMarketLiveActivity`) | `ClobClient::get_market_live_activity` |
+| [x] | `GET` | `/prices-history` | [local](docs/api-reference/markets/get-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-prices-history) | `ClobClient::get_prices_history` |
+| [x] | `POST` | `/batch-prices-history` | [local](docs/api-reference/markets/get-batch-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-batch-prices-history) | `ClobClient::get_batch_prices_history` |
+| [x] | `GET` | `/rewards/markets/current` | [local](docs/api-reference/rewards/get-current-active-rewards-configurations.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-current-active-rewards-configurations) | `ClobClient::get_current_rewards` |
+| [x] | `GET` | `/rewards/markets/{condition_id}` | [local](docs/api-reference/rewards/get-raw-rewards-for-a-specific-market.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-raw-rewards-for-a-specific-market) | `ClobClient::get_raw_rewards_for_market` |
+| [x] | `GET` | `/rewards/markets/multi` | [local](docs/api-reference/rewards/get-multiple-markets-with-rewards.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-multiple-markets-with-rewards) | `ClobClient::get_markets_with_rewards` |
+| [x] | `GET` | `/rebates/current` | [local](docs/api-reference/rebates/get-current-rebated-fees-for-a-maker.md) / [online](https://docs.polymarket.com/api-reference/rebates/get-current-rebated-fees-for-a-maker) | `ClobClient::get_current_rebated_fees` |
+| [x] | `GET` | `/builder/trades` | [local](docs/api-reference/trade/get-builder-trades.md) / [online](https://docs.polymarket.com/api-reference/trade/get-builder-trades) | `ClobClient::get_builder_trades` |
 
 ## Data API v2
 
