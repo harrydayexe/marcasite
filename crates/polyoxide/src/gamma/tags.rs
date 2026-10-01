@@ -1,15 +1,30 @@
-//! Tags: `/tags`, `/tags/{id}`.
+//! Tags: `/tags`, `/tags/{id}`, `/tags/slug/{slug}` and the related-tags endpoints.
 
 use chrono::{DateTime, Utc};
 use futures_core::Stream;
 use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use serde::{Deserialize, Serialize};
 
-use super::GammaClient;
+use super::{
+    GammaClient,
+    util::{Lookup, setters},
+};
 
 polyoxide_core::string_id! {
     /// A Gamma tag id (sent as a string in responses, e.g. `"100381"`).
     pub struct TagId;
+}
+
+polyoxide_core::string_enum! {
+    /// Which related tags to return (the `status` filter of the related-tags endpoints).
+    pub enum RelatedTagsStatus {
+        /// Related tags with active events.
+        Active => "active",
+        /// Related tags with closed events.
+        Closed => "closed",
+        /// All related tags.
+        All => "all",
+    }
 }
 
 /// A tag used to categorise events, markets and series.
@@ -46,6 +61,31 @@ pub struct Tag {
     pub is_carousel: Option<bool>,
 }
 
+/// A relationship between two tags (`components/schemas/RelatedTag`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct RelatedTag {
+    /// Relationship id.
+    pub id: Option<String>,
+    /// The tag (wire name `tagID`, an integer).
+    #[serde(
+        rename = "tagID",
+        default,
+        with = "crate::gamma::util::integer_id_option"
+    )]
+    pub tag_id: Option<TagId>,
+    /// The related tag (wire name `relatedTagID`, an integer).
+    #[serde(
+        rename = "relatedTagID",
+        default,
+        with = "crate::gamma::util::integer_id_option"
+    )]
+    pub related_tag_id: Option<TagId>,
+    /// Rank of the relationship.
+    pub rank: Option<i64>,
+}
+
 impl GammaClient {
     /// Lists tags (offset pagination).
     ///
@@ -62,12 +102,7 @@ impl GammaClient {
     pub fn list_tags(&self) -> ListTags {
         ListTags {
             client: self.clone(),
-            limit: None,
-            offset: None,
-            order: None,
-            ascending: None,
-            include_template: None,
-            is_carousel: None,
+            params: ListTagsParams::default(),
         }
     }
 
@@ -80,8 +115,71 @@ impl GammaClient {
     pub fn get_tag(&self, id: impl Into<TagId>) -> GetTag {
         GetTag {
             client: self.clone(),
-            id: id.into(),
-            include_template: None,
+            lookup: Lookup::Id(id.into()),
+            params: GetTagParams::default(),
+        }
+    }
+
+    /// Gets a tag by slug.
+    ///
+    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the tag does not exist.
+    ///
+    /// See <https://docs.polymarket.com/api-reference/tags/get-tag-by-slug>.
+    pub fn get_tag_by_slug(&self, slug: impl Into<String>) -> GetTag {
+        GetTag {
+            client: self.clone(),
+            lookup: Lookup::Slug(slug.into()),
+            params: GetTagParams::default(),
+        }
+    }
+
+    /// Gets the relationships between a tag (by id) and its related tags.
+    ///
+    /// See <https://docs.polymarket.com/api-reference/tags/get-related-tags-relationships-by-tag-id>.
+    pub fn get_related_tag_relationships(
+        &self,
+        id: impl Into<TagId>,
+    ) -> GetRelatedTagRelationships {
+        GetRelatedTagRelationships {
+            client: self.clone(),
+            lookup: Lookup::Id(id.into()),
+            params: RelatedTagsParams::default(),
+        }
+    }
+
+    /// Gets the relationships between a tag (by slug) and its related tags.
+    ///
+    /// See <https://docs.polymarket.com/api-reference/tags/get-related-tags-relationships-by-tag-slug>.
+    pub fn get_related_tag_relationships_by_slug(
+        &self,
+        slug: impl Into<String>,
+    ) -> GetRelatedTagRelationships {
+        GetRelatedTagRelationships {
+            client: self.clone(),
+            lookup: Lookup::Slug(slug.into()),
+            params: RelatedTagsParams::default(),
+        }
+    }
+
+    /// Gets the tags related to a tag (by id).
+    ///
+    /// See <https://docs.polymarket.com/api-reference/tags/get-tags-related-to-a-tag-id>.
+    pub fn get_related_tags(&self, id: impl Into<TagId>) -> GetRelatedTags {
+        GetRelatedTags {
+            client: self.clone(),
+            lookup: Lookup::Id(id.into()),
+            params: RelatedTagsParams::default(),
+        }
+    }
+
+    /// Gets the tags related to a tag (by slug).
+    ///
+    /// See <https://docs.polymarket.com/api-reference/tags/get-tags-related-to-a-tag-slug>.
+    pub fn get_related_tags_by_slug(&self, slug: impl Into<String>) -> GetRelatedTags {
+        GetRelatedTags {
+            client: self.clone(),
+            lookup: Lookup::Slug(slug.into()),
+            params: RelatedTagsParams::default(),
         }
     }
 }
@@ -91,6 +189,11 @@ impl GammaClient {
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
 pub struct ListTags {
     client: GammaClient,
+    params: ListTagsParams,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ListTagsParams {
     limit: Option<u64>,
     offset: Option<u64>,
     order: Option<String>,
@@ -100,60 +203,31 @@ pub struct ListTags {
 }
 
 impl ListTags {
-    /// Maximum number of tags per page.
-    pub fn limit(mut self, limit: u64) -> Self {
-        self.limit = Some(limit);
-        self
+    setters! {
+        /// Maximum number of tags per page.
+        limit: u64;
+        /// Number of tags to skip.
+        offset: u64;
+        /// Comma-separated list of fields to order by.
+        order: into String;
+        /// Sort ascending (`true`) or descending (`false`).
+        ascending: bool;
+        /// Include tag templates.
+        include_template: bool;
+        /// Only carousel tags (`true`) or only non-carousel tags (`false`).
+        is_carousel: bool;
     }
 
-    /// Number of tags to skip.
-    pub fn offset(mut self, offset: u64) -> Self {
-        self.offset = Some(offset);
-        self
-    }
-
-    /// Comma-separated list of fields to order by.
-    pub fn order(mut self, order: impl Into<String>) -> Self {
-        self.order = Some(order.into());
-        self
-    }
-
-    /// Sort ascending (`true`) or descending (`false`).
-    pub fn ascending(mut self, ascending: bool) -> Self {
-        self.ascending = Some(ascending);
-        self
-    }
-
-    /// Include tag templates.
-    pub fn include_template(mut self, include_template: bool) -> Self {
-        self.include_template = Some(include_template);
-        self
-    }
-
-    /// Only carousel tags (`true`) or only non-carousel tags (`false`).
-    pub fn is_carousel(mut self, is_carousel: bool) -> Self {
-        self.is_carousel = Some(is_carousel);
-        self
-    }
-
-    fn query(&self, offset: Option<u64>) -> Query {
-        let mut q = Query::new();
-        q.push_opt("limit", self.limit)
+    async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Tag>> {
+        let p = &self.params;
+        let mut query = Query::new();
+        query
+            .push_opt("limit", p.limit)
             .push_opt("offset", offset)
-            .push_opt("order", self.order.as_deref())
-            .push_opt("ascending", self.ascending)
-            .push_opt("include_template", self.include_template)
-            .push_opt("is_carousel", self.is_carousel);
-        q
-    }
-
-    /// Fetches one page.
-    ///
-    /// # Errors
-    ///
-    /// See [`Error`](crate::Error).
-    pub async fn send(self) -> Result<Vec<Tag>> {
-        let query = self.query(self.offset);
+            .push_opt("order", p.order.as_deref())
+            .push_opt("ascending", p.ascending)
+            .push_opt("include_template", p.include_template)
+            .push_opt("is_carousel", p.is_carousel);
         self.client
             .transport
             .get(&["tags"])
@@ -162,43 +236,47 @@ impl ListTags {
             .await
     }
 
+    /// Fetches one page.
+    ///
+    /// # Errors
+    ///
+    /// See [`Error`](crate::Error).
+    pub async fn send(self) -> Result<Vec<Tag>> {
+        self.fetch(self.params.offset).await
+    }
+
     /// Streams every tag from the configured offset onwards, fetching pages lazily.
     ///
     /// The stream ends at the first empty page or the first page shorter than
     /// [`limit`](Self::limit) (when set).
     pub fn into_stream(self) -> impl Stream<Item = Result<Tag>> + Send + 'static {
-        let start = self.offset.unwrap_or(0);
-        let page_size = self.limit;
+        let start = self.params.offset.unwrap_or(0);
+        let page_size = self.params.limit;
         offset_stream(start, page_size, move |offset| {
             let request = self.clone();
-            async move {
-                let query = request.query(Some(offset));
-                request
-                    .client
-                    .transport
-                    .get(&["tags"])
-                    .query(query)
-                    .send()
-                    .await
-            }
+            async move { request.fetch(Some(offset)).await }
         })
     }
 }
 
-/// Request builder for [`GammaClient::get_tag`].
+/// Request builder for [`GammaClient::get_tag`] and [`GammaClient::get_tag_by_slug`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` is awaited"]
 pub struct GetTag {
     client: GammaClient,
-    id: TagId,
+    lookup: Lookup<TagId>,
+    params: GetTagParams,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GetTagParams {
     include_template: Option<bool>,
 }
 
 impl GetTag {
-    /// Include the tag template.
-    pub fn include_template(mut self, include_template: bool) -> Self {
-        self.include_template = Some(include_template);
-        self
+    setters! {
+        /// Include the tag template.
+        include_template: bool;
     }
 
     /// Sends the request.
@@ -209,13 +287,97 @@ impl GetTag {
     /// with status `404`.
     pub async fn send(self) -> Result<Tag> {
         let mut query = Query::new();
-        query.push_opt("include_template", self.include_template);
-        self.client
-            .transport
-            .get(&["tags", self.id.as_str()])
-            .query(query)
-            .send()
-            .await
+        query.push_opt("include_template", self.params.include_template);
+        let transport = &self.client.transport;
+        let request = match &self.lookup {
+            Lookup::Id(id) => transport.get(&["tags", id.as_str()]),
+            Lookup::Slug(slug) => transport.get(&["tags", "slug", slug.as_str()]),
+        };
+        request.query(query).send().await
+    }
+}
+
+/// Parameters shared by the four related-tags endpoints.
+#[derive(Debug, Clone, Default)]
+struct RelatedTagsParams {
+    omit_empty: Option<bool>,
+    status: Option<RelatedTagsStatus>,
+}
+
+impl RelatedTagsParams {
+    fn query(&self) -> Query {
+        let mut q = Query::new();
+        q.push_opt("omit_empty", self.omit_empty)
+            .push_opt("status", self.status.as_ref());
+        q
+    }
+}
+
+/// Request builder for [`GammaClient::get_related_tag_relationships`] and
+/// [`GammaClient::get_related_tag_relationships_by_slug`].
+#[derive(Debug, Clone)]
+#[must_use = "requests do nothing until `.send()` is awaited"]
+pub struct GetRelatedTagRelationships {
+    client: GammaClient,
+    lookup: Lookup<TagId>,
+    params: RelatedTagsParams,
+}
+
+impl GetRelatedTagRelationships {
+    setters! {
+        /// Leave out related tags without events.
+        omit_empty: bool;
+        /// Which related tags to return.
+        status: RelatedTagsStatus;
+    }
+
+    /// Sends the request.
+    ///
+    /// # Errors
+    ///
+    /// See [`Error`](crate::Error).
+    pub async fn send(self) -> Result<Vec<RelatedTag>> {
+        let transport = &self.client.transport;
+        let request = match &self.lookup {
+            Lookup::Id(id) => transport.get(&["tags", id.as_str(), "related-tags"]),
+            Lookup::Slug(slug) => transport.get(&["tags", "slug", slug.as_str(), "related-tags"]),
+        };
+        request.query(self.params.query()).send().await
+    }
+}
+
+/// Request builder for [`GammaClient::get_related_tags`] and
+/// [`GammaClient::get_related_tags_by_slug`].
+#[derive(Debug, Clone)]
+#[must_use = "requests do nothing until `.send()` is awaited"]
+pub struct GetRelatedTags {
+    client: GammaClient,
+    lookup: Lookup<TagId>,
+    params: RelatedTagsParams,
+}
+
+impl GetRelatedTags {
+    setters! {
+        /// Leave out related tags without events.
+        omit_empty: bool;
+        /// Which related tags to return.
+        status: RelatedTagsStatus;
+    }
+
+    /// Sends the request.
+    ///
+    /// # Errors
+    ///
+    /// See [`Error`](crate::Error).
+    pub async fn send(self) -> Result<Vec<Tag>> {
+        let transport = &self.client.transport;
+        let request = match &self.lookup {
+            Lookup::Id(id) => transport.get(&["tags", id.as_str(), "related-tags", "tags"]),
+            Lookup::Slug(slug) => {
+                transport.get(&["tags", "slug", slug.as_str(), "related-tags", "tags"])
+            }
+        };
+        request.query(self.params.query()).send().await
     }
 }
 
@@ -255,5 +417,23 @@ mod tests {
     fn deserializes_empty_tag() {
         let tag: Tag = serde_json::from_str("{}").unwrap();
         assert_eq!(tag.id, None);
+    }
+
+    /// Field names and types from `components/schemas/RelatedTag` in
+    /// `docs/specs/gamma-openapi.yaml`.
+    #[test]
+    fn related_tag_ids_are_integers_on_the_wire() {
+        let json = serde_json::json!({"id": "7", "tagID": 100381, "relatedTagID": 2, "rank": 1});
+        let related: RelatedTag = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(related.tag_id, Some(TagId::from("100381")));
+        assert_eq!(related.related_tag_id, Some(TagId::from("2")));
+        assert_eq!(related.rank, Some(1));
+        assert_eq!(serde_json::to_value(&related).unwrap(), json);
+    }
+
+    #[test]
+    fn related_tags_status_spelling() {
+        assert_eq!(RelatedTagsStatus::Active.as_str(), "active");
+        assert_eq!(RelatedTagsStatus::All.to_string(), "all");
     }
 }

@@ -1,0 +1,15 @@
+{
+  "id": "id-value",
+  "title": "title-value",
+  "slug": "slug-value",
+  "eventDates": [
+    "a",
+    "b"
+  ],
+  "eventWeeks": [
+    1,
+    2
+  ],
+  "earliest_open_week": 7,
+  "earliest_open_date": "earliest_open_date-value"
+}

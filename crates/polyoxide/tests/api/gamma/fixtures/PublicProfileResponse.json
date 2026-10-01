@@ -1,0 +1,18 @@
+{
+  "createdAt": "2024-01-02T03:04:05Z",
+  "proxyWallet": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+  "profileImage": "https://example.com/profileImage",
+  "displayUsernamePublic": true,
+  "bio": "bio-value",
+  "pseudonym": "pseudonym-value",
+  "name": "name-value",
+  "users": [
+    {
+      "id": "id-value",
+      "creator": true,
+      "mod": true
+    }
+  ],
+  "xUsername": "xUsername-value",
+  "verifiedBadge": true
+}

@@ -1,0 +1,81 @@
+{
+  "id": "id-value",
+  "body": "body-value",
+  "parentEntityType": "parentEntityType-value",
+  "parentEntityID": 7,
+  "parentCommentID": "parentCommentID-value",
+  "userAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+  "replyAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+  "createdAt": "2024-01-02T03:04:05Z",
+  "updatedAt": "2024-01-02T03:04:05Z",
+  "profile": {
+    "name": "name-value",
+    "pseudonym": "pseudonym-value",
+    "displayUsernamePublic": true,
+    "bio": "bio-value",
+    "isMod": true,
+    "isCreator": true,
+    "proxyWallet": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+    "baseAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+    "profileImage": "profileImage-value",
+    "profileImageOptimized": {
+      "id": "id-value",
+      "imageUrlSource": "imageUrlSource-value",
+      "imageUrlOptimized": "imageUrlOptimized-value",
+      "imageSizeKbSource": 1.5,
+      "imageSizeKbOptimized": 1.5,
+      "imageOptimizedComplete": true,
+      "imageOptimizedLastUpdated": "imageOptimizedLastUpdated-value",
+      "relID": 7,
+      "field": "field-value",
+      "relname": "relname-value"
+    },
+    "positions": [
+      {
+        "tokenId": "tokenId-value",
+        "positionSize": "1.5"
+      }
+    ]
+  },
+  "reactions": [
+    {
+      "id": "id-value",
+      "commentID": 7,
+      "reactionType": "reactionType-value",
+      "icon": "icon-value",
+      "userAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+      "createdAt": "2024-01-02T03:04:05Z",
+      "profile": {
+        "name": "name-value",
+        "pseudonym": "pseudonym-value",
+        "displayUsernamePublic": true,
+        "bio": "bio-value",
+        "isMod": true,
+        "isCreator": true,
+        "proxyWallet": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+        "baseAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
+        "profileImage": "profileImage-value",
+        "profileImageOptimized": {
+          "id": "id-value",
+          "imageUrlSource": "imageUrlSource-value",
+          "imageUrlOptimized": "imageUrlOptimized-value",
+          "imageSizeKbSource": 1.5,
+          "imageSizeKbOptimized": 1.5,
+          "imageOptimizedComplete": true,
+          "imageOptimizedLastUpdated": "imageOptimizedLastUpdated-value",
+          "relID": 7,
+          "field": "field-value",
+          "relname": "relname-value"
+        },
+        "positions": [
+          {
+            "tokenId": "tokenId-value",
+            "positionSize": "1.5"
+          }
+        ]
+      }
+    }
+  ],
+  "reportCount": 7,
+  "reactionCount": 7
+}

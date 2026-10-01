@@ -1,0 +1,146 @@
+{
+  "id": "id-value",
+  "ticker": "ticker-value",
+  "slug": "slug-value",
+  "title": "title-value",
+  "subtitle": "subtitle-value",
+  "seriesType": "seriesType-value",
+  "recurrence": "recurrence-value",
+  "description": "description-value",
+  "image": "image-value",
+  "icon": "icon-value",
+  "layout": "layout-value",
+  "active": true,
+  "closed": true,
+  "archived": true,
+  "new": true,
+  "featured": true,
+  "restricted": true,
+  "isTemplate": true,
+  "templateVariables": true,
+  "publishedAt": "publishedAt-value",
+  "createdBy": "createdBy-value",
+  "updatedBy": "updatedBy-value",
+  "createdAt": "2024-01-02T03:04:05Z",
+  "updatedAt": "2024-01-02T03:04:05Z",
+  "commentsEnabled": true,
+  "competitive": "competitive-value",
+  "volume24hr": 1.5,
+  "volume": 1.5,
+  "liquidity": 1.5,
+  "startDate": "2024-01-02T03:04:05Z",
+  "pythTokenID": "pythTokenID-value",
+  "cgAssetName": "cgAssetName-value",
+  "score": 7,
+  "events": [
+    {
+      "id": "9"
+    }
+  ],
+  "collections": [
+    {
+      "id": "id-value",
+      "ticker": "ticker-value",
+      "slug": "slug-value",
+      "title": "title-value",
+      "subtitle": "subtitle-value",
+      "collectionType": "collectionType-value",
+      "description": "description-value",
+      "tags": "tags-value",
+      "image": "image-value",
+      "icon": "icon-value",
+      "headerImage": "headerImage-value",
+      "layout": "layout-value",
+      "active": true,
+      "closed": true,
+      "archived": true,
+      "new": true,
+      "featured": true,
+      "restricted": true,
+      "isTemplate": true,
+      "templateVariables": "templateVariables-value",
+      "publishedAt": "publishedAt-value",
+      "createdBy": "createdBy-value",
+      "updatedBy": "updatedBy-value",
+      "createdAt": "2024-01-02T03:04:05Z",
+      "updatedAt": "2024-01-02T03:04:05Z",
+      "commentsEnabled": true,
+      "imageOptimized": {
+        "id": "id-value",
+        "imageUrlSource": "imageUrlSource-value",
+        "imageUrlOptimized": "imageUrlOptimized-value",
+        "imageSizeKbSource": 1.5,
+        "imageSizeKbOptimized": 1.5,
+        "imageOptimizedComplete": true,
+        "imageOptimizedLastUpdated": "imageOptimizedLastUpdated-value",
+        "relID": 7,
+        "field": "field-value",
+        "relname": "relname-value"
+      },
+      "iconOptimized": {
+        "id": "id-value",
+        "imageUrlSource": "imageUrlSource-value",
+        "imageUrlOptimized": "imageUrlOptimized-value",
+        "imageSizeKbSource": 1.5,
+        "imageSizeKbOptimized": 1.5,
+        "imageOptimizedComplete": true,
+        "imageOptimizedLastUpdated": "imageOptimizedLastUpdated-value",
+        "relID": 7,
+        "field": "field-value",
+        "relname": "relname-value"
+      },
+      "headerImageOptimized": {
+        "id": "id-value",
+        "imageUrlSource": "imageUrlSource-value",
+        "imageUrlOptimized": "imageUrlOptimized-value",
+        "imageSizeKbSource": 1.5,
+        "imageSizeKbOptimized": 1.5,
+        "imageOptimizedComplete": true,
+        "imageOptimizedLastUpdated": "imageOptimizedLastUpdated-value",
+        "relID": 7,
+        "field": "field-value",
+        "relname": "relname-value"
+      }
+    }
+  ],
+  "categories": [
+    {
+      "id": "id-value",
+      "label": "label-value",
+      "parentCategory": "parentCategory-value",
+      "slug": "slug-value",
+      "publishedAt": "publishedAt-value",
+      "createdBy": "createdBy-value",
+      "updatedBy": "updatedBy-value",
+      "createdAt": "2024-01-02T03:04:05Z",
+      "updatedAt": "2024-01-02T03:04:05Z"
+    }
+  ],
+  "tags": [
+    {
+      "id": "id-value",
+      "label": "label-value",
+      "slug": "slug-value",
+      "forceShow": true,
+      "publishedAt": "publishedAt-value",
+      "createdBy": 7,
+      "updatedBy": 7,
+      "createdAt": "2024-01-02T03:04:05Z",
+      "updatedAt": "2024-01-02T03:04:05Z",
+      "forceHide": true,
+      "isCarousel": true
+    }
+  ],
+  "commentCount": 7,
+  "chats": [
+    {
+      "id": "id-value",
+      "channelId": "channelId-value",
+      "channelName": "channelName-value",
+      "channelImage": "channelImage-value",
+      "live": true,
+      "startTime": "2024-01-02T03:04:05Z",
+      "endTime": "2024-01-02T03:04:05Z"
+    }
+  ]
+}
