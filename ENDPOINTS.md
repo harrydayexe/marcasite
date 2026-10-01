@@ -135,10 +135,10 @@ Base URL `https://relayer-v2.polymarket.com`, spec [`docs/specs/relayer-openapi.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/transaction` | [local](docs/api-reference/relayer/get-a-transaction-by-id.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id) | |
-| [ ] | `GET` | `/nonce` | [local](docs/api-reference/relayer/get-current-nonce-for-a-user.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-current-nonce-for-a-user) | |
-| [ ] | `GET` | `/relay-payload` | [local](docs/api-reference/relayer/get-relayer-address-and-nonce.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce) | |
-| [ ] | `GET` | `/deployed` | [local](docs/api-reference/relayer/check-if-a-wallet-is-deployed.md) / [online](https://docs.polymarket.com/api-reference/relayer/check-if-a-wallet-is-deployed) | |
+| [x] | `GET` | `/transaction` | [local](docs/api-reference/relayer/get-a-transaction-by-id.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id) | `RelayerClient::get_transaction` |
+| [x] | `GET` | `/nonce` | [local](docs/api-reference/relayer/get-current-nonce-for-a-user.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-current-nonce-for-a-user) | `RelayerClient::get_nonce` |
+| [x] | `GET` | `/relay-payload` | [local](docs/api-reference/relayer/get-relayer-address-and-nonce.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce) | `RelayerClient::get_relay_payload` |
+| [x] | `GET` | `/deployed` | [local](docs/api-reference/relayer/check-if-a-wallet-is-deployed.md) / [online](https://docs.polymarket.com/api-reference/relayer/check-if-a-wallet-is-deployed) | `RelayerClient::check_deployed` |
 
 ## Bridge API
 
@@ -146,11 +146,11 @@ Base URL `https://bridge.polymarket.com`, spec [`docs/specs/bridge-openapi.yaml`
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/supported-assets` | [local](docs/api-reference/bridge/get-supported-assets.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-supported-assets) | |
-| [ ] | `POST` | `/quote` | [local](docs/api-reference/bridge/get-a-quote.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-a-quote) | |
-| [ ] | `POST` | `/deposit` | [local](docs/api-reference/bridge/create-bridge-addresses.md) / [online](https://docs.polymarket.com/api-reference/bridge/create-bridge-addresses) | |
-| [ ] | `POST` | `/withdraw` | [local](docs/api-reference/bridge/create-withdrawal-addresses.md) / [online](https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses) | |
-| [ ] | `GET` | `/status/{address}` | [local](docs/api-reference/bridge/get-transaction-status.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-transaction-status) | |
+| [x] | `GET` | `/supported-assets` | [local](docs/api-reference/bridge/get-supported-assets.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-supported-assets) | `BridgeClient::get_supported_assets` |
+| [x] | `POST` | `/quote` | [local](docs/api-reference/bridge/get-a-quote.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-a-quote) | `BridgeClient::get_quote` |
+| [x] | `POST` | `/deposit` | [local](docs/api-reference/bridge/create-bridge-addresses.md) / [online](https://docs.polymarket.com/api-reference/bridge/create-bridge-addresses) | `BridgeClient::create_deposit_addresses` |
+| [x] | `POST` | `/withdraw` | [local](docs/api-reference/bridge/create-withdrawal-addresses.md) / [online](https://docs.polymarket.com/api-reference/bridge/create-withdrawal-addresses) | `BridgeClient::create_withdrawal_addresses` |
+| [x] | `GET` | `/status/{address}` | [local](docs/api-reference/bridge/get-transaction-status.md) / [online](https://docs.polymarket.com/api-reference/bridge/get-transaction-status) | `BridgeClient::get_transaction_status` |
 
 ## Combos / RFQ REST (public endpoints)
 
@@ -158,7 +158,7 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-o
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | |
+| [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` |
 
 ## WebSocket channels (public)
 
