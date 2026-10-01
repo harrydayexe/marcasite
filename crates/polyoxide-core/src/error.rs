@@ -141,12 +141,15 @@ impl Error {
     }
 
     /// The HTTP status code, for [`Error::Api`], [`Error::RateLimited`] and
-    /// [`Error::Decode`].
+    /// [`Error::Decode`], and for an `Error::WebSocket` whose handshake the server refused
+    /// with an HTTP status (see `WebSocketError::http_status`).
     #[must_use]
     pub fn status(&self) -> Option<StatusCode> {
         match self {
             Self::Api(e) | Self::RateLimited(e) => Some(e.status),
             Self::Decode(e) => Some(e.status),
+            #[cfg(feature = "ws")]
+            Self::WebSocket(e) => e.http_status(),
             _ => None,
         }
     }
@@ -160,11 +163,18 @@ impl Error {
         }
     }
 
-    /// How long the server asked the client to wait before retrying, when provided
-    /// (`Retry-After` header or a documented body field).
+    /// How long the server asked the client to wait before retrying, when provided: the
+    /// `Retry-After` header or a documented body field of an API error, or the
+    /// `Retry-After` header of a refused WebSocket handshake (see
+    /// `WebSocketError::retry_after`).
     #[must_use]
     pub fn retry_after(&self) -> Option<Duration> {
-        self.api_error().and_then(ApiError::retry_after)
+        match self {
+            Self::Api(e) | Self::RateLimited(e) => e.retry_after(),
+            #[cfg(feature = "ws")]
+            Self::WebSocket(e) => e.retry_after(),
+            _ => None,
+        }
     }
 
     /// The server-side trace id, when the service provides one (e.g. Data API v2's
@@ -616,8 +626,10 @@ impl std::error::Error for ConfigError {
 pub enum WebSocketErrorKind {
     /// The connection could not be established: the TCP connection, the TLS or WebSocket
     /// handshake failed (including a handshake refused with an HTTP status such as `429`
-    /// or `503`), the handshake timed out, or the messages to send right after connecting
-    /// (e.g. a subscription) could not be sent.
+    /// or `503`, see [`WebSocketError::http_status`] and [`WebSocketError::retry_after`]),
+    /// the handshake timed out, the messages to send right after connecting (e.g. a
+    /// subscription) could not be sent, or the connection was opened outside a Tokio
+    /// runtime.
     Connect,
     /// The connection is closed: the server closed it with a close code other than `1000`
     /// (normal), see [`WebSocketError::close_code`]; it ended without a close frame; or a
@@ -629,6 +641,10 @@ pub enum WebSocketErrorKind {
     /// A frame could not be sent: writing it to the socket failed (which ends the
     /// connection), or the request could not be encoded.
     Send,
+    /// The connection stopped responding and was abandoned: no frame of any kind arrived
+    /// within the configured idle timeout, or writing a frame to the socket did not
+    /// complete within the write timeout (e.g. a half-open connection).
+    Timeout,
     /// A received message could not be decoded into the expected type. Not fatal: the
     /// connection stays open and the stream continues with the next message.
     Decode,
@@ -644,6 +660,7 @@ impl WebSocketErrorKind {
             Self::Closed => "closed",
             Self::Protocol => "protocol",
             Self::Send => "send",
+            Self::Timeout => "timeout",
             Self::Decode => "decode",
         }
     }
@@ -667,6 +684,8 @@ pub struct WebSocketError {
     pub(crate) message: Cow<'static, str>,
     pub(crate) close_code: Option<u16>,
     pub(crate) close_reason: Option<String>,
+    pub(crate) http_status: Option<StatusCode>,
+    pub(crate) retry_after: Option<Duration>,
     pub(crate) source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
 }
 
@@ -685,6 +704,8 @@ impl WebSocketError {
             message: message.into(),
             close_code: None,
             close_reason: None,
+            http_status: None,
+            retry_after: None,
             source: None,
         }
     }
@@ -735,12 +756,35 @@ impl WebSocketError {
     pub fn close_reason(&self) -> Option<&str> {
         self.close_reason.as_deref()
     }
+
+    /// The HTTP status the server answered the WebSocket handshake with, when it refused
+    /// the upgrade (e.g. `429 Too Many Requests` or `503 Service Unavailable`). Only set on
+    /// errors of kind [`WebSocketErrorKind::Connect`].
+    #[must_use]
+    pub fn http_status(&self) -> Option<StatusCode> {
+        self.http_status
+    }
+
+    /// How long the server asked the client to wait before connecting again: the
+    /// `Retry-After` header (in seconds) of a refused handshake, when present. Only set on
+    /// errors of kind [`WebSocketErrorKind::Connect`]. Also available as
+    /// [`Error::retry_after`].
+    #[must_use]
+    pub fn retry_after(&self) -> Option<Duration> {
+        self.retry_after
+    }
 }
 
 #[cfg(feature = "ws")]
 impl fmt::Display for WebSocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} websocket error: {}", self.service, self.message)?;
+        if let Some(status) = self.http_status {
+            write!(f, " (HTTP {status})")?;
+        }
+        if let Some(retry_after) = self.retry_after {
+            write!(f, " (retry after {}s)", retry_after.as_secs())?;
+        }
         if let Some(code) = self.close_code {
             write!(f, " (close code {code}")?;
             match self.close_reason.as_deref() {
@@ -839,6 +883,31 @@ mod tests {
             "failed to decode message",
         )));
         assert_eq!(err.service(), Some(Service::MarketChannel));
+        assert_eq!(err.status(), None);
+        assert_eq!(err.retry_after(), None);
+    }
+
+    #[cfg(feature = "ws")]
+    #[test]
+    fn websocket_error_exposes_a_refused_handshake() {
+        let mut ws = WebSocketError::new(
+            Service::PolyBolt,
+            WebSocketErrorKind::Connect,
+            "handshake refused",
+        );
+        ws.http_status = Some(StatusCode::TOO_MANY_REQUESTS);
+        ws.retry_after = Some(Duration::from_secs(7));
+        assert_eq!(ws.http_status(), Some(StatusCode::TOO_MANY_REQUESTS));
+        assert_eq!(ws.retry_after(), Some(Duration::from_secs(7)));
+        assert_eq!(
+            ws.to_string(),
+            "polybolt websocket error: handshake refused (HTTP 429 Too Many Requests) (retry after 7s)"
+        );
+        let err = Error::WebSocket(Box::new(ws));
+        assert_eq!(err.status(), Some(StatusCode::TOO_MANY_REQUESTS));
+        assert_eq!(err.retry_after(), Some(Duration::from_secs(7)));
+        assert!(!err.is_not_found());
+        assert_eq!(WebSocketErrorKind::Timeout.to_string(), "timeout");
     }
 
     fn api_error(status: StatusCode, retryable: Option<bool>) -> ApiError {
