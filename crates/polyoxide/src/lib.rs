@@ -104,8 +104,9 @@
 //! # Logging
 //!
 //! This crate emits diagnostics via [`tracing`]. It never installs a subscriber; install one
-//! in your application (e.g. with `tracing-subscriber`) to see them. Requests are logged at
-//! `DEBUG`, response bodies at `TRACE`.
+//! in your application (e.g. with `tracing-subscriber`) to see them. Requests, retries and
+//! failures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors
+//! that are returned to you are never logged above `DEBUG`, so they are not reported twice.
 //!
 //! [`ENDPOINTS.md`]: https://github.com/harrydayexe/polyoxide/blob/main/ENDPOINTS.md
 //! [`Stream`]: futures_core::Stream

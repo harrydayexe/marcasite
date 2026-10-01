@@ -612,7 +612,8 @@ async fn drive(
         let _ = incoming.send(item).await;
     }
     if let Some(err) = failure {
-        tracing::warn!(service = %service, error = %err, "websocket terminated");
+        // Yielded to the consumer, so not logged above DEBUG.
+        tracing::debug!(service = %service, error = %err, "websocket terminated");
         let _ = incoming.send(Err(err)).await;
     } else {
         tracing::debug!(service = %service, "websocket closed");

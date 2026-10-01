@@ -337,7 +337,8 @@ impl RawResponse {
 
     fn decode_error(&self, path: String, source: serde_json::Error) -> Error {
         let snippet = snippet_around(&self.body, &source);
-        tracing::warn!(
+        // Returned to the caller, so not logged above DEBUG.
+        tracing::debug!(
             service = %self.service,
             path = %path,
             error = %source,
@@ -421,12 +422,8 @@ async fn execute(
             continue;
         }
 
-        match &err {
-            Error::Api(_) | Error::RateLimited(_) => {
-                tracing::debug!(elapsed_ms, error = %err, "request failed");
-            }
-            _ => tracing::warn!(elapsed_ms, error = %err, "request failed"),
-        }
+        // Returned to the caller, so not logged above DEBUG.
+        tracing::debug!(elapsed_ms, error = %err, "request failed");
         return Err(err);
     }
 }

@@ -20,8 +20,11 @@
 //! # Logging
 //!
 //! This crate emits diagnostics via [`tracing`]. It never installs a subscriber; that is
-//! left to the application. Requests are logged at `DEBUG` (method, path, status, latency),
-//! retries and API errors at `DEBUG`/`WARN`, and response bodies (truncated) at `TRACE`.
+//! left to the application. Requests, retries and failures are logged at `DEBUG` (method,
+//! path, status, latency), and response bodies (truncated) and WebSocket frames at `TRACE`
+//! (outgoing frames by length only). Failures that are returned to the caller (failed
+//! requests, decode failures, terminated WebSocket connections) are never logged above
+//! `DEBUG`, so they are not reported twice.
 //!
 //! [`polyoxide`]: https://docs.rs/polyoxide
 //! [`Stream`]: futures_core::Stream
