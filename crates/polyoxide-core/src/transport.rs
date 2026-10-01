@@ -1,8 +1,9 @@
 //! Request execution for a single service: URL building, retries, logging, error-body
 //! parsing and response decoding.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use chrono::{DateTime, Utc};
 use http::{HeaderMap, Method, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::Instrument as _;
@@ -535,9 +536,8 @@ pub(crate) fn parse_api_error(
             }
         };
     let retry_after = header_str(headers, header::RETRY_AFTER.as_str())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .or(body_retry_after)
-        .map(Duration::from_secs);
+        .and_then(|value| parse_retry_after(value, SystemTime::now().into()))
+        .or(body_retry_after.map(Duration::from_secs));
     let trace_id = header_str(headers, TRACE_ID_HEADER)
         .map(str::to_owned)
         .or(body_trace_id);
@@ -555,6 +555,23 @@ pub(crate) fn parse_api_error(
         retry_after,
         body: truncate(text, MAX_ERROR_BODY_BYTES),
     }
+}
+
+/// Parses a `Retry-After` header value (RFC 9110): either a number of seconds (`120`) or an
+/// HTTP date (`Wed, 21 Oct 2015 07:28:00 GMT`), which is turned into the delay from `now`
+/// (zero if the date has passed). Returns `None` for anything else.
+pub(crate) fn parse_retry_after(value: &str, now: DateTime<Utc>) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let at = DateTime::parse_from_rfc2822(value).ok()?;
+    Some(
+        at.with_timezone(&Utc)
+            .signed_duration_since(now)
+            .to_std()
+            .unwrap_or(Duration::ZERO),
+    )
 }
 
 fn header_str<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
@@ -629,6 +646,49 @@ mod tests {
         assert_eq!(err.retryable(), Some(true));
         assert_eq!(err.trace_id(), Some("hdr-trace"));
         assert_eq!(err.retry_after(), Some(Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn retry_after_accepts_seconds_and_http_dates() {
+        let now = DateTime::parse_from_rfc3339("2015-10-21T07:27:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            parse_retry_after("120", now),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(parse_retry_after(" 7 ", now), Some(Duration::from_secs(7)));
+        assert_eq!(
+            parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", now),
+            Some(Duration::from_secs(60))
+        );
+        // A date in the past means "now".
+        assert_eq!(
+            parse_retry_after("Wed, 21 Oct 2015 07:00:00 GMT", now),
+            Some(Duration::ZERO)
+        );
+        for invalid in ["", "-5", "1.5", "soon", "2015-10-21T07:28:00Z", "€"] {
+            assert_eq!(parse_retry_after(invalid, now), None, "{invalid:?}");
+        }
+
+        // A header date in the future is honoured by API errors.
+        let mut headers = HeaderMap::new();
+        let later = (DateTime::<Utc>::from(SystemTime::now()) + chrono::TimeDelta::seconds(3600))
+            .to_rfc2822();
+        headers.insert("retry-after", http::HeaderValue::from_str(&later).unwrap());
+        let err = parse_api_error(
+            Service::Clob,
+            Method::GET,
+            &url(),
+            StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            b"{}",
+        );
+        let delay = err.retry_after().unwrap();
+        assert!(
+            delay > Duration::from_secs(3500) && delay <= Duration::from_secs(3600),
+            "{delay:?}"
+        );
     }
 
     #[test]

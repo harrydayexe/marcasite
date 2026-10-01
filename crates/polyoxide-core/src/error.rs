@@ -343,8 +343,8 @@ impl ApiError {
         self.trace_id.as_deref()
     }
 
-    /// How long to wait before retrying (`Retry-After` header, or the CLOB
-    /// `retry_after_seconds` body field), when provided.
+    /// How long to wait before retrying (`Retry-After` header, in seconds or as an HTTP
+    /// date, or the CLOB `retry_after_seconds` body field), when provided.
     #[must_use]
     pub fn retry_after(&self) -> Option<Duration> {
         self.retry_after
@@ -797,7 +797,8 @@ impl WebSocketError {
     }
 
     /// How long the server asked the client to wait before connecting again: the
-    /// `Retry-After` header (in seconds) of a refused handshake, when present. Only set on
+    /// `Retry-After` header (in seconds or as an HTTP date) of a refused handshake, when
+    /// present. Only set on
     /// errors of kind [`WebSocketErrorKind::Connect`]. Also available as
     /// [`Error::retry_after`].
     #[must_use]

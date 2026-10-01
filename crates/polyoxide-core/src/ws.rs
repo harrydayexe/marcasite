@@ -732,8 +732,9 @@ fn handshake_error(service: Service, error: tungstenite::Error) -> Error {
         .headers()
         .get(header::RETRY_AFTER)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
+        .and_then(|value| {
+            crate::transport::parse_retry_after(value, std::time::SystemTime::now().into())
+        });
     tracing::debug!(
         service = %service,
         status = status.as_u16(),
