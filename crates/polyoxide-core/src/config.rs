@@ -16,9 +16,12 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// When and how to retry failed requests automatically.
 ///
 /// Only requests that are safe to repeat are retried: `GET` requests, and read-only `POST`
-/// requests that the service clients mark as idempotent (e.g. batch price lookups). A
-/// request is retried when it fails with `429 Too Many Requests`, `502`, `503`, `504`, a
-/// timeout, or a connection error.
+/// requests that the service clients mark as idempotent (e.g. batch price lookups).
+/// Requests that create server-side state are never retried. A request is retried when
+/// [`Error::is_retryable`](crate::Error::is_retryable) is `true` for its failure: when the
+/// error body carries an explicit `retryable` flag (Data API v2), that flag decides
+/// (`"retryable": false` is never retried); otherwise `429 Too Many Requests`, `502`,
+/// `503`, `504`, a timeout, or a connection error.
 ///
 /// The delay before retry `n` (starting at 0) is the server's `Retry-After` value when
 /// present, otherwise `initial_backoff * 2^n`, capped at `max_backoff`. If the server asks

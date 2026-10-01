@@ -184,24 +184,27 @@ impl Error {
         self.status() == Some(StatusCode::NOT_FOUND)
     }
 
-    /// `true` if retrying the same request later may succeed.
+    /// `true` if the failure is transient: the same request may succeed if sent again
+    /// later.
     ///
-    /// This covers rate limiting, timeouts, connection failures, `502`/`503`/`504`
-    /// responses, and API errors whose body explicitly says `"retryable": true`.
+    /// When the API error body carries an explicit `retryable` flag (as Data API v2 errors
+    /// do), the flag decides, whatever the status: `"retryable": false` is never
+    /// retryable, not even for a `429` or `503`. Without the flag, this covers rate
+    /// limiting (`429`), `502`/`503`/`504` responses, timeouts and connection failures.
+    /// The automatic retries of a [`RetryPolicy`](crate::RetryPolicy) use the same rule.
+    ///
+    /// This describes the *failure*, not the *request*: it does **not** mean that the
+    /// request is safe to repeat. A request that creates server-side state (for example
+    /// creating Bridge deposit or withdrawal addresses) may have been processed even though
+    /// it failed with a timeout or a `5xx`, and repeating it may do so twice. Such requests
+    /// are never retried automatically; the caller must decide whether repeating them is
+    /// safe.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::RateLimited(_) | Self::Timeout(_) => true,
+            Self::Api(e) | Self::RateLimited(e) => e.is_transient(),
+            Self::Timeout(_) => true,
             Self::Transport(e) => e.is_connect(),
-            Self::Api(e) => {
-                e.retryable() == Some(true)
-                    || matches!(
-                        e.status,
-                        StatusCode::BAD_GATEWAY
-                            | StatusCode::SERVICE_UNAVAILABLE
-                            | StatusCode::GATEWAY_TIMEOUT
-                    )
-            }
             _ => false,
         }
     }
@@ -287,7 +290,8 @@ impl ApiError {
     }
 
     /// Whether the server marked the failure as retryable (`retryable` field), when
-    /// provided. See also [`Error::is_retryable`].
+    /// provided. When present, it overrides the status-based rule of
+    /// [`Error::is_retryable`] and of the automatic retries.
     #[must_use]
     pub fn retryable(&self) -> Option<bool> {
         self.retryable
@@ -316,6 +320,18 @@ impl ApiError {
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body
+    }
+
+    /// Whether the failure is transient: the body's `retryable` flag when present,
+    /// otherwise `true` for `429`, `502`, `503` and `504`.
+    pub(crate) fn is_transient(&self) -> bool {
+        self.retryable.unwrap_or(matches!(
+            self.status,
+            StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::BAD_GATEWAY
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        ))
     }
 }
 
@@ -823,6 +839,47 @@ mod tests {
             "failed to decode message",
         )));
         assert_eq!(err.service(), Some(Service::MarketChannel));
+    }
+
+    fn api_error(status: StatusCode, retryable: Option<bool>) -> ApiError {
+        ApiError {
+            service: Service::Data,
+            method: Method::GET,
+            url: "https://data-api.polymarket.com/v2/status".to_owned(),
+            status,
+            message: None,
+            code: None,
+            error_type: None,
+            retryable,
+            parameter: None,
+            trace_id: None,
+            retry_after: None,
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn explicit_retryable_flag_overrides_the_status() {
+        let cases = [
+            (StatusCode::SERVICE_UNAVAILABLE, None, true),
+            (StatusCode::BAD_GATEWAY, None, true),
+            (StatusCode::GATEWAY_TIMEOUT, None, true),
+            (StatusCode::INTERNAL_SERVER_ERROR, None, false),
+            (StatusCode::BAD_REQUEST, None, false),
+            (StatusCode::SERVICE_UNAVAILABLE, Some(false), false),
+            (StatusCode::GATEWAY_TIMEOUT, Some(false), false),
+            (StatusCode::INTERNAL_SERVER_ERROR, Some(true), true),
+        ];
+        for (status, flag, expected) in cases {
+            let err = Error::Api(Box::new(api_error(status, flag)));
+            assert_eq!(err.is_retryable(), expected, "{status} {flag:?}");
+        }
+        let limited =
+            |flag| Error::RateLimited(Box::new(api_error(StatusCode::TOO_MANY_REQUESTS, flag)));
+        assert!(limited(None).is_retryable());
+        assert!(limited(Some(true)).is_retryable());
+        assert!(!limited(Some(false)).is_retryable());
+        assert!(!Error::from(ValidationError::new("x", "y")).is_retryable());
     }
 
     #[test]

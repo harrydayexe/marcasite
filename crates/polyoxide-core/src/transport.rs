@@ -377,18 +377,9 @@ async fn execute(
             Err(err) => err,
         };
 
-        let retryable = idempotent
-            && match &err {
-                Error::RateLimited(_) | Error::Timeout(_) => true,
-                Error::Transport(e) => e.is_connect(),
-                Error::Api(e) => matches!(
-                    e.status,
-                    StatusCode::BAD_GATEWAY
-                        | StatusCode::SERVICE_UNAVAILABLE
-                        | StatusCode::GATEWAY_TIMEOUT
-                ),
-                _ => false,
-            };
+        // Only idempotent requests are retried: a failed non-idempotent request may still
+        // have been processed. An explicit `"retryable": false` in the body is honoured.
+        let retryable = idempotent && err.is_retryable();
         if let Some(delay) = retryable
             .then(|| retry.delay_for(attempt, err.retry_after()))
             .flatten()
@@ -707,6 +698,97 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Validation(_)), "{err:?}");
+        Ok(())
+    }
+
+    /// A transport against `server` that retries up to `retries` times without waiting.
+    fn retrying_transport(server: &wiremock::MockServer, retries: u32) -> Result<Transport> {
+        let http = HttpClient::builder()
+            .retry_policy(
+                crate::RetryPolicy::new(retries).with_initial_backoff(Duration::from_millis(1)),
+            )
+            .build()?;
+        Ok(Transport::new(
+            http,
+            Service::Data,
+            parse_base_url(&server.uri())?,
+        ))
+    }
+
+    #[tokio::test]
+    async fn explicit_retryable_false_is_not_retried() -> Result<()> {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        Mock::given(matchers::path("/v2/status"))
+            .respond_with(ResponseTemplate::new(503).set_body_raw(
+                r#"{"error":"down","code":"dependency_unavailable","retryable":false,"trace_id":"t"}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(matchers::path("/v2/trades"))
+            .respond_with(ResponseTemplate::new(429).set_body_raw(
+                r#"{"error":"no","code":"rate_limited","retryable":false}"#,
+                "application/json",
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let transport = retrying_transport(&server, 3)?;
+        let err = transport
+            .get(&["v2", "status"])
+            .send_raw()
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Api(_)), "{err:?}");
+        assert!(!err.is_retryable());
+        let err = transport
+            .get(&["v2", "trades"])
+            .send_raw()
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::RateLimited(_)), "{err:?}");
+        assert!(!err.is_retryable());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn transient_failures_are_retried() -> Result<()> {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        // No flag: the status decides.
+        Mock::given(matchers::path("/a"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(3)
+            .mount(&server)
+            .await;
+        // An explicit `retryable: true` is retried whatever the status.
+        Mock::given(matchers::path("/b"))
+            .respond_with(ResponseTemplate::new(500).set_body_raw(
+                r#"{"error":"try again","retryable":true}"#,
+                "application/json",
+            ))
+            .expect(3)
+            .mount(&server)
+            .await;
+        // Non-idempotent requests are never retried.
+        Mock::given(matchers::path("/c"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let transport = retrying_transport(&server, 2)?;
+        let err = transport.get(&["a"]).send_raw().await.unwrap_err();
+        assert!(err.is_retryable());
+        let err = transport.get(&["b"]).send_raw().await.unwrap_err();
+        assert!(err.is_retryable());
+        let err = transport.post(&["c"]).send_raw().await.unwrap_err();
+        assert!(err.is_retryable());
         Ok(())
     }
 
