@@ -8,6 +8,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     pin::Pin,
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -17,7 +18,7 @@ use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{
     Error, Result, Service, ValidationError, WebSocketError, WebSocketErrorKind, serde_util,
     types::{ConditionId, TokenId},
-    ws::WsConnection,
+    ws::{WsConnection, WsSender},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
@@ -332,23 +333,13 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// still bunch frames up; batch many ids into one frame instead), and at most 64 000 bytes
 /// per frame.
 ///
+/// To subscribe or unsubscribe from another task while the stream is consumed, use a
+/// [`PolyBoltChannelHandle`] from [`handle`](Self::handle); the channel and its handles
+/// share the limit accounting.
+///
 /// Note: the PolyBolt overview page says subscriptions require CLOB API credentials,
 /// while the AsyncAPI spec marks `price.polymarket` as public (no auth). This type follows
 /// the spec.
-///
-/// # Stream items
-///
-/// Each item is an `Ok(`[`PolyBoltEvent`]`)` or an
-/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
-/// [`kind`](crate::WebSocketError::kind):
-///
-/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
-///   match its documented schema. **Not fatal**: the stream continues with the next
-///   message.
-/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
-///   stream ends after this item.
-///
-/// A normal close ends the stream without an error.
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/polybolt> and the [module
 /// documentation](super) for error handling and reconnection.
@@ -377,13 +368,26 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// # }
 /// ```
 ///
+/// # Stream items
+///
+/// Each item is an `Ok(`[`PolyBoltEvent`]`)` or an
+/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
+/// [`kind`](crate::WebSocketError::kind):
+///
+/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
+///   match its documented schema. **Not fatal**: the stream continues with the next
+///   message.
+/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
+///   stream ends after this item.
+///
+/// A normal close ends the stream without an error.
+///
 /// [`Stream`]: futures_core::Stream
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct PolyBoltChannel {
     events: EventStream<PolyBoltEvent>,
-    active: HashSet<(String, String)>,
-    recent_frames: VecDeque<Instant>,
+    handle: PolyBoltChannelHandle,
 }
 
 impl PolyBoltChannel {
@@ -405,6 +409,37 @@ impl PolyBoltChannel {
         PolyBoltChannelBuilder::default()
     }
 
+    /// A cloneable handle to subscribe, unsubscribe, ping or close from other tasks while
+    /// this channel is consumed as a stream.
+    ///
+    /// The channel and all its handles share one count of active subscriptions and one
+    /// frame rate budget, so the documented per-connection limits hold however the
+    /// requests are spread across tasks.
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use futures_util::StreamExt as _;
+    /// use polyoxide::ws::{PolyBoltChannel, PolyBoltSubscription};
+    ///
+    /// let mut channel = PolyBoltChannel::connect().await?;
+    /// let handle = channel.handle();
+    /// tokio::spawn(async move {
+    ///     // For example, in response to user input:
+    ///     let asset = "21742633143463906290569050155826241533067272736897614950488156847949938836455";
+    ///     if let Err(err) = handle.subscribe(PolyBoltSubscription::price_polymarket([asset])) {
+    ///         eprintln!("subscribe failed: {err}");
+    ///     }
+    /// });
+    /// while let Some(event) = channel.next().await {
+    ///     println!("{:?}", event?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn handle(&self) -> PolyBoltChannelHandle {
+        self.handle.clone()
+    }
+
     /// Adds subscriptions (`op: "subscribe"`, batch form).
     ///
     /// Each newly added subscription is acknowledged with
@@ -418,28 +453,8 @@ impl PolyBoltChannel {
     /// 78 decimal digits, the connection would exceed 64 active subscriptions, the frame
     /// would exceed 64 000 bytes, or 20 subscribe/unsubscribe frames were already sent in
     /// the last second; [`Error::WebSocket`] if the connection has terminated.
-    pub fn subscribe(&mut self, subscription: PolyBoltSubscription) -> Result<()> {
-        subscription.validate()?;
-        let keys: Vec<_> = subscription
-            .items
-            .iter()
-            .map(SubscriptionItem::key)
-            .collect();
-        let added: HashSet<_> = keys.iter().filter(|k| !self.active.contains(*k)).collect();
-        let after = self.active.len().saturating_add(added.len());
-        if after > MAX_ACTIVE_SUBSCRIPTIONS {
-            return Err(ValidationError::new(
-                "subscriptions",
-                format!(
-                    "a connection allows at most {MAX_ACTIVE_SUBSCRIPTIONS} active subscriptions; \
-                     this request would make {after}"
-                ),
-            )
-            .into());
-        }
-        self.send_subscription_frame(subscription.to_json("subscribe")?)?;
-        self.active.extend(keys);
-        Ok(())
+    pub fn subscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
+        self.handle.subscribe(subscription)
     }
 
     /// Removes subscriptions (`op: "unsubscribe"`, batch form); acknowledged with
@@ -451,13 +466,8 @@ impl PolyBoltChannel {
     /// 78 decimal digits, the frame would exceed 64 000 bytes, or 20 subscribe/unsubscribe
     /// frames were already sent in the last second; [`Error::WebSocket`] if the connection
     /// has terminated.
-    pub fn unsubscribe(&mut self, subscription: PolyBoltSubscription) -> Result<()> {
-        subscription.validate()?;
-        self.send_subscription_frame(subscription.to_json("unsubscribe")?)?;
-        for key in subscription.items.iter().map(SubscriptionItem::key) {
-            self.active.remove(&key);
-        }
-        Ok(())
+    pub fn unsubscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
+        self.handle.unsubscribe(subscription)
     }
 
     /// Sends the optional application-level ping (`op: "ping"`); answered with
@@ -467,7 +477,90 @@ impl PolyBoltChannel {
     ///
     /// Returns [`Error::WebSocket`] if the connection has terminated.
     pub fn ping(&self) -> Result<()> {
-        self.connection().send_text(r#"{"op":"ping"}"#)
+        self.handle.ping()
+    }
+
+    /// Like [`ping`](Self::ping), with a request id (`rid`) echoed on the pong.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if the frame would exceed 64 000 bytes, or
+    /// [`Error::WebSocket`] if the connection has terminated.
+    pub fn ping_with_rid(&self, rid: impl Into<String>) -> Result<()> {
+        self.handle.ping_with_rid(rid)
+    }
+
+    /// The number of distinct subscriptions requested and not unsubscribed on this
+    /// connection (through the channel or any of its handles), as counted for the
+    /// 64-subscription limit.
+    ///
+    /// This is an upper bound of what the server holds: subscriptions it rejected (see
+    /// [`PolyBoltEvent::Error`]) are still counted until unsubscribed.
+    #[must_use]
+    pub fn active_subscriptions(&self) -> usize {
+        self.handle.active_subscriptions()
+    }
+
+    /// Closes the connection gracefully; the stream then ends after any events already
+    /// received.
+    pub fn close(&self) {
+        self.handle.close();
+    }
+}
+
+/// A cloneable handle to a [`PolyBoltChannel`], obtained from [`PolyBoltChannel::handle`]:
+/// subscribes, unsubscribes, pings or closes the connection from any task while the
+/// channel is consumed as a stream.
+///
+/// The channel and all its handles share the client-side accounting of the documented
+/// per-connection limits (64 active subscriptions, 20 subscribe or unsubscribe frames per
+/// second), so concurrent requests from several tasks cannot exceed them together.
+///
+/// The handle does not keep the connection open: once the [`PolyBoltChannel`] is dropped
+/// or the connection has ended, sending fails with an [`Error::WebSocket`] of kind
+/// [`Closed`](crate::WebSocketErrorKind::Closed).
+#[derive(Debug, Clone)]
+pub struct PolyBoltChannelHandle {
+    sender: WsSender,
+    limits: Arc<Mutex<Limits>>,
+}
+
+impl PolyBoltChannelHandle {
+    /// Adds subscriptions; see [`PolyBoltChannel::subscribe`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if the subscription is empty, an asset id is not 1 to
+    /// 78 decimal digits, the connection would exceed 64 active subscriptions, the frame
+    /// would exceed 64 000 bytes, or 20 subscribe/unsubscribe frames were already sent in
+    /// the last second; [`Error::WebSocket`] if the connection has terminated.
+    pub fn subscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
+        subscription.validate()?;
+        let frame = subscription.to_json("subscribe")?;
+        lock(&self.limits).subscribe(&subscription, frame, |frame| self.sender.send_text(frame))
+    }
+
+    /// Removes subscriptions; see [`PolyBoltChannel::unsubscribe`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if the subscription is empty, an asset id is not 1 to
+    /// 78 decimal digits, the frame would exceed 64 000 bytes, or 20 subscribe/unsubscribe
+    /// frames were already sent in the last second; [`Error::WebSocket`] if the connection
+    /// has terminated.
+    pub fn unsubscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
+        subscription.validate()?;
+        let frame = subscription.to_json("unsubscribe")?;
+        lock(&self.limits).unsubscribe(&subscription, frame, |frame| self.sender.send_text(frame))
+    }
+
+    /// Sends the optional application-level ping; see [`PolyBoltChannel::ping`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::WebSocket`] if the connection has terminated.
+    pub fn ping(&self) -> Result<()> {
+        self.sender.send_text(r#"{"op":"ping"}"#)
     }
 
     /// Like [`ping`](Self::ping), with a request id (`rid`) echoed on the pong.
@@ -487,31 +580,87 @@ impl PolyBoltChannel {
             rid: rid.into(),
         })?;
         check_frame_size(&frame)?;
-        self.connection().send_text(frame)
+        self.sender.send_text(frame)
     }
 
-    /// The number of distinct subscriptions requested and not unsubscribed on this
-    /// connection, as counted for the 64-subscription limit.
-    ///
-    /// This is an upper bound of what the server holds: subscriptions it rejected (see
-    /// [`PolyBoltEvent::Error`]) are still counted until unsubscribed.
+    /// The number of active subscriptions counted for the connection; see
+    /// [`PolyBoltChannel::active_subscriptions`].
     #[must_use]
     pub fn active_subscriptions(&self) -> usize {
-        self.active.len()
+        lock(&self.limits).active.len()
     }
 
-    /// Closes the connection gracefully; the stream then ends after any events already
-    /// received.
+    /// Closes the connection gracefully; the channel's stream then ends after any events
+    /// already received.
     pub fn close(&self) {
-        self.connection().close();
+        self.sender.close();
+    }
+}
+
+/// The client-side accounting of the documented per-connection limits, shared by a
+/// [`PolyBoltChannel`] and its handles.
+#[derive(Debug, Default)]
+struct Limits {
+    /// Subscription keys (see [`SubscriptionItem::key`]) requested and not unsubscribed.
+    active: HashSet<(String, String)>,
+    /// When the subscribe/unsubscribe frames of the last second were sent.
+    recent_frames: VecDeque<Instant>,
+}
+
+impl Limits {
+    /// Enforces the subscription count, then sends `frame` (see
+    /// [`send_subscription_frame`](Self::send_subscription_frame)) and records the
+    /// subscriptions.
+    fn subscribe(
+        &mut self,
+        subscription: &PolyBoltSubscription,
+        frame: String,
+        send: impl FnOnce(String) -> Result<()>,
+    ) -> Result<()> {
+        let keys: Vec<_> = subscription
+            .items
+            .iter()
+            .map(SubscriptionItem::key)
+            .collect();
+        let added: HashSet<_> = keys.iter().filter(|k| !self.active.contains(*k)).collect();
+        let after = self.active.len().saturating_add(added.len());
+        if after > MAX_ACTIVE_SUBSCRIPTIONS {
+            return Err(ValidationError::new(
+                "subscriptions",
+                format!(
+                    "a connection allows at most {MAX_ACTIVE_SUBSCRIPTIONS} active subscriptions; \
+                     this request would make {after}"
+                ),
+            )
+            .into());
+        }
+        self.send_subscription_frame(frame, send)?;
+        self.active.extend(keys);
+        Ok(())
     }
 
-    fn connection(&self) -> &WsConnection {
-        self.events.connection()
+    /// Sends `frame` (see [`send_subscription_frame`](Self::send_subscription_frame)) and
+    /// forgets the subscriptions.
+    fn unsubscribe(
+        &mut self,
+        subscription: &PolyBoltSubscription,
+        frame: String,
+        send: impl FnOnce(String) -> Result<()>,
+    ) -> Result<()> {
+        self.send_subscription_frame(frame, send)?;
+        for key in subscription.items.iter().map(SubscriptionItem::key) {
+            self.active.remove(&key);
+        }
+        Ok(())
     }
 
-    /// Enforces the frame size and rate limits, then sends a subscribe/unsubscribe frame.
-    fn send_subscription_frame(&mut self, frame: String) -> Result<()> {
+    /// Enforces the frame size and rate limits, then sends a subscribe/unsubscribe frame
+    /// with `send` and records it for the rate limit.
+    fn send_subscription_frame(
+        &mut self,
+        frame: String,
+        send: impl FnOnce(String) -> Result<()>,
+    ) -> Result<()> {
         check_frame_size(&frame)?;
         let now = Instant::now();
         while self
@@ -531,10 +680,17 @@ impl PolyBoltChannel {
             )
             .into());
         }
-        self.connection().send_text(frame)?;
+        send(frame)?;
         self.recent_frames.push_back(now);
         Ok(())
     }
+}
+
+/// Locks the shared limits. A poisoned lock (a panic in another thread while it held the
+/// lock) is recovered rather than propagated: the accounting is only updated after each
+/// check and send succeeds, so it is never left half-updated.
+fn lock(limits: &Mutex<Limits>) -> MutexGuard<'_, Limits> {
+    limits.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn check_frame_size(frame: &str) -> Result<()> {
@@ -615,10 +771,13 @@ impl PolyBoltChannelBuilder {
             .options
             .config(Service::PolyBolt, PolyBoltChannel::DEFAULT_URL)?;
         let conn = WsConnection::connect(config).await?;
+        let handle = PolyBoltChannelHandle {
+            sender: conn.sender(),
+            limits: Arc::default(),
+        };
         Ok(PolyBoltChannel {
             events: EventStream::new(conn),
-            active: HashSet::new(),
-            recent_frames: VecDeque::new(),
+            handle,
         })
     }
 }
@@ -815,6 +974,76 @@ mod tests {
 
     fn event(json: &str) -> PolyBoltEvent {
         serde_json::from_str(json).unwrap()
+    }
+
+    fn ids(range: std::ops::RangeInclusive<u32>) -> PolyBoltSubscription {
+        PolyBoltSubscription::price_polymarket(range.map(|i| i.to_string()))
+    }
+
+    #[test]
+    fn limits_count_subscriptions_and_frames() {
+        let mut limits = Limits::default();
+        let mut sent = Vec::new();
+        let mut send = |frame: String| {
+            sent.push(frame);
+            Ok(())
+        };
+        limits
+            .subscribe(&ids(1..=64), "a".to_owned(), &mut send)
+            .unwrap();
+        assert_eq!(limits.active.len(), 64);
+        let err = limits
+            .subscribe(&ids(65..=65), "b".to_owned(), &mut send)
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "subscriptions"));
+        limits
+            .unsubscribe(&ids(1..=1), "c".to_owned(), &mut send)
+            .unwrap();
+        limits
+            .subscribe(&ids(65..=65), "d".to_owned(), &mut send)
+            .unwrap();
+        assert_eq!(limits.active.len(), 64);
+        // A frame that fails to send is not counted (`2` is already active, so only the send
+        // can fail).
+        let err = limits
+            .subscribe(&ids(2..=2), "e".to_owned(), |_| {
+                Err(Error::Validation(ValidationError::new("x", "send failed")))
+            })
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "x"));
+        assert_eq!(limits.recent_frames.len(), 3);
+        // Nor are the subscriptions of a frame that fails to send.
+        limits
+            .unsubscribe(&ids(2..=2), "f".to_owned(), &mut send)
+            .unwrap();
+        let err = limits
+            .subscribe(&ids(2..=2), "g".to_owned(), |_| {
+                Err(Error::Validation(ValidationError::new("x", "send failed")))
+            })
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "x"));
+        assert_eq!(limits.active.len(), 63);
+        assert_eq!(limits.recent_frames.len(), 4);
+        // Rejected requests are not sent.
+        assert_eq!(sent, ["a", "c", "d", "f"]);
+    }
+
+    #[test]
+    fn limits_survive_a_poisoned_lock() {
+        let limits = Arc::new(Mutex::new(Limits::default()));
+        let poisoner = Arc::clone(&limits);
+        let panicked = std::thread::spawn(move || {
+            let _guard = poisoner.lock().unwrap();
+            panic!("poisoning the lock on purpose");
+        })
+        .join();
+        assert!(panicked.is_err());
+        assert!(limits.is_poisoned());
+
+        lock(&limits)
+            .subscribe(&ids(1..=2), "frame".to_owned(), |_| Ok(()))
+            .unwrap();
+        assert_eq!(lock(&limits).active.len(), 2);
     }
 
     // Requests: `components/messages/{subscribe,unsubscribe,ping}` examples in

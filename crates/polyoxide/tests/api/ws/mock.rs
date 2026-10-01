@@ -90,3 +90,21 @@ pub async fn next<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
         .await
         .expect("timed out waiting for an event")
 }
+
+/// Calls `f` until it fails (e.g. a send after the connection has terminated, which the
+/// driver task notices asynchronously), failing the test after a timeout.
+pub async fn eventually_err<T>(mut f: impl FnMut() -> polyoxide::Result<T>) -> polyoxide::Error {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        match f() {
+            Err(err) => return err,
+            Ok(_) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out waiting for an error"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    }
+}

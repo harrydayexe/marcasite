@@ -14,7 +14,7 @@ use polyoxide::{
 };
 use serde_json::json;
 
-use super::mock::{close, drain, next, recv_json, recv_text, send, serve};
+use super::mock::{close, drain, eventually_err, next, recv_json, recv_text, send, serve};
 
 const ASSET_A: &str =
     "65818619657568813474341868652308942079804919287380422192892211131408793125422";
@@ -186,6 +186,85 @@ async fn updates_subscriptions_without_reconnecting() {
     assert!(matches!(err, Error::Validation(_)));
 
     drop(channel);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn handle_changes_subscriptions_from_another_task() {
+    let (url, server) = serve("/ws/market", |mut socket| async move {
+        recv_json(&mut socket).await;
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({"operation": "subscribe", "assets_ids": [ASSET_B]})
+        );
+        send(&mut socket, BOOK).await;
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({"operation": "unsubscribe", "assets_ids": [ASSET_A]})
+        );
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({"operation": "subscribe", "assets_ids": [ASSET_A], "level": 1})
+        );
+        send(&mut socket, TICK_SIZE_CHANGE).await;
+        drain(&mut socket).await;
+    })
+    .await;
+
+    let mut channel = connect(&url, MarketSubscription::new([ASSET_A])).await;
+    let handle = channel.handle();
+    // The handle is used from another task while this one consumes the stream.
+    let handle = tokio::spawn(async move {
+        handle.subscribe([ASSET_B]).unwrap();
+        handle
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        next(&mut channel).await,
+        Some(Ok(MarketEvent::Book(_)))
+    ));
+    let clone = handle.clone();
+    tokio::spawn(async move {
+        clone.unsubscribe([ASSET_A]).unwrap();
+        clone
+            .update_subscription(
+                MarketSubscriptionUpdate::subscribe([ASSET_A]).level(SubscriptionLevel::Level1),
+            )
+            .unwrap();
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        next(&mut channel).await,
+        Some(Ok(MarketEvent::TickSizeChange(_)))
+    ));
+    // Empty updates are rejected locally, through the handle too.
+    let err = handle.subscribe(Vec::<String>::new()).unwrap_err();
+    assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "assets_ids"));
+
+    // The handle does not keep the connection open.
+    drop(channel);
+    server.await.unwrap();
+    let err = eventually_err(|| handle.subscribe([ASSET_B])).await;
+    let Error::WebSocket(ws) = &err else {
+        panic!("expected a websocket error, got {err:?}");
+    };
+    assert_eq!(ws.kind(), WebSocketErrorKind::Closed);
+}
+
+#[tokio::test]
+async fn handle_closes_the_connection() {
+    let (url, server) = serve("/ws/market", |mut socket| async move {
+        recv_json(&mut socket).await;
+        drain(&mut socket).await;
+    })
+    .await;
+    let mut channel = connect(&url, MarketSubscription::new([ASSET_A])).await;
+    let handle = channel.handle();
+    tokio::spawn(async move { handle.close() }).await.unwrap();
+    assert!(next(&mut channel).await.is_none());
+    assert!(channel.is_terminated());
     server.await.unwrap();
 }
 

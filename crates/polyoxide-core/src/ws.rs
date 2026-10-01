@@ -4,7 +4,8 @@
 //! current Tokio runtime) that owns the socket. The task:
 //!
 //! - forwards incoming text frames to the [`WsConnection`] handle (which is a [`Stream`]),
-//! - sends outgoing text frames queued with [`WsConnection::send_text`],
+//! - sends outgoing text frames queued with [`WsConnection::send_text`] or a cloneable
+//!   [`WsSender`] (from [`WsConnection::sender`], usable from other tasks),
 //! - sends an application-level heartbeat on a fixed interval, if configured,
 //! - answers server text pings (e.g. `ping` → `pong`) and drops heartbeat replies
 //!   (e.g. `PONG`), if configured,
@@ -16,8 +17,9 @@
 //! close, a connection that ended without a close frame, or a send on a terminated
 //! connection, `Protocol` for socket and protocol errors, and `Send` for failed writes.
 //!
-//! Dropping the handle closes the connection. The driver does not reconnect: when the
-//! stream ends, create a new connection (and re-subscribe).
+//! Dropping the [`WsConnection`] closes the connection, even while [`WsSender`]s exist. The
+//! driver does not reconnect: when the stream ends, create a new connection (and
+//! re-subscribe).
 //!
 //! [`Stream`]: futures_core::Stream
 
@@ -169,16 +171,62 @@ enum Command {
     Close,
 }
 
+/// A cloneable handle that queues frames on a [`WsConnection`], obtained from
+/// [`WsConnection::sender`].
+///
+/// Use it to send from other tasks (e.g. to change a subscription) while the connection is
+/// consumed as a stream. It does not keep the connection open: once the [`WsConnection`] is
+/// dropped or closed, or the connection terminates, sending fails with an
+/// [`Error::WebSocket`] of kind [`WebSocketErrorKind::Closed`]. A frame queued just before
+/// the connection terminates may be dropped without an error.
+#[derive(Debug, Clone)]
+pub struct WsSender {
+    service: Service,
+    commands: mpsc::UnboundedSender<Command>,
+}
+
+impl WsSender {
+    /// The channel this sender belongs to.
+    #[must_use]
+    pub fn service(&self) -> Service {
+        self.service
+    }
+
+    /// Queues a text frame to be sent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::WebSocket`] of kind [`WebSocketErrorKind::Closed`] if the
+    /// connection has already terminated.
+    pub fn send_text(&self, text: impl Into<String>) -> Result<()> {
+        self.commands.send(Command::Send(text.into())).map_err(|_| {
+            ws_error(
+                self.service,
+                WebSocketErrorKind::Closed,
+                "connection is closed",
+                None,
+            )
+        })
+    }
+
+    /// Closes the connection gracefully (for every holder of the connection and its
+    /// senders). Messages already received can still be read from the [`WsConnection`].
+    /// Does nothing if the connection has already terminated.
+    pub fn close(&self) {
+        let _ = self.commands.send(Command::Close);
+    }
+}
+
 /// A live WebSocket connection: a [`Stream`] of incoming text frames plus a sender.
 ///
 /// The stream yields `Ok(text)` per message, at most one `Err` describing an abnormal
-/// termination, then ends.
+/// termination, then ends. Use [`sender`](Self::sender) to send from other tasks while the
+/// stream is consumed.
 ///
 /// [`Stream`]: futures_core::Stream
 #[derive(Debug)]
 pub struct WsConnection {
-    service: Service,
-    commands: mpsc::UnboundedSender<Command>,
+    sender: WsSender,
     incoming: mpsc::Receiver<Result<String>>,
 }
 
@@ -252,8 +300,10 @@ impl WsConnection {
         let (incoming_tx, incoming_rx) = mpsc::channel(config.buffer);
         tokio::spawn(drive(socket, config, command_rx, incoming_tx));
         Ok(Self {
-            service,
-            commands: command_tx,
+            sender: WsSender {
+                service,
+                commands: command_tx,
+            },
             incoming: incoming_rx,
         })
     }
@@ -261,23 +311,24 @@ impl WsConnection {
     /// The channel this connection belongs to.
     #[must_use]
     pub fn service(&self) -> Service {
-        self.service
+        self.sender.service
+    }
+
+    /// A cloneable sender for this connection, to send frames from other tasks while the
+    /// connection is consumed as a stream.
+    #[must_use]
+    pub fn sender(&self) -> WsSender {
+        self.sender.clone()
     }
 
     /// Queues a text frame to be sent.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::WebSocket`] if the connection has already terminated.
+    /// Returns [`Error::WebSocket`] of kind [`WebSocketErrorKind::Closed`] if the
+    /// connection has already terminated.
     pub fn send_text(&self, text: impl Into<String>) -> Result<()> {
-        self.commands.send(Command::Send(text.into())).map_err(|_| {
-            ws_error(
-                self.service,
-                WebSocketErrorKind::Closed,
-                "connection is closed",
-                None,
-            )
-        })
+        self.sender.send_text(text)
     }
 
     /// Receives the next incoming text frame; `None` once the connection has ended.
@@ -287,13 +338,13 @@ impl WsConnection {
 
     /// Closes the connection gracefully. Messages already received can still be read.
     pub fn close(&self) {
-        let _ = self.commands.send(Command::Close);
+        self.sender.close();
     }
 }
 
 impl Drop for WsConnection {
     fn drop(&mut self) {
-        let _ = self.commands.send(Command::Close);
+        self.sender.close();
     }
 }
 
@@ -486,7 +537,171 @@ fn tls_connector(service: Service) -> Result<Connector> {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{WebSocketStream, accept_async};
+
     use super::*;
+
+    type ServerSocket = WebSocketStream<tokio::net::TcpStream>;
+
+    /// How long a test waits for any single message before failing.
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Accepts one connection on a random local port and runs `handler` on it; returns the
+    /// `ws://` URL and the server task.
+    async fn serve<F, Fut>(handler: F) -> (Url, tokio::task::JoinHandle<()>)
+    where
+        F: FnOnce(ServerSocket) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            handler(accept_async(stream).await.unwrap()).await;
+        });
+        (parse_ws_url(&format!("ws://{addr}")).unwrap(), task)
+    }
+
+    /// The next text frame sent by the client, or `None` once it closes.
+    async fn recv_text(socket: &mut ServerSocket) -> Option<String> {
+        loop {
+            let message = tokio::time::timeout(TIMEOUT, socket.next())
+                .await
+                .expect("timed out waiting for a client frame")?
+                .ok()?;
+            match message {
+                Message::Text(text) => return Some(text.as_str().to_owned()),
+                Message::Close(_) => return None,
+                _ => {}
+            }
+        }
+    }
+
+    async fn next(conn: &mut WsConnection) -> Option<Result<String>> {
+        tokio::time::timeout(TIMEOUT, conn.recv())
+            .await
+            .expect("timed out waiting for a message")
+    }
+
+    /// Waits until sending on `sender` fails (the driver has exited) and checks the kind.
+    async fn assert_closed(sender: &WsSender) {
+        let deadline = tokio::time::Instant::now() + TIMEOUT;
+        loop {
+            match sender.send_text("late") {
+                Err(err) => return assert_eq!(kind(&err), WebSocketErrorKind::Closed),
+                Ok(()) => {
+                    assert!(
+                        tokio::time::Instant::now() < deadline,
+                        "the connection did not terminate"
+                    );
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+        }
+    }
+
+    fn kind(err: &Error) -> WebSocketErrorKind {
+        match err {
+            Error::WebSocket(ws) => ws.kind(),
+            other => panic!("expected a websocket error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sender_sends_from_other_tasks_and_closes() {
+        let (url, server) = serve(|mut socket| async move {
+            assert_eq!(recv_text(&mut socket).await.as_deref(), Some("hello"));
+            socket.send(Message::text("world")).await.unwrap();
+            assert_eq!(recv_text(&mut socket).await.as_deref(), Some("again"));
+            // The client closes after `again`.
+            assert_eq!(recv_text(&mut socket).await, None);
+        })
+        .await;
+        let mut conn = WsConnection::connect(WsConfig::new(Service::MarketChannel, url))
+            .await
+            .unwrap();
+        let sender = conn.sender();
+        assert_eq!(sender.service(), Service::MarketChannel);
+        let other = sender.clone();
+        tokio::spawn(async move { other.send_text("hello") })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(next(&mut conn).await.unwrap().unwrap(), "world");
+        conn.send_text("again").unwrap();
+
+        // Closing through a sender ends the connection for everyone.
+        sender.close();
+        assert!(next(&mut conn).await.is_none());
+        assert_closed(&sender).await;
+        let err = conn.send_text("late").unwrap_err();
+        assert_eq!(kind(&err), WebSocketErrorKind::Closed);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dropping_the_connection_closes_it_despite_senders() {
+        let (url, server) = serve(|mut socket| async move {
+            assert_eq!(recv_text(&mut socket).await, None);
+        })
+        .await;
+        let conn = WsConnection::connect(WsConfig::new(Service::SportsChannel, url))
+            .await
+            .unwrap();
+        let sender = conn.sender();
+        drop(conn);
+        server.await.unwrap();
+        assert_closed(&sender).await;
+    }
+
+    #[tokio::test]
+    async fn abnormal_close_is_a_closed_error() {
+        let (url, server) = serve(|mut socket| async move {
+            socket
+                .close(Some(CloseFrame {
+                    code: CloseCode::from(4008),
+                    reason: "policy".into(),
+                }))
+                .await
+                .unwrap();
+        })
+        .await;
+        let mut conn = WsConnection::connect(WsConfig::new(Service::PolyBolt, url))
+            .await
+            .unwrap();
+        let err = next(&mut conn).await.unwrap().unwrap_err();
+        let Error::WebSocket(ws) = &err else {
+            panic!("expected a websocket error, got {err:?}");
+        };
+        assert_eq!(ws.kind(), WebSocketErrorKind::Closed);
+        assert_eq!(ws.close_code(), Some(4008));
+        assert_eq!(ws.close_reason(), Some("policy"));
+        assert!(next(&mut conn).await.is_none());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn refused_connection_is_a_connect_error() {
+        // Bind then drop a listener to get a port nothing listens on.
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let url = parse_ws_url(&format!("ws://127.0.0.1:{port}")).unwrap();
+        let err = WsConnection::connect(WsConfig::new(Service::MarketChannel, url))
+            .await
+            .unwrap_err();
+        assert_eq!(kind(&err), WebSocketErrorKind::Connect);
+    }
+
+    #[test]
+    fn sender_is_send_sync_and_clone() {
+        fn assert_traits<T: Send + Sync + Clone + std::fmt::Debug>() {}
+        assert_traits::<WsSender>();
+    }
 
     #[test]
     fn zero_heartbeat_is_clamped() {

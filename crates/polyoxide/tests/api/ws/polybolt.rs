@@ -12,7 +12,7 @@ use polyoxide::{
 };
 use serde_json::json;
 
-use super::mock::{close, drain, next, recv_json, send, serve};
+use super::mock::{close, drain, eventually_err, next, recv_json, send, serve};
 
 const ASSET: &str = "21742633143463906290569050155826241533067272736897614950488156847949938836455";
 
@@ -144,7 +144,7 @@ async fn enforces_documented_limits_locally() {
         drain(&mut socket).await;
     })
     .await;
-    let mut channel = connect(&url).await;
+    let channel = connect(&url).await;
 
     // Malformed requests never reach the server.
     let err = channel
@@ -194,6 +194,106 @@ async fn enforces_documented_limits_locally() {
     channel.ping().unwrap();
 
     drop(channel);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn handles_share_the_documented_limits() {
+    let (url, server) = serve("/ws", |mut socket| async move {
+        // The first frame comes from the channel, the second from a handle in another
+        // task.
+        let first = recv_json(&mut socket).await;
+        assert_eq!(first["op"], "subscribe");
+        assert_eq!(first["subscriptions"].as_array().unwrap().len(), 60);
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({
+                "op": "subscribe",
+                "subscriptions": [
+                    {"channel": "price.polymarket", "filter": {"asset_id": "61"}},
+                    {"channel": "price.polymarket", "filter": {"asset_id": "62"}},
+                    {"channel": "price.polymarket", "filter": {"asset_id": "63"}},
+                    {"channel": "price.polymarket", "filter": {"asset_id": "64"}}
+                ]
+            })
+        );
+        send(
+            &mut socket,
+            r#"{"op":"subscribed","channel":"price.polymarket"}"#,
+        )
+        .await;
+        drain(&mut socket).await;
+    })
+    .await;
+
+    let mut channel = connect(&url).await;
+    let handle = channel.handle();
+    let first: Vec<String> = (1..=60).map(|i| i.to_string()).collect();
+    channel
+        .subscribe(PolyBoltSubscription::price_polymarket(&first))
+        .unwrap();
+    let task_handle = handle.clone();
+    tokio::spawn(async move {
+        task_handle.subscribe(PolyBoltSubscription::price_polymarket([
+            "61", "62", "63", "64",
+        ]))
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(matches!(
+        next(&mut channel).await,
+        Some(Ok(PolyBoltEvent::Subscribed(_)))
+    ));
+
+    // One count of active subscriptions for the channel and all its handles.
+    assert_eq!(channel.active_subscriptions(), 64);
+    assert_eq!(handle.active_subscriptions(), 64);
+    for err in [
+        handle
+            .subscribe(PolyBoltSubscription::price_polymarket(["65"]))
+            .unwrap_err(),
+        channel
+            .subscribe(PolyBoltSubscription::price_polymarket(["65"]))
+            .unwrap_err(),
+    ] {
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "subscriptions"));
+    }
+    handle
+        .unsubscribe(PolyBoltSubscription::price_polymarket(["1"]))
+        .unwrap();
+    assert_eq!(channel.active_subscriptions(), 63);
+
+    // One frame rate budget too: 3 frames sent so far, 17 more reach the limit of 20.
+    for i in 0..17 {
+        let unsubscribe = PolyBoltSubscription::price_polymarket(["999"]);
+        if i % 2 == 0 {
+            channel.unsubscribe(unsubscribe).unwrap();
+        } else {
+            handle.unsubscribe(unsubscribe).unwrap();
+        }
+    }
+    for err in [
+        handle
+            .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
+            .unwrap_err(),
+        channel
+            .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
+            .unwrap_err(),
+    ] {
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "op"));
+    }
+    handle.ping().unwrap();
+
+    // Closing through the handle ends the stream; the handle then fails.
+    handle.close();
+    assert!(next(&mut channel).await.is_none());
+    assert!(channel.is_terminated());
+    let err = eventually_err(|| handle.ping()).await;
+    let Error::WebSocket(ws) = &err else {
+        panic!("expected a websocket error, got {err:?}");
+    };
+    assert_eq!(ws.kind(), WebSocketErrorKind::Closed);
     server.await.unwrap();
 }
 

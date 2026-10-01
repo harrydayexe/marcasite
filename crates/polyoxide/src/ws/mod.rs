@@ -11,6 +11,10 @@
 //! mock server), the receive buffer size and the handshake timeout. Connecting must happen
 //! inside a Tokio runtime.
 //!
+//! To change subscriptions from another task while the stream is consumed, take a
+//! cloneable handle with [`MarketChannel::handle`] ([`MarketChannelHandle`]) or
+//! [`PolyBoltChannel::handle`] ([`PolyBoltChannelHandle`]).
+//!
 //! ```no_run
 //! # async fn run() -> polyoxide::Result<()> {
 //! use std::time::Duration;
@@ -179,14 +183,14 @@ pub use polyoxide_core::ws::{DEFAULT_BUFFER, DEFAULT_CONNECT_TIMEOUT};
 
 pub use market::{
     BestBidAskEvent, BookEvent, EventMessage, LastTradePriceEvent, MarketChannel,
-    MarketChannelBuilder, MarketEvent, MarketResolvedEvent, MarketSubscription,
-    MarketSubscriptionUpdate, NewMarketEvent, OrderSummary, PriceChange, PriceChangeEvent,
-    SubscriptionLevel, TickSizeChangeEvent,
+    MarketChannelBuilder, MarketChannelHandle, MarketEvent, MarketResolvedEvent,
+    MarketSubscription, MarketSubscriptionUpdate, NewMarketEvent, OrderSummary, PriceChange,
+    PriceChangeEvent, SubscriptionLevel, TickSizeChangeEvent,
 };
 pub use polybolt::{
-    BestBidAsk, ChannelAck, ErrorAck, PolyBoltChannel, PolyBoltChannelBuilder, PolyBoltChannelName,
-    PolyBoltCloseCode, PolyBoltErrorCode, PolyBoltEvent, PolyBoltSubscription, PongAck,
-    PricePolymarketEnvelope, PriceProvider,
+    BestBidAsk, ChannelAck, ErrorAck, PolyBoltChannel, PolyBoltChannelBuilder,
+    PolyBoltChannelHandle, PolyBoltChannelName, PolyBoltCloseCode, PolyBoltErrorCode,
+    PolyBoltEvent, PolyBoltSubscription, PongAck, PricePolymarketEnvelope, PriceProvider,
 };
 pub use sports::{SportResult, SportsChannel, SportsChannelBuilder, SportsEvent};
 
@@ -209,5 +213,7 @@ mod tests {
         assert_send_sync::<PolyBoltEvent>();
         assert_send_sync::<MarketChannelBuilder>();
         assert_send_sync::<PolyBoltSubscription>();
+        assert_send_sync::<MarketChannelHandle>();
+        assert_send_sync::<PolyBoltChannelHandle>();
     }
 }

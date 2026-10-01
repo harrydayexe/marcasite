@@ -13,7 +13,7 @@ use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{
     Error, Result, Service, ValidationError, WebSocketError, WebSocketErrorKind, serde_util,
     types::{ConditionId, EventId, MarketId, Side, TokenId},
-    ws::WsConnection,
+    ws::{WsConnection, WsSender},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
@@ -276,19 +276,8 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// heartbeat every 10 seconds and drops the server's `PONG` replies. See the
 /// [module documentation](super) for error handling and reconnection.
 ///
-/// # Stream items
-///
-/// Each item is an `Ok(`[`MarketEvent`]`)` or an
-/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
-/// [`kind`](crate::WebSocketError::kind):
-///
-/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
-///   match its documented schema. **Not fatal**: the stream continues with the next
-///   message.
-/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
-///   stream ends after this item.
-///
-/// A normal close ends the stream without an error.
+/// To change the subscription from another task while the stream is consumed, use a
+/// [`MarketChannelHandle`] from [`handle`](Self::handle).
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/market>.
 ///
@@ -312,11 +301,26 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// # }
 /// ```
 ///
+/// # Stream items
+///
+/// Each item is an `Ok(`[`MarketEvent`]`)` or an
+/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
+/// [`kind`](crate::WebSocketError::kind):
+///
+/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
+///   match its documented schema. **Not fatal**: the stream continues with the next
+///   message.
+/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
+///   stream ends after this item.
+///
+/// A normal close ends the stream without an error.
+///
 /// [`Stream`]: futures_core::Stream
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct MarketChannel {
     events: EventStream<MarketEvent>,
+    handle: MarketChannelHandle,
 }
 
 impl MarketChannel {
@@ -340,6 +344,94 @@ impl MarketChannel {
         MarketChannelBuilder::default()
     }
 
+    /// A cloneable handle to change the subscription (or close the connection) from other
+    /// tasks while this channel is consumed as a stream.
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use futures_util::StreamExt as _;
+    /// use polyoxide::ws::{MarketChannel, MarketSubscription};
+    ///
+    /// let mut channel = MarketChannel::connect(MarketSubscription::new([
+    ///     "65818619657568813474341868652308942079804919287380422192892211131408793125422",
+    /// ]))
+    /// .await?;
+    /// let handle = channel.handle();
+    /// tokio::spawn(async move {
+    ///     // For example, in response to user input:
+    ///     let more = ["71321045679252212594626385532706912750332728571942532289631379312455583992563"];
+    ///     if let Err(err) = handle.subscribe(more) {
+    ///         eprintln!("subscription change failed: {err}");
+    ///     }
+    /// });
+    /// while let Some(event) = channel.next().await {
+    ///     println!("{:?}", event?);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn handle(&self) -> MarketChannelHandle {
+        self.handle.clone()
+    }
+
+    /// Starts following more asset ids without reconnecting.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if `asset_ids` is empty, or [`Error::WebSocket`] if the
+    /// connection has terminated.
+    pub fn subscribe<I>(&self, asset_ids: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: Into<TokenId>,
+    {
+        self.handle.subscribe(asset_ids)
+    }
+
+    /// Stops following some asset ids without reconnecting.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if `asset_ids` is empty, or [`Error::WebSocket`] if the
+    /// connection has terminated.
+    pub fn unsubscribe<I>(&self, asset_ids: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: Into<TokenId>,
+    {
+        self.handle.unsubscribe(asset_ids)
+    }
+
+    /// Sends a subscription change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Validation`] if the update has no asset ids, or
+    /// [`Error::WebSocket`] if the connection has terminated.
+    pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()> {
+        self.handle.update_subscription(update)
+    }
+
+    /// Closes the connection gracefully; the stream then ends after any events already
+    /// received.
+    pub fn close(&self) {
+        self.handle.close();
+    }
+}
+
+/// A cloneable handle to a [`MarketChannel`], obtained from [`MarketChannel::handle`]:
+/// changes the subscription or closes the connection from any task while the channel is
+/// consumed as a stream.
+///
+/// The handle does not keep the connection open: once the [`MarketChannel`] is dropped or
+/// the connection has ended, its methods fail with an
+/// [`Error::WebSocket`] of kind [`Closed`](crate::WebSocketErrorKind::Closed).
+#[derive(Debug, Clone)]
+pub struct MarketChannelHandle {
+    sender: WsSender,
+}
+
+impl MarketChannelHandle {
     /// Starts following more asset ids without reconnecting.
     ///
     /// # Errors
@@ -376,17 +468,13 @@ impl MarketChannel {
     /// [`Error::WebSocket`] if the connection has terminated.
     pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()> {
         let frame = update.to_json()?;
-        self.connection().send_text(frame)
+        self.sender.send_text(frame)
     }
 
-    /// Closes the connection gracefully; the stream then ends after any events already
-    /// received.
+    /// Closes the connection gracefully; the channel's stream then ends after any events
+    /// already received.
     pub fn close(&self) {
-        self.connection().close();
-    }
-
-    fn connection(&self) -> &WsConnection {
-        self.events.connection()
+        self.sender.close();
     }
 }
 
@@ -466,8 +554,12 @@ impl MarketChannelBuilder {
             .ignore(PONG)
             .initial_message(subscription.to_json()?);
         let conn = WsConnection::connect(config).await?;
+        let handle = MarketChannelHandle {
+            sender: conn.sender(),
+        };
         Ok(MarketChannel {
             events: EventStream::new(conn),
+            handle,
         })
     }
 }
