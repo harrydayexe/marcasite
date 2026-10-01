@@ -53,8 +53,13 @@ pub fn parse_datetime(s: &str) -> Option<DateTime<Utc>> {
         .map(|naive| naive.and_utc())
 }
 
+/// Parses a date-time ending in a short `+HH` / `-HH` offset.
+///
+/// Network input: never slice at a byte offset that may fall inside a multi-byte
+/// character (`str::get` returns `None` there instead of panicking).
 fn short_offset(s: &str) -> Option<DateTime<Utc>> {
-    let (head, tail) = s.split_at(s.len().checked_sub(3)?);
+    let split = s.len().checked_sub(3)?;
+    let (head, tail) = (s.get(..split)?, s.get(split..)?);
     let sign = tail.chars().next()?;
     if !(sign == '+' || sign == '-') || !tail.get(1..)?.chars().all(|c| c.is_ascii_digit()) {
         return None;
@@ -911,5 +916,175 @@ mod tests {
     #[test]
     fn rejects_garbage() {
         assert!(serde_json::from_str::<Wire>(r#"{"secs":"soon"}"#).is_err());
+    }
+
+    #[test]
+    fn multi_byte_input_does_not_panic() {
+        for s in [
+            "€ab",
+            "aaaaaaaaaaaaaaaa€a",
+            "x€y",
+            "2024-01-02T03:04:05€",
+            "2024-01-02 03:04:05+0€",
+            "2024-01-02T03:04:05+€0",
+            "€",
+            "😀",
+            "é+0",
+        ] {
+            assert_eq!(parse_datetime(s), None, "{s}");
+        }
+        // Still parsed when the multi-byte character is not at the end.
+        assert!(parse_datetime(" 2024-01-02 03:04:05+00 ").is_some());
+    }
+
+    /// A small deterministic xorshift generator, so the fuzz test needs no dependency and
+    /// is reproducible.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next() % n as u64).unwrap()
+        }
+    }
+
+    /// Characters chosen to hit the parsers' edge cases: digits, separators, signs,
+    /// whitespace, and 2-, 3- and 4-byte UTF-8 characters.
+    const ALPHABET: [&str; 16] = [
+        "0", "9", "-", "+", ":", "T", " ", ".", "Z", "e", "é", "€", "😀", "\u{301}", "\"", "\n",
+    ];
+
+    /// Prefixes that get the parsers past their first checks.
+    const PREFIXES: [&str; 8] = [
+        "",
+        "2024-01-02",
+        "2024-01-02T03:04:05",
+        "2024-01-02 03:04:05+0",
+        "2024-01-02T03:04:05.123",
+        "1700000000",
+        "-1",
+        "[\"a\",",
+    ];
+
+    /// Every string of up to three alphabet characters, plus random strings that start
+    /// with a plausible prefix.
+    fn fuzz_strings() -> Vec<String> {
+        let mut out = vec![String::new()];
+        let mut frontier = vec![String::new()];
+        for _ in 0..3 {
+            let mut next = Vec::new();
+            for prefix in &frontier {
+                for c in ALPHABET {
+                    next.push(format!("{prefix}{c}"));
+                }
+            }
+            out.extend(next.iter().cloned());
+            frontier = next;
+        }
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..4000 {
+            let mut s = PREFIXES[rng.below(PREFIXES.len())].to_owned();
+            for _ in 0..rng.below(8) {
+                s.push_str(ALPHABET[rng.below(ALPHABET.len())]);
+            }
+            out.push(s);
+        }
+        out
+    }
+
+    /// JSON values of every type, including numbers at and beyond the edges of the
+    /// integer and float ranges.
+    fn fuzz_values() -> Vec<Value> {
+        let mut values: Vec<Value> = fuzz_strings().into_iter().map(Value::String).collect();
+        for raw in [
+            "null",
+            "true",
+            "false",
+            "0",
+            "-0",
+            "-0.0",
+            "1.5",
+            "1e300",
+            "-1e300",
+            "1e-300",
+            "9223372036854775807",
+            "-9223372036854775808",
+            "18446744073709551615",
+            "18446744073709551616",
+            "1e19",
+            "1700000000.0",
+            "1700000000.5",
+            "79228162514264337593543950336",
+            "123456789012345678901234567890.123",
+            "[]",
+            "[1, \"2\"]",
+            "{}",
+            "{\"a\": 1}",
+        ] {
+            values.push(serde_json::from_str(raw).unwrap());
+        }
+        values
+    }
+
+    /// Runs `T`'s deserializer on `value`; on success, serializes the result again (which
+    /// must not panic either).
+    fn exercise<T: DeserializeOwned + Serialize>(value: &Value) {
+        if let Ok(decoded) = T::deserialize(value) {
+            let _ = serde_json::to_string(&decoded);
+        }
+    }
+
+    macro_rules! fuzz_fields {
+        ($value:expr; $($name:ident: $ty:ty => $attr:meta;)*) => {
+            $(
+                #[derive(Deserialize, Serialize)]
+                struct $name {
+                    #[$attr]
+                    #[allow(dead_code)]
+                    v: $ty,
+                }
+                exercise::<$name>(&serde_json::json!({ "v": $value }));
+            )*
+        };
+    }
+
+    #[test]
+    fn helpers_never_panic_on_arbitrary_input() {
+        for value in fuzz_values() {
+            if let Value::String(s) = &value {
+                let _ = parse_datetime(s);
+            }
+            fuzz_fields! { value.clone();
+                Secs: DateTime<Utc> => serde(with = "timestamp_seconds");
+                SecsOpt: Option<DateTime<Utc>> => serde(default, with = "timestamp_seconds_option");
+                Millis: DateTime<Utc> => serde(with = "timestamp_millis");
+                MillisOpt: Option<DateTime<Utc>> => serde(default, with = "timestamp_millis_option");
+                Micros: DateTime<Utc> => serde(with = "timestamp_micros");
+                MicrosOpt: Option<DateTime<Utc>> => serde(default, with = "timestamp_micros_option");
+                Date: DateTime<Utc> => serde(with = "datetime");
+                DateOpt: Option<DateTime<Utc>> => serde(default, with = "datetime_option");
+                JsonList: Vec<String> => serde(with = "json_string");
+                JsonAny: Value => serde(with = "json_string");
+                JsonOpt: Option<Vec<i64>> => serde(default, with = "json_string_option");
+                NumU64: u64 => serde(with = "string_or_number");
+                NumI64: i64 => serde(with = "string_or_number");
+                NumDec: Decimal => serde(with = "string_or_number");
+                NumOpt: Option<Decimal> => serde(default, with = "string_or_number_option");
+                NumOptI32: Option<i32> => serde(default, with = "string_or_number_option");
+                DecNum: Decimal => serde(with = "decimal_number");
+                DecNumOpt: Option<Decimal> => serde(default, with = "decimal_number_option");
+                Id: crate::types::TokenId => serde(with = "integer_id");
+                IdOpt: Option<crate::types::TokenId> => serde(default, with = "integer_id_option");
+                Empty: Option<String> => serde(default, deserialize_with = "empty_string_as_none");
+                EmptyDec: Option<Decimal> => serde(default, deserialize_with = "empty_string_as_none");
+                PlainDec: Decimal => serde(default);
+            }
+        }
     }
 }
