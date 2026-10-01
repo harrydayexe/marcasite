@@ -1,0 +1,1659 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "Polymarket PolyBolt WebSocket",
+    "version": "2.0.0",
+    "description": "Real-time push socket for Polymarket market prices and licensed reference prices. One connection carries many channel subscriptions. Every server frame is a uniform envelope with a dense per-channel sequence, a snapshot barrier on subscribe, and typed close codes. Replaces the legacy Real-Time Data Service (RTDS)."
+  },
+  "servers": {
+    "production": {
+      "host": "ws-live-v2.polymarket.com",
+      "pathname": "/ws",
+      "protocol": "wss",
+      "description": "Production socket. The same host serves the Polymarket web app's ticket endpoint; third-party clients authenticate gated channels with CLOB API credentials over the socket itself."
+    }
+  },
+  "channels": {
+    "ws": {
+      "address": "/ws",
+      "title": "Live Data Channel",
+      "description": "Send JSON text frames tagged with op. The server answers every op with an ack or an error ack (never a close, except for policy breaches, close 4008) and pushes envelopes for subscribed channels. Limits per connection: 64 active (channel, filter) subscriptions, 20 subscribe or unsubscribe frames per second (a batch frame counts once), 64 KB per frame, 8 auth attempts. The server sends a WebSocket ping every 25 seconds; two missed pongs close 4002. Close codes: 4001 authentication failed on a presented credential, 4002 slow consumer or pong timeout, 4003 server draining (reconnect once after a uniform 0 to 10 s delay), 4008 policy violation (fix the client; do not reconnect blindly).",
+      "messages": {
+        "subscribe": {
+          "$ref": "#/components/messages/subscribe"
+        },
+        "unsubscribe": {
+          "$ref": "#/components/messages/unsubscribe"
+        },
+        "auth": {
+          "$ref": "#/components/messages/auth"
+        },
+        "ping": {
+          "$ref": "#/components/messages/ping"
+        },
+        "subscribed": {
+          "$ref": "#/components/messages/subscribed"
+        },
+        "unsubscribed": {
+          "$ref": "#/components/messages/unsubscribed"
+        },
+        "authed": {
+          "$ref": "#/components/messages/authed"
+        },
+        "pong": {
+          "$ref": "#/components/messages/pong"
+        },
+        "error": {
+          "$ref": "#/components/messages/error"
+        },
+        "pricePolymarket": {
+          "$ref": "#/components/messages/pricePolymarket"
+        },
+        "priceCrypto": {
+          "$ref": "#/components/messages/priceCrypto"
+        },
+        "priceEquity": {
+          "$ref": "#/components/messages/priceEquity"
+        },
+        "priceCryptoTwap": {
+          "$ref": "#/components/messages/priceCryptoTwap"
+        },
+        "priceEquityTwap": {
+          "$ref": "#/components/messages/priceEquityTwap"
+        },
+        "challenge": {
+          "$ref": "#/components/messages/challenge"
+        },
+        "challengeRequest": {
+          "$ref": "#/components/messages/challengeRequest"
+        }
+      }
+    }
+  },
+  "operations": {
+    "subscribe": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Subscribe",
+      "summary": "Add one or more (channel, filter) subscriptions",
+      "description": "Batch form: subscriptions is an array of {channel, filter}. Singular form: {op: subscribe, channel, filter}. Each newly added subscription is acknowledged with subscribed, then receives exactly one snapshot envelope (snapshot: true), then live frames. A duplicate (channel, filter) is acknowledged again without a new snapshot. A gated channel on an unauthenticated connection answers the non-closing error code auth_required; other subscriptions on the same connection are unaffected.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/subscribe"
+        }
+      ]
+    },
+    "unsubscribe": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Unsubscribe",
+      "summary": "Remove subscriptions; same singular and batch shapes as subscribe",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/unsubscribe"
+        }
+      ]
+    },
+    "auth": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Authenticate",
+      "summary": "Unlock the gated channels on this connection with CLOB API credentials or a web-app ticket",
+      "description": "Send before subscribing to price.crypto, price.equity, price.crypto.twap or price.equity.twap. Answered with authed. A refused credential answers the non-closing error code auth_invalid; an unreachable verifier answers auth_unavailable (retry later). Idempotent once authenticated. Lifetime budget of 8 auth frames per connection; the ninth closes 4008. The Polymarket web app uses a different credential in the same op (a one-time ticket in the ticket field); third-party clients use the auth object. A web-app ticket is minted from a Turnstile solve; when the widget carried this connection's challenge nonce (see the challenge frame) the ticket verifies on this socket alone, and one minted for another socket answers the non-closing auth_expired (mint again).",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/auth"
+        }
+      ]
+    },
+    "ping": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Ping",
+      "summary": "Optional application-level liveness probe; answered with pong",
+      "description": "Not required for keepalive: the server sends WebSocket ping frames every 25 seconds and standard clients answer them automatically.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/ping"
+        }
+      ]
+    },
+    "acknowledgements": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Acknowledgements",
+      "summary": "challenge (on request), subscribed, unsubscribed, authed, pong and error acks; rid is echoed when the request carried one",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/challenge"
+        },
+        {
+          "$ref": "#/channels/ws/messages/subscribed"
+        },
+        {
+          "$ref": "#/channels/ws/messages/unsubscribed"
+        },
+        {
+          "$ref": "#/channels/ws/messages/authed"
+        },
+        {
+          "$ref": "#/channels/ws/messages/pong"
+        },
+        {
+          "$ref": "#/channels/ws/messages/error"
+        }
+      ]
+    },
+    "pricePolymarket": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "price.polymarket",
+      "summary": "Best bid and ask per outcome token (public, no auth)",
+      "description": "Filter: {asset_id: <outcome token id, decimal string>}. Snapshot payload: the latest best bid and ask for the token, or an empty array [] when the token has not traded within the server's warm window. Live payload: one best-bid-and-ask object per change. Same-token updates are conflated (latest wins) when the client is slow.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/pricePolymarket"
+        }
+      ]
+    },
+    "priceCrypto": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "price.crypto",
+      "summary": "Pyth crypto reference prices, about one update per second per symbol (gated)",
+      "description": "Filter: {symbol}, lowercase, one of btcusd, ethusd, solusd, dogeusd, xrpusd, bnbusd. Snapshot payload: {symbol, data: [points for the previous two minutes]}. Live payload: one point.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/priceCrypto"
+        }
+      ]
+    },
+    "priceEquity": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "price.equity",
+      "summary": "Pyth equity, ETF, forex, metals and commodity reference prices (gated)",
+      "description": "Filter: {symbol}, lowercase. Catalog: stocks aapl, tsla, msft, googl, amzn, meta, nvda, nflx, pltr, open, rklb, abnb, coin, hood; ETFs qqq, spy, ewy, vxx; forex eurusd, gbpusd, usdcad, usdjpy, usdkrw; precious metals xauusd, xagusd; commodities wti, cc, ngd (front-month futures, the symbol stays the root while the contract rolls). Snapshot payload: {symbol, source, data: [points for the previous two minutes]}. Live payload: one point with optional received_at and is_carried_forward. Every payload names the vendor that produced it in source (pyth, massive or chainlink; ownership is a per-symbol operator decision); during a rolling ownership flip old and new pods serve different vendors for the flipped symbol, so consecutive frames can carry different sources until the roll completes.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/priceEquity"
+        }
+      ]
+    },
+    "priceCryptoTwap": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "price.crypto.twap",
+      "summary": "Chainlink time-weighted average prices used by crypto up/down market resolution (gated)",
+      "description": "Filter: {symbol, window_seconds}. Only window_seconds 60 exists; symbols btcusd, ethusd, solusd, xrpusd, dogeusd, hypeusd, bnbusd. Another positive window is accepted but never carries data. Snapshot payload: {symbol, window_seconds, data: [points]}. Live payload: one point including window_seconds.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/priceCryptoTwap"
+        }
+      ]
+    },
+    "priceEquityTwap": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "price.equity.twap",
+      "summary": "Chainlink Data Streams FX time-weighted average prices (gated)",
+      "description": "Filter: {symbol, window_seconds}. Launch feeds eurusd and usdjpy at window_seconds 60; another positive window is accepted but never carries data. Ticket-gated like the other vendor channels and snapshot-then-live like price.crypto.twap. Snapshot payload: {symbol, window_seconds, source, data: [points]}. Live payload: one point including window_seconds and source. Every payload names the vendor that produced it in source; the channel is Chainlink-only today, so the value is chainlink.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/priceEquityTwap"
+        }
+      ]
+    },
+    "challenge": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ws"
+      },
+      "title": "Request the challenge",
+      "summary": "Ask for this connection's challenge nonce",
+      "description": "Ask for this connection's challenge nonce. The server never pushes it unasked: a client that authenticates with a ticket sends this right after the socket opens, then renders the Turnstile widget with the nonce as cData. Idempotent (the same nonce for the life of the connection, rid echoed) and metered like subscribe and auth. A nonce field in the request is ignored: a client can never choose its own. A server that predates this op answers the non-closing bad_op error ack with no rid (the frame did not parse): treat an uncorrelated bad_op while the request is pending as no nonce served, and render the widget without cData.",
+      "messages": [
+        {
+          "$ref": "#/channels/ws/messages/challengeRequest"
+        }
+      ]
+    }
+  },
+  "components": {
+    "messages": {
+      "subscribe": {
+        "name": "subscribe",
+        "title": "subscribe",
+        "payload": {
+          "$ref": "#/components/schemas/SubscribeRequest"
+        },
+        "examples": [
+          {
+            "name": "batch",
+            "summary": "Two channels in one frame",
+            "payload": {
+              "op": "subscribe",
+              "rid": "s1",
+              "subscriptions": [
+                {
+                  "channel": "price.polymarket",
+                  "filter": {
+                    "asset_id": "21742633143463906290569050155826241533067272736897614950488156847949938836455"
+                  }
+                },
+                {
+                  "channel": "price.crypto",
+                  "filter": {
+                    "symbol": "btcusd"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "singular",
+            "summary": "One subscription",
+            "payload": {
+              "op": "subscribe",
+              "channel": "price.crypto.twap",
+              "filter": {
+                "symbol": "btcusd",
+                "window_seconds": 60
+              }
+            }
+          },
+          {
+            "name": "pinned-provider",
+            "summary": "One subscription pinned to a provider (spec 08b; ignored while the selector is disabled)",
+            "payload": {
+              "op": "subscribe",
+              "channel": "price.equity",
+              "filter": {
+                "symbol": "xauusd",
+                "provider": "pyth"
+              },
+              "rid": "s3"
+            }
+          }
+        ]
+      },
+      "unsubscribe": {
+        "name": "unsubscribe",
+        "title": "unsubscribe",
+        "payload": {
+          "$ref": "#/components/schemas/UnsubscribeRequest"
+        },
+        "examples": [
+          {
+            "name": "singular",
+            "payload": {
+              "op": "unsubscribe",
+              "channel": "price.crypto",
+              "filter": {
+                "symbol": "btcusd"
+              }
+            }
+          }
+        ]
+      },
+      "auth": {
+        "name": "auth",
+        "title": "auth",
+        "payload": {
+          "$ref": "#/components/schemas/AuthRequest"
+        },
+        "examples": [
+          {
+            "name": "clob-credentials",
+            "summary": "CLOB API credentials (third-party clients)",
+            "payload": {
+              "op": "auth",
+              "rid": "a1",
+              "auth": {
+                "apiKey": "00000000-0000-4000-8000-000000000000",
+                "secret": "<api secret>",
+                "passphrase": "<api passphrase>"
+              }
+            }
+          },
+          {
+            "name": "web-app-ticket",
+            "summary": "One-time ticket (the Polymarket web app)",
+            "payload": {
+              "op": "auth",
+              "rid": "a2",
+              "ticket": "5c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
+            }
+          }
+        ]
+      },
+      "ping": {
+        "name": "ping",
+        "title": "ping",
+        "payload": {
+          "$ref": "#/components/schemas/PingRequest"
+        },
+        "examples": [
+          {
+            "name": "ping",
+            "payload": {
+              "op": "ping",
+              "rid": "p1"
+            }
+          }
+        ]
+      },
+      "subscribed": {
+        "name": "subscribed",
+        "title": "subscribed",
+        "payload": {
+          "$ref": "#/components/schemas/ChannelAck"
+        },
+        "examples": [
+          {
+            "name": "subscribed",
+            "payload": {
+              "op": "subscribed",
+              "channel": "price.crypto",
+              "rid": "s1"
+            }
+          },
+          {
+            "name": "subscribed-with-provider",
+            "summary": "Provider selector enabled: the ack names the SERVED provider",
+            "payload": {
+              "op": "subscribed",
+              "channel": "price.equity",
+              "rid": "s2",
+              "provider": "chainlink"
+            }
+          }
+        ]
+      },
+      "unsubscribed": {
+        "name": "unsubscribed",
+        "title": "unsubscribed",
+        "payload": {
+          "$ref": "#/components/schemas/ChannelAck"
+        },
+        "examples": [
+          {
+            "name": "unsubscribed",
+            "payload": {
+              "op": "unsubscribed",
+              "channel": "price.crypto"
+            }
+          }
+        ]
+      },
+      "authed": {
+        "name": "authed",
+        "title": "authed",
+        "payload": {
+          "$ref": "#/components/schemas/SimpleAck"
+        },
+        "examples": [
+          {
+            "name": "authed",
+            "payload": {
+              "op": "authed",
+              "rid": "a1"
+            }
+          }
+        ]
+      },
+      "pong": {
+        "name": "pong",
+        "title": "pong",
+        "payload": {
+          "$ref": "#/components/schemas/SimpleAck"
+        },
+        "examples": [
+          {
+            "name": "pong",
+            "payload": {
+              "op": "pong",
+              "rid": "p1"
+            }
+          }
+        ]
+      },
+      "error": {
+        "name": "error",
+        "title": "error",
+        "payload": {
+          "$ref": "#/components/schemas/ErrorAck"
+        },
+        "examples": [
+          {
+            "name": "auth_required",
+            "summary": "Gated channel subscribed before auth; the connection stays open",
+            "payload": {
+              "op": "error",
+              "code": "auth_required",
+              "channel": "price.crypto",
+              "rid": "s1"
+            }
+          },
+          {
+            "name": "bad_filter",
+            "payload": {
+              "op": "error",
+              "code": "bad_filter",
+              "channel": "price.polymarket",
+              "rid": "s2"
+            }
+          }
+        ]
+      },
+      "pricePolymarket": {
+        "name": "price.polymarket",
+        "title": "price.polymarket envelope",
+        "payload": {
+          "$ref": "#/components/schemas/PricePolymarketEnvelope"
+        },
+        "examples": [
+          {
+            "name": "snapshot",
+            "payload": {
+              "v": 1,
+              "channel": "price.polymarket",
+              "seq": 1,
+              "ts": 1788973000123,
+              "snapshot": true,
+              "payload": {
+                "market": "0x9deb0baac40648821f96f01339229a422e2f5c877de55dc4dbf981f95a1e709c",
+                "asset_id": "21742633143463906290569050155826241533067272736897614950488156847949938836455",
+                "best_bid": "0.51",
+                "best_ask": "0.53",
+                "hash": "3f9c1e7a",
+                "timestamp": 1788972999871
+              }
+            }
+          },
+          {
+            "name": "cold snapshot",
+            "summary": "Token with no trade inside the warm window",
+            "payload": {
+              "v": 1,
+              "channel": "price.polymarket",
+              "seq": 1,
+              "ts": 1788973000123,
+              "snapshot": true,
+              "payload": []
+            }
+          },
+          {
+            "name": "live",
+            "payload": {
+              "v": 1,
+              "channel": "price.polymarket",
+              "seq": 2,
+              "ts": 1788973004501,
+              "payload": {
+                "market": "0x9deb0baac40648821f96f01339229a422e2f5c877de55dc4dbf981f95a1e709c",
+                "asset_id": "21742633143463906290569050155826241533067272736897614950488156847949938836455",
+                "best_bid": "0.52",
+                "best_ask": "0.53",
+                "hash": "a81d02c4",
+                "timestamp": 1788973004498
+              }
+            }
+          }
+        ]
+      },
+      "priceCrypto": {
+        "name": "price.crypto",
+        "title": "price.crypto envelope",
+        "payload": {
+          "$ref": "#/components/schemas/PriceCryptoEnvelope"
+        },
+        "examples": [
+          {
+            "name": "snapshot",
+            "payload": {
+              "v": 1,
+              "channel": "price.crypto",
+              "seq": 1,
+              "ts": 1788973000000,
+              "snapshot": true,
+              "payload": {
+                "symbol": "btcusd",
+                "source": "pyth",
+                "data": [
+                  {
+                    "timestamp": 1788972880000,
+                    "value": 64123.5,
+                    "full_accuracy_value": "64123.50000000"
+                  },
+                  {
+                    "timestamp": 1788972881000,
+                    "value": 64125.1,
+                    "full_accuracy_value": "64125.10000000"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "live",
+            "payload": {
+              "v": 1,
+              "channel": "price.crypto",
+              "seq": 2,
+              "ts": 1788973001000,
+              "payload": {
+                "symbol": "btcusd",
+                "value": 64126.0,
+                "full_accuracy_value": "64126.00000000",
+                "timestamp": 1788973001000,
+                "source": "pyth"
+              }
+            }
+          }
+        ]
+      },
+      "priceEquity": {
+        "name": "price.equity",
+        "title": "price.equity envelope",
+        "payload": {
+          "$ref": "#/components/schemas/PriceEquityEnvelope"
+        },
+        "examples": [
+          {
+            "name": "live",
+            "payload": {
+              "v": 1,
+              "channel": "price.equity",
+              "seq": 5,
+              "ts": 1788973001200,
+              "payload": {
+                "symbol": "aapl",
+                "value": 189.42,
+                "full_accuracy_value": "189.4217",
+                "timestamp": 1788973001200,
+                "received_at": 1788973001207,
+                "is_carried_forward": false,
+                "source": "pyth"
+              }
+            }
+          }
+        ]
+      },
+      "priceCryptoTwap": {
+        "name": "price.crypto.twap",
+        "title": "price.crypto.twap envelope",
+        "payload": {
+          "$ref": "#/components/schemas/PriceCryptoTwapEnvelope"
+        },
+        "examples": [
+          {
+            "name": "live",
+            "payload": {
+              "v": 1,
+              "channel": "price.crypto.twap",
+              "seq": 3,
+              "ts": 1788973002000,
+              "payload": {
+                "symbol": "btcusd",
+                "value": 64120.7,
+                "full_accuracy_value": "64120.70000000",
+                "timestamp": 1788973002000,
+                "window_seconds": 60,
+                "source": "chainlink"
+              }
+            }
+          }
+        ]
+      },
+      "priceEquityTwap": {
+        "name": "price.equity.twap",
+        "title": "price.equity.twap envelope",
+        "payload": {
+          "$ref": "#/components/schemas/PriceEquityTwapEnvelope"
+        },
+        "examples": [
+          {
+            "name": "live",
+            "payload": {
+              "v": 1,
+              "channel": "price.equity.twap",
+              "seq": 3,
+              "ts": 1788973002000,
+              "payload": {
+                "symbol": "eurusd",
+                "value": 1.0842,
+                "full_accuracy_value": "1.08420000",
+                "timestamp": 1788973002000,
+                "window_seconds": 60,
+                "source": "chainlink"
+              }
+            }
+          }
+        ]
+      },
+      "challenge": {
+        "name": "challenge",
+        "title": "challenge",
+        "summary": "This connection's challenge nonce, the answer to a challenge request; never pushed unasked",
+        "payload": {
+          "$ref": "#/components/schemas/ChallengeAck"
+        },
+        "examples": [
+          {
+            "name": "answer",
+            "summary": "Answer to a challenge request; the same nonce for the life of the connection, rid echoed",
+            "payload": {
+              "op": "challenge",
+              "nonce": "3f2b6c1e-9a4d-4c2b-8e1f-0a1b2c3d4e5f",
+              "rid": "c1"
+            }
+          }
+        ]
+      },
+      "challengeRequest": {
+        "name": "challengeRequest",
+        "title": "challenge (request)",
+        "summary": "Ask for this connection's challenge nonce",
+        "payload": {
+          "$ref": "#/components/schemas/ChallengeRequest"
+        },
+        "examples": [
+          {
+            "name": "request",
+            "payload": {
+              "op": "challenge",
+              "rid": "c1"
+            }
+          }
+        ]
+      }
+    },
+    "schemas": {
+      "SubscriptionItem": {
+        "type": "object",
+        "required": [
+          "channel",
+          "filter"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "price.polymarket",
+              "price.crypto",
+              "price.equity",
+              "price.crypto.twap",
+              "price.equity.twap"
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssetIdFilter"
+              },
+              {
+                "$ref": "#/components/schemas/SymbolFilter"
+              },
+              {
+                "$ref": "#/components/schemas/TwapFilter"
+              }
+            ]
+          }
+        }
+      },
+      "AssetIdFilter": {
+        "type": "object",
+        "required": [
+          "asset_id"
+        ],
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "pattern": "^[0-9]{1,78}$",
+            "description": "Outcome token id (clobTokenIds entry), decimal string. Leading zeros are normalized."
+          }
+        }
+      },
+      "SymbolFilter": {
+        "type": "object",
+        "required": [
+          "symbol"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Lowercase symbol. Matching is case-insensitive."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "chainlink",
+              "pyth"
+            ],
+            "description": "Optional provider pin (spec 08b). While the server's provider selector is DISABLED (PRICE_PROVIDER_SELECTOR_ENABLED=false, the default), this field is accepted and IGNORED like any unknown key: the lane's owner is served and the subscribed ack carries no provider. While it is ENABLED, the value must be one of the enum tokens; anything else (including massive, owner, numbers, null) is a bad_filter error ack. A pin the catalog serves gets that provider's stream; a pin it cannot serve falls back to the owner's stream, and the subscribed ack names the provider actually served. Ignored on price.polymarket."
+          }
+        }
+      },
+      "TwapFilter": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "window_seconds"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Only 60 carries data today, on price.crypto.twap and price.equity.twap alike."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "chainlink",
+              "pyth"
+            ],
+            "description": "Optional provider pin (spec 08b). While the server's provider selector is DISABLED (PRICE_PROVIDER_SELECTOR_ENABLED=false, the default), this field is accepted and IGNORED like any unknown key: the lane's owner is served and the subscribed ack carries no provider. While it is ENABLED, the value must be one of the enum tokens; anything else (including massive, owner, numbers, null) is a bad_filter error ack. A pin the catalog serves gets that provider's stream; a pin it cannot serve falls back to the owner's stream, and the subscribed ack names the provider actually served. Ignored on price.polymarket."
+          }
+        }
+      },
+      "SubscribeRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "op",
+              "subscriptions"
+            ],
+            "properties": {
+              "op": {
+                "const": "subscribe"
+              },
+              "subscriptions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/SubscriptionItem"
+                }
+              },
+              "rid": {
+                "type": "string",
+                "description": "Client request id, echoed on every ack this frame produces."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "op",
+              "channel",
+              "filter"
+            ],
+            "properties": {
+              "op": {
+                "const": "subscribe"
+              },
+              "channel": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "object"
+              },
+              "rid": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "UnsubscribeRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "op",
+              "subscriptions"
+            ],
+            "properties": {
+              "op": {
+                "const": "unsubscribe"
+              },
+              "subscriptions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/components/schemas/SubscriptionItem"
+                }
+              },
+              "rid": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "op",
+              "channel",
+              "filter"
+            ],
+            "properties": {
+              "op": {
+                "const": "unsubscribe"
+              },
+              "channel": {
+                "type": "string"
+              },
+              "filter": {
+                "type": "object"
+              },
+              "rid": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "AuthRequest": {
+        "type": "object",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "const": "auth"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/ClobCredentials"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "ticket": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The one-time ticket from POST /api/ws-ticket (the Polymarket web app's credential), consumed by the attempt whatever the outcome. Minted from a Cloudflare Turnstile solve; when the widget was rendered with this connection's challenge nonce as cData, the ticket verifies only on this socket, whatever IP either request came from. A stale, consumed or unknown ticket, or one minted for another socket, answers the non-closing auth_expired: mint again."
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "auth"
+            ]
+          },
+          {
+            "required": [
+              "ticket"
+            ]
+          }
+        ],
+        "description": "Exactly one credential per frame: auth (CLOB API credentials, third-party clients) or ticket (the web app). Zero or two answer the non-closing bad_op."
+      },
+      "ClobCredentials": {
+        "type": "object",
+        "required": [
+          "apiKey",
+          "secret",
+          "passphrase"
+        ],
+        "properties": {
+          "apiKey": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "passphrase": {
+            "type": "string"
+          }
+        },
+        "description": "The CLOB L2 API credential trio, the same credentials used for the CLOB user WebSocket."
+      },
+      "PingRequest": {
+        "type": "object",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "const": "ping"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "ChannelAck": {
+        "type": "object",
+        "required": [
+          "op",
+          "channel"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "subscribed",
+              "unsubscribed"
+            ]
+          },
+          "channel": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "pyth",
+              "massive",
+              "chainlink"
+            ],
+            "description": "subscribed acks only, vendor channels only, and only while the provider selector is enabled (spec 08b): the provider actually SERVED - the requested pin when the catalog serves it, else the lane's owner (massive is reachable on the omitted path only). Also present on the idempotent duplicate-subscribe ack. Absent everywhere else, including every ack while the selector is disabled."
+          }
+        }
+      },
+      "SimpleAck": {
+        "type": "object",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "authed",
+              "pong"
+            ]
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorAck": {
+        "type": "object",
+        "required": [
+          "op",
+          "code"
+        ],
+        "properties": {
+          "op": {
+            "const": "error"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "bad_op",
+              "bad_channel",
+              "bad_filter",
+              "sub_limit",
+              "rate_limited",
+              "auth_required",
+              "auth_expired",
+              "auth_unavailable",
+              "auth_invalid",
+              "auth_attempts"
+            ],
+            "description": "bad_op malformed frame; bad_channel unknown channel; bad_filter missing or invalid filter; sub_limit 65th subscription (followed by close 4008); rate_limited more than 20 subscribe/unsubscribe frames per second (followed by close 4008); auth_required gated channel before auth; auth_expired consumed or unknown ticket (web app lane); auth_unavailable verifier unreachable, retry later; auth_invalid credentials refused; auth_attempts ninth auth frame (followed by close 4008)."
+          },
+          "channel": {
+            "type": "string"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "BestBidAsk": {
+        "type": "object",
+        "required": [
+          "market",
+          "asset_id",
+          "best_bid",
+          "best_ask",
+          "hash",
+          "timestamp"
+        ],
+        "properties": {
+          "market": {
+            "type": "string",
+            "description": "Condition id, 0x-prefixed."
+          },
+          "asset_id": {
+            "type": "string",
+            "description": "Outcome token id, decimal string."
+          },
+          "best_bid": {
+            "type": "string",
+            "description": "Decimal string price."
+          },
+          "best_ask": {
+            "type": "string",
+            "description": "Decimal string price."
+          },
+          "hash": {
+            "type": "string",
+            "description": "Order book hash at this change."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Order book time, Unix milliseconds."
+          }
+        }
+      },
+      "BatchPoint": {
+        "type": "object",
+        "required": [
+          "value",
+          "full_accuracy_value",
+          "timestamp"
+        ],
+        "properties": {
+          "value": {
+            "type": "number",
+            "description": "Price as a float. Prefer full_accuracy_value."
+          },
+          "full_accuracy_value": {
+            "type": "string",
+            "description": "Exact decimal price as published by the source."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Source event time, Unix milliseconds."
+          }
+        },
+        "description": "One historical point of a snapshot batch. Batch points carry NO symbol and NO source: both live once at batch level (the batch object's own fields), matching what the server actually emits - the retired shared point schema wrongly REQUIRED a symbol on every point."
+      },
+      "CryptoPoint": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "value",
+          "full_accuracy_value",
+          "timestamp",
+          "source"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Lowercase symbol, for example btcusd."
+          },
+          "value": {
+            "type": "number",
+            "description": "Price as a float. Prefer full_accuracy_value."
+          },
+          "full_accuracy_value": {
+            "type": "string",
+            "description": "Exact decimal price as published by the source."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Source event time, Unix milliseconds."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pyth"
+            ],
+            "description": "The producing vendor. price.crypto is a single-provider lane, so the value is the topic constant."
+          }
+        }
+      },
+      "EquityPoint": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "value",
+          "full_accuracy_value",
+          "timestamp",
+          "source"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Lowercase symbol, for example btcusd or aapl."
+          },
+          "value": {
+            "type": "number",
+            "description": "Price as a float. Prefer full_accuracy_value."
+          },
+          "full_accuracy_value": {
+            "type": "string",
+            "description": "Exact decimal price as published by the source."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Source event time, Unix milliseconds."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pyth",
+              "massive",
+              "chainlink"
+            ],
+            "description": "Vendor that produced this price, on every point this server emits. A per-symbol ownership flip rolls the edge fleet, so mid-roll a symbol's consecutive frames can legitimately carry different sources until the roll completes."
+          },
+          "received_at": {
+            "type": "integer",
+            "description": "Ingest receive time, Unix milliseconds. Live frames only."
+          },
+          "is_carried_forward": {
+            "type": "boolean",
+            "description": "True when the value is carried forward from the last session (market closed). Live frames only."
+          }
+        }
+      },
+      "TwapPoint": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "value",
+          "full_accuracy_value",
+          "timestamp",
+          "window_seconds",
+          "source"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Lowercase symbol, for example btcusd."
+          },
+          "value": {
+            "type": "number",
+            "description": "Price as a float. Prefer full_accuracy_value."
+          },
+          "full_accuracy_value": {
+            "type": "string",
+            "description": "Exact decimal price as published by the source."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Source event time, Unix milliseconds."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "const": 60,
+            "description": "Averaging window of the TWAP series. Only 60 exists today."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "chainlink"
+            ],
+            "description": "The producing vendor. price.crypto.twap is a single-provider lane, so the value is the topic constant."
+          }
+        }
+      },
+      "EquityTwapPoint": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "value",
+          "full_accuracy_value",
+          "timestamp",
+          "window_seconds",
+          "source"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Lowercase symbol, for example eurusd."
+          },
+          "value": {
+            "type": "number",
+            "description": "Price as a float. Prefer full_accuracy_value."
+          },
+          "full_accuracy_value": {
+            "type": "string",
+            "description": "Exact decimal price as published by the source."
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Source event time, Unix milliseconds."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "const": 60,
+            "description": "Averaging window of the TWAP series. Only 60 exists today."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "pyth",
+              "massive",
+              "chainlink"
+            ],
+            "description": "Vendor that produced this price, on every point this server emits. The channel is Chainlink-only today, so the emitted value is chainlink. Kept as its own schema because this enum is the full vendor set while TwapPoint pins its topic constant."
+          }
+        }
+      },
+      "PricePolymarketEnvelope": {
+        "type": "object",
+        "required": [
+          "v",
+          "channel",
+          "seq",
+          "ts",
+          "payload"
+        ],
+        "properties": {
+          "v": {
+            "type": "integer",
+            "const": 1,
+            "description": "Envelope version."
+          },
+          "channel": {
+            "type": "string",
+            "const": "price.polymarket"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Dense per-connection, per-channel sequence, assigned at delivery. Resets on every reconnect. Snapshot frames consume a seq."
+          },
+          "ts": {
+            "type": "integer",
+            "description": "Producer event time, Unix milliseconds."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Present and true on the one snapshot frame sent after each new subscription. Absent on live frames."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Number of frames dropped on this channel since the last delivered frame (slow-consumer signal). Absent when zero."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PricePolymarketPayload"
+          }
+        },
+        "description": "Snapshot payload is a BestBidAsk object or an empty array; live payload is a BestBidAsk object."
+      },
+      "PricePolymarketPayload": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BestBidAsk"
+          },
+          {
+            "type": "array",
+            "maxItems": 0,
+            "description": "Empty snapshot for a cold token."
+          }
+        ]
+      },
+      "PriceCryptoEnvelope": {
+        "type": "object",
+        "required": [
+          "v",
+          "channel",
+          "seq",
+          "ts",
+          "payload"
+        ],
+        "properties": {
+          "v": {
+            "type": "integer",
+            "const": 1,
+            "description": "Envelope version."
+          },
+          "channel": {
+            "type": "string",
+            "const": "price.crypto"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Dense per-connection, per-channel sequence, assigned at delivery. Resets on every reconnect. Snapshot frames consume a seq."
+          },
+          "ts": {
+            "type": "integer",
+            "description": "Producer event time, Unix milliseconds."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Present and true on the one snapshot frame sent after each new subscription. Absent on live frames."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Number of frames dropped on this channel since the last delivered frame (slow-consumer signal). Absent when zero."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PriceCryptoPayload"
+          }
+        },
+        "description": "Snapshot payload is a symbol batch; live payload is a single point."
+      },
+      "PriceCryptoPayload": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CryptoPoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "symbol",
+              "source",
+              "data"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "pyth"
+                ],
+                "description": "The producing vendor, once per batch (points are source-free). Topic constant on this single-provider lane."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BatchPoint"
+                },
+                "description": "The array holds the previous two minutes of points by event time and is empty for a symbol with no recent data."
+              }
+            }
+          }
+        ]
+      },
+      "PriceEquityEnvelope": {
+        "type": "object",
+        "required": [
+          "v",
+          "channel",
+          "seq",
+          "ts",
+          "payload"
+        ],
+        "properties": {
+          "v": {
+            "type": "integer",
+            "const": 1,
+            "description": "Envelope version."
+          },
+          "channel": {
+            "type": "string",
+            "const": "price.equity"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Dense per-connection, per-channel sequence, assigned at delivery. Resets on every reconnect. Snapshot frames consume a seq."
+          },
+          "ts": {
+            "type": "integer",
+            "description": "Producer event time, Unix milliseconds."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Present and true on the one snapshot frame sent after each new subscription. Absent on live frames."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Number of frames dropped on this channel since the last delivered frame (slow-consumer signal). Absent when zero."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PriceEquityPayload"
+          }
+        },
+        "description": "Snapshot payload is a symbol batch; live payload is a single point."
+      },
+      "PriceEquityPayload": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/EquityPoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "symbol",
+              "source",
+              "data"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "pyth",
+                  "massive",
+                  "chainlink"
+                ],
+                "description": "Vendor that produced every point in this batch, once at batch level: symbol ownership is fixed for the life of a pod, so one series never mixes vendors. After a reconnect during an ownership flip, the batch can carry a different source than the previous connection's frames."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BatchPoint"
+                },
+                "description": "The array holds the previous two minutes of points by event time and is empty for a symbol with no recent data."
+              }
+            }
+          }
+        ]
+      },
+      "PriceCryptoTwapEnvelope": {
+        "type": "object",
+        "required": [
+          "v",
+          "channel",
+          "seq",
+          "ts",
+          "payload"
+        ],
+        "properties": {
+          "v": {
+            "type": "integer",
+            "const": 1,
+            "description": "Envelope version."
+          },
+          "channel": {
+            "type": "string",
+            "const": "price.crypto.twap"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Dense per-connection, per-channel sequence, assigned at delivery. Resets on every reconnect. Snapshot frames consume a seq."
+          },
+          "ts": {
+            "type": "integer",
+            "description": "Producer event time, Unix milliseconds."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Present and true on the one snapshot frame sent after each new subscription. Absent on live frames."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Number of frames dropped on this channel since the last delivered frame (slow-consumer signal). Absent when zero."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PriceCryptoTwapPayload"
+          }
+        },
+        "description": "Snapshot payload is a symbol batch carrying window_seconds; live payload is a single point carrying window_seconds."
+      },
+      "PriceCryptoTwapPayload": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TwapPoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "symbol",
+              "data",
+              "window_seconds",
+              "source"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BatchPoint"
+                },
+                "description": "The array holds the previous two minutes of points by event time and is empty for a symbol with no recent data."
+              },
+              "window_seconds": {
+                "type": "integer",
+                "const": 60
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "chainlink"
+                ],
+                "description": "The producing vendor, once per batch (points are source-free). Topic constant on this single-provider lane."
+              }
+            }
+          }
+        ]
+      },
+      "PriceEquityTwapEnvelope": {
+        "type": "object",
+        "required": [
+          "v",
+          "channel",
+          "seq",
+          "ts",
+          "payload"
+        ],
+        "properties": {
+          "v": {
+            "type": "integer",
+            "const": 1,
+            "description": "Envelope version."
+          },
+          "channel": {
+            "type": "string",
+            "const": "price.equity.twap"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "Dense per-connection, per-channel sequence, assigned at delivery. Resets on every reconnect. Snapshot frames consume a seq."
+          },
+          "ts": {
+            "type": "integer",
+            "description": "Producer event time, Unix milliseconds."
+          },
+          "snapshot": {
+            "type": "boolean",
+            "description": "Present and true on the one snapshot frame sent after each new subscription. Absent on live frames."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Number of frames dropped on this channel since the last delivered frame (slow-consumer signal). Absent when zero."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PriceEquityTwapPayload"
+          }
+        },
+        "description": "Snapshot payload is a symbol batch carrying window_seconds; live payload is a single point carrying window_seconds."
+      },
+      "PriceEquityTwapPayload": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/EquityTwapPoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "symbol",
+              "source",
+              "data",
+              "window_seconds"
+            ],
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "pyth",
+                  "massive",
+                  "chainlink"
+                ],
+                "description": "Vendor that produced every point in this batch, once at batch level. The channel is Chainlink-only today, so the value is chainlink."
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BatchPoint"
+                },
+                "description": "The array holds the previous two minutes of points by event time and is empty for a symbol with no recent data."
+              },
+              "window_seconds": {
+                "type": "integer",
+                "const": 60
+              }
+            }
+          }
+        ]
+      },
+      "ChallengeAck": {
+        "type": "object",
+        "required": [
+          "op",
+          "nonce"
+        ],
+        "properties": {
+          "op": {
+            "const": "challenge"
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,255}$",
+            "description": "This connection's challenge nonce (a UUID). Render the Turnstile widget with it as cData before minting a ticket at POST /api/ws-ticket; the ticket then verifies only on this socket, whatever IP either request came from. Not a secret, never rotated for the life of the connection."
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      },
+      "ChallengeRequest": {
+        "type": "object",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "const": "challenge"
+          },
+          "rid": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,187 @@
+# Polymarket Predictions API Reference: Page Index
+
+Verbatim copies of the official docs (fetched 2026-10-01). One line per page: title, local path, description. Source URL = `https://docs.polymarket.com/<path>`.
+
+## General
+
+- [Overview](api-reference/predictions/overview.md) - Explore the APIs available for building with Polymarket Predictions.
+- [Rate Limits](api-reference/rate-limits.md) - Cloudflare IP-based request limits for Polymarket APIs
+- [CLOB Trading Rate Limits](api-reference/trading-rate-limits.md) - Per-signer token-bucket limits for CLOB order and cancellation requests
+- [Geographic Restrictions](api-reference/geoblock.md) - Check geographic restrictions before placing orders on the Polymarket API
+- [Get data freshness](api-reference/service/get-data-freshness.md) - How fresh the data behind this API is.
+- [Data API v2](api-reference/data-api/overview.md) - Read wallet portfolios, trade and activity feeds, market state, and ranked leaderboards through one consistent response contract.
+
+## Events
+
+- [List events (keyset pagination)](api-reference/events/list-events-keyset-pagination.md) - Returns events using cursor-based (keyset) pagination for stable, efficient paging through large result sets. Use `next_cursor` from...
+- [List events](api-reference/events/list-events.md)
+- [Get event by id](api-reference/events/get-event-by-id.md)
+- [Get event by slug](api-reference/events/get-event-by-slug.md)
+- [Get event tags](api-reference/events/get-event-tags.md)
+
+## Markets
+
+- [List markets (keyset pagination)](api-reference/markets/list-markets-keyset-pagination.md) - Returns markets using cursor-based (keyset) pagination for stable, efficient paging through large result sets. Use `next_cursor` from...
+- [List markets](api-reference/markets/list-markets.md)
+- [Get market by id](api-reference/markets/get-market-by-id.md)
+- [Get market by slug](api-reference/markets/get-market-by-slug.md)
+- [Get market tags by id](api-reference/markets/get-market-tags-by-id.md)
+- [Get market by token](api-reference/markets/get-market-by-token.md) - Returns the parent market for a given token ID. Useful when you have a token ID and need to resolve its parent market without knowing...
+- [List a market's top holders](api-reference/markets/list-a-markets-top-holders.md) - Top holders of a market, netted per user and grouped by outcome token.
+- [Get open interest](api-reference/markets/get-open-interest.md) - Priced gross open interest per market.
+- [Get live volume for an event](api-reference/markets/get-live-volume-for-an-event.md) - Cumulative one-side (taker) volume per market.
+- [Get resolution state](api-reference/markets/get-resolution-state.md) - Complete resolution state by one selector family.
+- [Get simplified markets](api-reference/markets/get-simplified-markets.md)
+- [Get sampling markets](api-reference/markets/get-sampling-markets.md)
+- [Get sampling simplified markets](api-reference/markets/get-sampling-simplified-markets.md)
+
+## Orderbook & Pricing
+
+- [Get order book](api-reference/market-data/get-order-book.md) - Retrieves the order book summary for a specific token ID. Includes bids, asks, market details, and last trade price.
+- [Get order books (request body)](api-reference/market-data/get-order-books-request-body.md) - Retrieves order book summaries for multiple token IDs using a request body.
+- [Get market price](api-reference/market-data/get-market-price.md) - Retrieves the best market price for a specific token ID and side (bid or ask). Returns the best bid price for BUY side or best ask price...
+- [Get market prices (query parameters)](api-reference/market-data/get-market-prices-query-parameters.md) - Retrieves market prices for multiple token IDs and sides using query parameters.
+- [Get market prices (request body)](api-reference/market-data/get-market-prices-request-body.md) - Retrieves market prices for multiple token IDs and sides using a request body. Each request must include both token_id and side.
+- [Get midpoint price](api-reference/data/get-midpoint-price.md) - Retrieves the midpoint price for a specific token ID. The midpoint is calculated as the average of the best bid and best ask prices.
+- [Get midpoint prices (query parameters)](api-reference/market-data/get-midpoint-prices-query-parameters.md) - Retrieves midpoint prices for multiple token IDs using query parameters. The midpoint is calculated as the average of the best bid and...
+- [Get midpoint prices (request body)](api-reference/market-data/get-midpoint-prices-request-body.md) - Retrieves midpoint prices for multiple token IDs using a request body. The midpoint is calculated as the average of the best bid and...
+- [Get spread](api-reference/market-data/get-spread.md) - Retrieves the spread for a specific token ID. The spread is the difference between the best ask and best bid prices.
+- [Get spreads](api-reference/market-data/get-spreads.md) - Retrieves spreads for multiple token IDs. The spread is the difference between the best ask and best bid prices.
+- [Get last trade price](api-reference/market-data/get-last-trade-price.md) - Retrieves the last trade price and side for a specific token ID. Returns default values of "0.5" for price and empty string for side if...
+- [Get last trade prices (query parameters)](api-reference/market-data/get-last-trade-prices-query-parameters.md) - Retrieves last trade prices for multiple token IDs using query parameters. Maximum 500 token IDs can be requested per call.
+- [Get last trade prices (request body)](api-reference/market-data/get-last-trade-prices-request-body.md) - Retrieves last trade prices for multiple token IDs using a request body. Maximum 500 token IDs can be requested per call.
+- [Get prices history](api-reference/markets/get-prices-history.md) - Retrieve historical price data for a market.
+- [Get a token's price history](api-reference/markets/get-a-tokens-price-history.md) - The price-history series for one outcome token, or a single point-in-time observation.
+- [Get batch prices history](api-reference/markets/get-batch-prices-history.md) - Retrieve historical price data for multiple markets in a single request.
+- [Get fee rate](api-reference/market-data/get-fee-rate.md) - Retrieves the base fee rate for a specific token ID. The fee rate can be provided either as a query parameter or as a path parameter.
+- [Get fee rate by path parameter](api-reference/market-data/get-fee-rate-by-path-parameter.md) - Retrieves the base fee rate for a specific token ID using the token ID as a path parameter.
+- [Get tick size](api-reference/market-data/get-tick-size.md) - Retrieves the minimum tick size (price increment) for a specific token ID. The tick size can be provided either as a query parameter or...
+- [Get tick size by path parameter](api-reference/market-data/get-tick-size-by-path-parameter.md) - Retrieves the minimum tick size (price increment) for a specific token ID using the token ID as a path parameter.
+- [Get CLOB market info](api-reference/markets/get-clob-market-info.md) - Returns all CLOB-level parameters for a market in a single call — tokens, tick size, base fees, rewards, RFQ status, and fee details.
+- [Get server time](api-reference/data/get-server-time.md) - Returns the current Unix timestamp of the server. This can be used to synchronize client time with server time.
+
+## Orders
+
+- [Post a new order](api-reference/trade/post-a-new-order.md) - Creates a new order in the order book
+- [Cancel single order](api-reference/trade/cancel-single-order.md) - Cancels a single order by its ID. Works even in cancel-only mode.
+- [Get single order by ID](api-reference/trade/get-single-order-by-id.md) - Retrieves a specific order by its ID (order hash) for the authenticated user, including canceled or fully matched orders....
+- [Post multiple orders](api-reference/trade/post-multiple-orders.md) - Creates multiple new orders in the order book. Orders are processed in parallel. Maximum 15 orders per request.
+- [Get user orders](api-reference/trade/get-user-orders.md) - Retrieves live orders for the authenticated user. Returns paginated results. Filtering by id returns that order regardless of status,...
+- [Cancel multiple orders](api-reference/trade/cancel-multiple-orders.md) - Cancels multiple orders by their IDs. Maximum 1000 orders per request. Duplicate order IDs in the request are automatically ignored....
+- [Cancel all orders](api-reference/trade/cancel-all-orders.md) - Cancels all open orders for the authenticated user. Works even in cancel-only mode.
+- [Cancel orders for a market](api-reference/trade/cancel-orders-for-a-market.md) - Cancels all open orders for the authenticated user in a specific market (condition) and asset. Works even in cancel-only mode.
+- [Get order scoring status](api-reference/trade/get-order-scoring-status.md) - Checks if a specific order is currently scoring for rewards.
+- [Send heartbeat](api-reference/trade/send-heartbeat.md) - Sends a heartbeat signal to maintain active session status. If heartbeats are not sent regularly, all open orders for the user will be...
+
+## Trades
+
+- [List trades](api-reference/feeds/list-trades.md) - Keyset-paginated trade feed in the standard `{ data, pagination }` envelope.
+- [Get trades](api-reference/trade/get-trades.md) - Retrieves trades for the authenticated user. Returns paginated results. Requires readonly or level 2 API key authentication.
+- [Get builder trades](api-reference/trade/get-builder-trades.md) - Retrieves trades attributed to a builder code.
+
+## Rebates
+
+- [Get current rebated fees for a maker](api-reference/rebates/get-current-rebated-fees-for-a-maker.md) - Returns the current rebated fees for a maker address on a given date.
+
+## Rewards
+
+- [Get current active rewards configurations](api-reference/rewards/get-current-active-rewards-configurations.md) - Returns all current active rewards configurations grouped by market.
+- [Get raw rewards for a specific market](api-reference/rewards/get-raw-rewards-for-a-specific-market.md) - Returns an array of present and future rewards configured on a market.
+- [Get multiple markets with rewards](api-reference/rewards/get-multiple-markets-with-rewards.md) - Returns a list of active markets with their reward configurations. Supports text search, tag filtering, numeric filters, and sorting.
+- [Get earnings for user by date](api-reference/rewards/get-earnings-for-user-by-date.md) - Returns an array of user earnings per market for a provided day.
+- [Get total earnings for user by date](api-reference/rewards/get-total-earnings-for-user-by-date.md) - Returns the summed total rewards earnings for a user on a provided day, grouped by asset address.
+- [Get reward percentages for user](api-reference/rewards/get-reward-percentages-for-user.md) - Returns the real-time percentages of rewards that a user is earning per market.
+- [Get user earnings and markets configuration](api-reference/rewards/get-user-earnings-and-markets-configuration.md) - Returns an array of current rewards including user earnings and live percentages per market for a provided day.
+
+## Profile
+
+- [Get public profile by wallet address](api-reference/profiles/get-public-profile-by-wallet-address.md)
+- [Get a user's profile stats](api-reference/wallet/get-a-users-profile-stats.md) - The profile card for one wallet in a single call.
+- [List positions for a user or market](api-reference/wallet/list-positions-for-a-user-or-market.md) - A keyset page of positions in the standard `{ data, pagination }` envelope. One route serves a user's open book, their closed book...
+- [Get portfolio value](api-reference/wallet/get-portfolio-value.md) - The user's portfolio value: single-market holdings marked to market plus unresolved combo positions at cost basis.
+- [Get a user's PnL series](api-reference/wallet/get-a-users-pnl-series.md) - Complete cumulative native-PnL atoms and compositions.
+- [Get a user's trading volume](api-reference/wallet/get-a-users-trading-volume.md) - One wallet's trading volume over a window, in both units side by side.
+- [List account activity](api-reference/feeds/list-account-activity.md) - Keyset-paginated activity feed (trades, splits, merges, redeems, …) in the standard `{ data, pagination }` envelope.
+- [Get wallet approvals](api-reference/wallet/get-wallet-approvals.md) - Polygon token/operator approval state for one wallet.
+
+## Boards
+
+- [Get the trader leaderboard](api-reference/boards/get-the-trader-leaderboard.md) - The ranked board of realized PnL, combos included.
+- [List the biggest wins](api-reference/boards/list-the-biggest-wins.md) - The biggest single winning positions.
+- [Get the builders leaderboard](api-reference/boards/get-the-builders-leaderboard.md) - The ranked board of builders by volume.
+- [Get builder volume over time](api-reference/boards/get-builder-volume-over-time.md) - The per-builder volume time series.
+
+## Search
+
+- [Search markets, events, and profiles](api-reference/search/search-markets-events-and-profiles.md)
+
+## Tags
+
+- [List tags](api-reference/tags/list-tags.md)
+- [Get tag by id](api-reference/tags/get-tag-by-id.md)
+- [Get tag by slug](api-reference/tags/get-tag-by-slug.md)
+- [Get related tags (relationships) by tag id](api-reference/tags/get-related-tags-relationships-by-tag-id.md)
+- [Get related tags (relationships) by tag slug](api-reference/tags/get-related-tags-relationships-by-tag-slug.md)
+- [Get tags related to a tag id](api-reference/tags/get-tags-related-to-a-tag-id.md)
+- [Get tags related to a tag slug](api-reference/tags/get-tags-related-to-a-tag-slug.md)
+
+## Series
+
+- [List series](api-reference/series/list-series.md)
+- [Get series by id](api-reference/series/get-series-by-id.md)
+
+## Comments
+
+- [List comments](api-reference/comments/list-comments.md)
+- [Get comments by comment id](api-reference/comments/get-comments-by-comment-id.md)
+- [Get comments by user address](api-reference/comments/get-comments-by-user-address.md)
+
+## Sports
+
+- [Get sports metadata information](api-reference/sports/get-sports-metadata-information.md)
+- [Get valid sports market types](api-reference/sports/get-valid-sports-market-types.md)
+- [List teams](api-reference/sports/list-teams.md)
+
+## Relayer
+
+- [Submit a transaction](api-reference/relayer/submit-a-transaction.md) - Submit a transaction request to the Relayer. Authenticated using Builder API Keys or Relayer API Keys.
+- [Get a transaction by ID](api-reference/relayer/get-a-transaction-by-id.md) - Gets a transaction submitted to the Relayer. Takes in a required transaction ID as a query parameter.
+- [Get recent transactions for a user](api-reference/relayer/get-recent-transactions-for-a-user.md) - Gets the most recent transactions submitted to the Relayer, owned by a specific user. Authenticated using Builder API Keys or Relayer...
+- [Get current nonce for a user](api-reference/relayer/get-current-nonce-for-a-user.md) - Gets the current Proxy or Safe nonce for a user. Takes in the user's signer address and the type of nonce to retrieve.
+- [Get relayer address and nonce](api-reference/relayer/get-relayer-address-and-nonce.md) - Fetches the relayer address and nonce for a specific user. Takes in the user's signer address and the type of nonce to retrieve.
+- [Check if a wallet is deployed](api-reference/relayer/check-if-a-wallet-is-deployed.md) - Returns whether the wallet at the given address is deployed onchain.
+- [Get all relayer API keys](api-reference/relayer-api-keys/get-all-relayer-api-keys.md) - Returns all relayer API keys for the authenticated address. Auth allowed: Gamma auth or Relayer API key auth (`RELAYER_API_KEY` +...
+
+## Combos
+
+- [Get combo markets](api-reference/combo-markets/get-combo-markets.md) - Returns active markets that can be used as combo legs, ordered by volume descending. This endpoint is public and does not require CLOB...
+- [Submit a quote](api-reference/maker/submit-a-quote.md) - Submit a signed maker quote for an active RFQ. Requires CLOB L2 authentication for the maker role.
+- [Cancel a quote](api-reference/maker/cancel-a-quote.md) - Cancel an active maker quote before it is selected. Requires CLOB L2 authentication for the maker role. `signer_address` and...
+- [Confirm or decline last look](api-reference/maker/confirm-or-decline-last-look.md) - Respond to a last-look confirmation request for a selected quote. Requires CLOB L2 authentication for the maker role. `decision` must be...
+- [List combo positions](api-reference/wallet/list-combo-positions.md) - Combo positions for a user, in the standard `{ data, pagination }` envelope.
+- [List combo activity](api-reference/feeds/list-combo-activity.md) - Keyset-paginated combo lifecycle + redemption feed for a user, in the standard `{ data, pagination }` envelope.
+- [Quoter Gateway](api-reference/wss/rfq.md) - Authenticated WebSocket for combinatorial RFQ quoters — receive requests, submit quotes, confirm last look, and track execution.
+
+## WebSocket
+
+- [Market Channel](api-reference/wss/market.md) - Public WebSocket for real-time orderbook, price, and market lifecycle updates.
+- [User Channel](api-reference/wss/user.md) - Authenticated WebSocket for real-time order and trade updates.
+- [Sports Channel](api-reference/wss/sports.md) - Public WebSocket for real-time sports match results.
+
+## PolyBolt WebSocket
+
+- [PolyBolt WebSocket](api-reference/live-data/overview.md) - Stream crypto, equity and TWAP reference prices over one WebSocket connection.
+- [Live Data Channel](api-reference/wss/polybolt.md) - PolyBolt WebSocket message reference for crypto, equity and TWAP reference prices.
+
+## Websockets
+
+- [Live Data Channel](api-reference/websockets/live-data-channel.md) - Send JSON text frames tagged with op. The server answers every op with an ack or an error ack (never a close, except for policy...
+
+## Bridge
+
+- [Get supported assets](api-reference/bridge/get-supported-assets.md)
+- [Create bridge addresses](api-reference/bridge/create-bridge-addresses.md)
+- [Get a quote](api-reference/bridge/get-a-quote.md)
+- [Get transaction status](api-reference/bridge/get-transaction-status.md) - Returns the deposits and withdrawals seen at a bridge address, newest first. Responses are cursor-paginated: each request returns one...
+- [Create withdrawal addresses](api-reference/bridge/create-withdrawal-addresses.md)
+
