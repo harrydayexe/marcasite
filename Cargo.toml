@@ -12,8 +12,10 @@ keywords = ["polymarket", "prediction-markets", "sdk", "api", "trading"]
 categories = ["api-bindings", "web-programming::http-client", "finance"]
 
 [workspace.dependencies]
-polyoxide-core = { path = "crates/polyoxide-core", version = "0.1.0", default-features = false }
-chrono = { version = "0.4.41", default-features = false, features = ["std", "serde"] }
+# Exact version: polyoxide-core's API is an implementation detail of polyoxide (no semver
+# guarantees of its own), so the two crates are released in lockstep.
+polyoxide-core = { path = "crates/polyoxide-core", version = "=0.1.0", default-features = false }
+chrono = { version = "0.4.41", default-features = false, features = ["std", "serde", "now"] }
 futures-core = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["std", "sink"] }
 http = "1.3"

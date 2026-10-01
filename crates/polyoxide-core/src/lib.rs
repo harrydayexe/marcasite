@@ -1,8 +1,15 @@
 //! Shared transport, configuration and error types for [`polyoxide`].
 //!
-//! Most users should depend on the `polyoxide` crate rather than this one directly: it
-//! re-exports everything needed from here. The building blocks in this crate are public so
-//! that the service clients in `polyoxide` can use them, and are documented for maintainers.
+//! **This crate is an implementation detail of `polyoxide`. Its API has no stability
+//! guarantees of its own: any release may change or remove any item, whatever its version
+//! number says.** Depend on the `polyoxide` crate instead, which re-exports everything
+//! users need from here (errors, the HTTP client and its settings, identifier types,
+//! [`Paginated`](pagination::Paginated), ...); only those re-exports follow semantic
+//! versioning, as part of `polyoxide`'s API. `polyoxide` requires the exact version of this
+//! crate it was released with.
+//!
+//! The building blocks in this crate are public so that the service clients in `polyoxide`
+//! can use them, and are documented for maintainers.
 //!
 //! # Contents
 //!

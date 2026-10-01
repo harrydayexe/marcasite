@@ -104,6 +104,21 @@
 //! enums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the
 //! server later never break deserialization.
 //!
+//! # Dependencies in the public API
+//!
+//! Types from these crates appear in polyoxide's public API, so upgrading any of them to a
+//! new major (or, before 1.0, minor) version is a breaking change of polyoxide:
+//! `http` 1 ([`StatusCode`], [`Method`]), `url` 2 ([`Url`]), `serde_json` 1
+//! ([`serde_json`]), `chrono` 0.4 ([`chrono`]), `rust_decimal` 1 ([`Decimal`]) and
+//! `futures-core` 0.3 ([`Stream`]). The types are re-exported, so you do not need to
+//! depend on these crates yourself to name them:
+//!
+//! ```
+//! use polyoxide::{Method, Url, chrono::Utc, serde_json::Value};
+//!
+//! let _ = (Method::GET, Url::parse("https://example.com"), Value::Null, Utc::now());
+//! ```
+//!
 //! # Logging
 //!
 //! This crate emits diagnostics via [`tracing`]. It never installs a subscriber; install one
@@ -142,8 +157,8 @@ pub mod ws;
 pub use client::{Polymarket, PolymarketBuilder};
 pub use polyoxide_core::pagination::Paginated;
 pub use polyoxide_core::{
-    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Result, RetryPolicy,
-    Service, StatusCode, TransportError, ValidationError,
+    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Method, Result,
+    RetryPolicy, Service, StatusCode, TransportError, Url, ValidationError,
 };
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
@@ -157,8 +172,13 @@ pub use polyoxide_core::{WebSocketError, WebSocketErrorKind};
 /// 17 significant digits (e.g. `12345678901.123456` becomes `12345678901.123455`).
 pub use rust_decimal::Decimal;
 
-/// Re-export of the [`chrono`] crate, whose `DateTime<Utc>` is used for timestamps.
+/// Re-export of the [`chrono`] crate, whose `DateTime<Utc>` is used for timestamps. Its
+/// `now` feature is enabled, so `polyoxide::chrono::Utc::now()` works.
 pub use chrono;
+
+/// Re-export of the [`serde_json`] crate, whose `Value` appears in the public API (e.g. the
+/// `Unknown` variants of the WebSocket event enums).
+pub use serde_json;
 
 /// Identifier newtypes and enums shared by several services.
 ///
