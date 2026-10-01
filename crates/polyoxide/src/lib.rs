@@ -95,7 +95,10 @@
 //!
 //! # Types
 //!
-//! Prices, sizes and amounts are [`Decimal`]s, never floating point. Timestamps are
+//! Prices, sizes and amounts are [`Decimal`]s, never floating point. Values the API sends as
+//! JSON strings are parsed exactly. Values it sends as JSON numbers are exact if they are
+//! integers (within `i64`/`u64`) or have at most 15 significant digits; longer numbers pass
+//! through `f64` while being parsed and may be rounded (see [`Decimal`]). Timestamps are
 //! [`chrono::DateTime<Utc>`](chrono::DateTime). Identifiers are newtypes (see [`types`]) so
 //! that, for example, a token id cannot be passed where a condition id is expected. String
 //! enums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the
@@ -147,6 +150,11 @@ pub use polyoxide_core::{
 pub use polyoxide_core::{WebSocketError, WebSocketErrorKind};
 
 /// Re-export of [`rust_decimal::Decimal`], used for all prices, sizes and amounts.
+///
+/// A decimal sent by the API as a JSON string is parsed exactly. One sent as a JSON number
+/// is exact if it is an integer within `i64`/`u64` or has at most 15 significant digits;
+/// a longer number passes through `f64` while being parsed and is rounded to about 15 to
+/// 17 significant digits (e.g. `12345678901.123456` becomes `12345678901.123455`).
 pub use rust_decimal::Decimal;
 
 /// Re-export of the [`chrono`] crate, whose `DateTime<Utc>` is used for timestamps.

@@ -9,6 +9,20 @@
 //! both JSON strings and JSON numbers. Their default serialization is a JSON string; for
 //! fields the API sends as JSON **numbers**, use [`decimal_number`] /
 //! [`decimal_number_option`], which serialize back to a JSON number (integers as integers).
+//!
+//! # Precision of decimals sent as JSON numbers
+//!
+//! A decimal sent as a JSON **string** is parsed exactly. A decimal sent as a JSON
+//! **number** is exact only within these bounds, because `serde_json` (used without its
+//! `arbitrary_precision` feature) hands non-integer numbers to [`Decimal`] as an `f64`:
+//!
+//! - integers that fit in `i64` or `u64` are exact;
+//! - other numbers are exact if they have at most 15 significant digits; longer ones are
+//!   rounded to the nearest `f64`, which keeps about 15 to 17 significant digits (for
+//!   example `12345678901.123456` decodes as `12345678901.123455`).
+//!
+//! A number the server itself produced from an `f64` decodes to the decimal that `f64`
+//! prints as (its shortest round-trip representation), so nothing is lost in that case.
 
 use std::{fmt::Display, str::FromStr};
 
@@ -811,11 +825,37 @@ mod tests {
     }
 
     #[test]
-    fn decimal_accepts_numbers_exactly() {
-        let d: Decimal = serde_json::from_str("0.1").unwrap();
-        assert_eq!(d.to_string(), "0.1");
-        let d: Decimal = serde_json::from_str("45159.4653").unwrap();
-        assert_eq!(d.to_string(), "45159.4653");
+    fn decimal_numbers_are_exact_up_to_15_significant_digits() {
+        for exact in [
+            "0.1",
+            "45159.4653",
+            "123456789.012345",
+            "-0.000000000000001",
+        ] {
+            let d: Decimal = serde_json::from_str(exact).unwrap();
+            assert_eq!(d.to_string(), exact);
+        }
+        // Integers within `i64` / `u64` are exact whatever their length.
+        let d: Decimal = serde_json::from_str("18446744073709551615").unwrap();
+        assert_eq!(d.to_string(), "18446744073709551615");
+    }
+
+    /// Documents a known limitation (see the module docs): JSON numbers with more than 15
+    /// significant digits go through `f64` and may be rounded. JSON strings never are.
+    #[test]
+    fn decimal_numbers_beyond_15_significant_digits_go_through_f64() {
+        let from_number: Decimal = serde_json::from_str("12345678901.123456").unwrap();
+        assert_eq!(from_number.to_string(), "12345678901.123455");
+        let from_string: Decimal = serde_json::from_str("\"12345678901.123456\"").unwrap();
+        assert_eq!(from_string.to_string(), "12345678901.123456");
+        // Same through the `decimal_number` helper.
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(with = "decimal_number")]
+            v: Decimal,
+        }
+        let wire: Wire = serde_json::from_str(r#"{"v":12345678901.123456}"#).unwrap();
+        assert_eq!(wire.v, from_number);
     }
 
     #[test]

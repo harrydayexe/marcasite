@@ -60,8 +60,9 @@ async fn main() -> polyoxide::Result<()> {
 
 ## Design
 
-- **Typed everything.** Prices, sizes and amounts are `rust_decimal::Decimal` (never `f64`),
-  timestamps are `chrono::DateTime<Utc>`, identifiers are newtypes (`TokenId`, `ConditionId`,
+- **Typed everything.** Prices, sizes and amounts are `rust_decimal::Decimal` (never `f64`;
+  values the API sends as JSON numbers with more than 15 significant digits may be rounded while
+  parsing, see the `Decimal` docs), timestamps are `chrono::DateTime<Utc>`, identifiers are newtypes (`TokenId`, `ConditionId`,
   `Address`, …) and documented string enums are Rust enums with an `Unknown(String)` fallback, so
   new server-side values never break deserialization.
 - **Builders for optional parameters.** Required parameters are method arguments; optional ones are
