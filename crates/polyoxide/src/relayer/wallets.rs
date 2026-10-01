@@ -1,9 +1,9 @@
 //! Wallets: `GET /deployed`.
 
-use polyoxide_core::{Query, Result, types::Address};
+use polyoxide_core::{Query, Result, types::Address, validate};
 use serde::{Deserialize, Serialize};
 
-use super::{RelayerClient, validate_address};
+use super::RelayerClient;
 
 polyoxide_core::string_enum! {
     /// The wallet type to check with [`RelayerClient::check_deployed`] (the `type` query
@@ -76,7 +76,7 @@ impl CheckDeployed {
     }
 
     fn query(&self) -> Result<Query> {
-        validate_address("address", &self.address)?;
+        validate::evm_address("address", self.address.as_str())?;
         let mut query = Query::new();
         query
             .push("address", &self.address)

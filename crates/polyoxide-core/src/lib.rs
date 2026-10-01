@@ -14,6 +14,7 @@
 //! - [`pagination`]: helpers that turn cursor/offset pagination into a [`Stream`].
 //! - [`types`]: identifier newtypes shared by several services.
 //! - [`serde_util`]: (de)serialization helpers for the wire formats the APIs use.
+//! - [`validate`]: client-side checks of documented parameter patterns (hex ids, addresses).
 //! - `ws` (feature `ws`): a WebSocket connection driver used by the streaming channels.
 //!
 //! # Logging
@@ -33,6 +34,7 @@ pub mod query;
 pub mod serde_util;
 pub mod transport;
 pub mod types;
+pub mod validate;
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
 pub mod ws;

@@ -1,9 +1,9 @@
 //! Nonces: `GET /nonce`, `GET /relay-payload`.
 
-use polyoxide_core::{Query, Result, types::Address};
+use polyoxide_core::{Query, Result, types::Address, validate};
 use serde::{Deserialize, Serialize};
 
-use super::{RelayerClient, validate_address};
+use super::RelayerClient;
 
 polyoxide_core::string_enum! {
     /// The type of nonce to retrieve (the `type` query parameter of `GET /nonce` and
@@ -105,7 +105,7 @@ impl RelayerClient {
 }
 
 fn nonce_query(address: Address, nonce_type: &NonceType) -> Result<Query> {
-    validate_address("address", &address)?;
+    validate::evm_address("address", address.as_str())?;
     let mut query = Query::new();
     query.push("address", address).push("type", nonce_type);
     Ok(query)

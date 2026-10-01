@@ -5,13 +5,14 @@ use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError, serde_util,
     types::{Address, ConditionId, Side, TokenId},
+    validate,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{
     ClobClient,
-    types::{BuilderCode, OrderId, Page, TradeId, page_stream, require_hex},
+    types::{BuilderCode, OrderId, Page, TradeId, page_stream},
 };
 
 /// A trade attributed to a builder code (`components/schemas/BuilderTrade`).
@@ -152,9 +153,9 @@ impl GetBuilderTrades {
     }
 
     async fn fetch(self, cursor: Option<String>) -> Result<Page<BuilderTrade>> {
-        require_hex("builder_code", self.builder_code.as_str(), 64)?;
+        validate::bytes32("builder_code", self.builder_code.as_str())?;
         if let Some(market) = &self.market {
-            require_hex("market", market.as_str(), 64)?;
+            validate::bytes32("market", market.as_str())?;
         }
         let before = self
             .before

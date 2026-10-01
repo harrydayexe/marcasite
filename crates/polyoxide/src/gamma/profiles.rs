@@ -1,10 +1,10 @@
 //! Profiles: `/public-profile` and `/profiles/user_address/{user_address}`.
 
 use chrono::{DateTime, Utc};
-use polyoxide_core::{Query, Result, serde_util, types::Address};
+use polyoxide_core::{Query, Result, serde_util, types::Address, validate};
 use serde::{Deserialize, Serialize};
 
-use super::{GammaClient, ImageOptimization, util::validate_address};
+use super::{GammaClient, ImageOptimization};
 
 /// A public profile (`components/schemas/PublicProfileResponse`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,7 +131,7 @@ impl GammaClient {
     /// - otherwise see [`Error`](crate::Error).
     pub async fn get_public_profile(&self, address: impl Into<Address>) -> Result<PublicProfile> {
         let address = address.into();
-        validate_address("address", &address)?;
+        validate::evm_address("address", address.as_str())?;
         let mut query = Query::new();
         query.push("address", &address);
         self.transport
@@ -154,7 +154,7 @@ impl GammaClient {
     /// - otherwise see [`Error`](crate::Error).
     pub async fn get_profile(&self, user_address: impl Into<Address>) -> Result<Profile> {
         let user_address = user_address.into();
-        validate_address("user_address", &user_address)?;
+        validate::evm_address("user_address", user_address.as_str())?;
         self.transport
             .get(&["profiles", "user_address", user_address.as_str()])
             .send()

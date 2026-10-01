@@ -1,7 +1,7 @@
 //! Private helpers shared by the Gamma endpoint modules.
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use polyoxide_core::{Query, Result, ValidationError, types::Address};
+use polyoxide_core::{Query, Result, ValidationError};
 
 /// Serde helper for `type: number` fields modelled as `Option<Decimal>`.
 ///
@@ -184,26 +184,6 @@ pub(crate) const KEYSET_MIN_LIMIT: u64 = 1;
 /// Largest `limit` accepted by the keyset endpoints.
 pub(crate) const KEYSET_MAX_LIMIT: u64 = 100;
 
-/// Checks the documented wallet-address pattern `^0x[a-fA-F0-9]{40}$`.
-///
-/// # Errors
-///
-/// Returns [`Error::Validation`](crate::Error::Validation) if `address` does not match.
-pub(crate) fn validate_address(parameter: &'static str, address: &Address) -> Result<()> {
-    let s = address.as_str();
-    let valid =
-        s.len() == 42 && s.starts_with("0x") && s.bytes().skip(2).all(|b| b.is_ascii_hexdigit());
-    if valid {
-        Ok(())
-    } else {
-        Err(ValidationError::new(
-            parameter,
-            format!("must match ^0x[a-fA-F0-9]{{40}}$, got {s:?}"),
-        )
-        .into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone as _;
@@ -223,26 +203,6 @@ mod tests {
         assert!(validate_keyset_limit(Some(100)).is_ok());
         assert!(validate_keyset_limit(Some(0)).is_err());
         assert!(validate_keyset_limit(Some(101)).is_err());
-    }
-
-    #[test]
-    fn validates_addresses() {
-        let ok = Address::from("0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b");
-        assert!(validate_address("address", &ok).is_ok());
-        let upper = Address::from("0x7C3DB723F1D4D8CB9C550095203B686CB11E5C6B");
-        assert!(validate_address("address", &upper).is_ok());
-        for bad in [
-            "",
-            "0x",
-            "7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
-            "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6",
-            "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6bb",
-            "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6g",
-            "0X7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
-        ] {
-            let err = validate_address("address", &Address::from(bad)).unwrap_err();
-            assert!(matches!(err, crate::Error::Validation(_)), "{bad}");
-        }
     }
 
     #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -218,21 +218,6 @@ pub(crate) fn require_at_most<T>(parameter: &'static str, items: &[T], max: usiz
     Ok(())
 }
 
-/// Fails unless `value` is `0x` followed by exactly `hex_len` hex characters.
-pub(crate) fn require_hex(parameter: &'static str, value: &str, hex_len: usize) -> Result<()> {
-    let valid = value
-        .strip_prefix("0x")
-        .is_some_and(|hex| hex.len() == hex_len && hex.bytes().all(|b| b.is_ascii_hexdigit()));
-    if !valid {
-        return Err(ValidationError::new(
-            parameter,
-            format!("must be `0x` followed by {hex_len} hex characters, got {value:?}"),
-        )
-        .into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,11 +281,5 @@ mod tests {
             panic!("expected a validation error")
         };
         assert_eq!(v.parameter(), "token_ids");
-
-        let ok = format!("0x{}", "aB".repeat(32));
-        assert!(require_hex("builder_code", &ok, 64).is_ok());
-        assert!(require_hex("builder_code", &ok[2..], 64).is_err());
-        assert!(require_hex("builder_code", "0x12", 64).is_err());
-        assert!(require_hex("builder_code", &format!("0x{}", "g".repeat(64)), 64).is_err());
     }
 }

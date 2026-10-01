@@ -1,9 +1,9 @@
 //! Deposit and withdrawal addresses: `POST /deposit`, `POST /withdraw`.
 
-use polyoxide_core::{Result, types::Address};
+use polyoxide_core::{Result, types::Address, validate};
 use serde::{Deserialize, Serialize};
 
-use super::{BUILDER_CODE_HEADER, BridgeClient, ChainId, validate_address, validate_builder_code};
+use super::{BUILDER_CODE_HEADER, BridgeClient, ChainId};
 
 /// The body of `POST /deposit` (`components/schemas/DepositRequest`).
 #[derive(Debug, Serialize)]
@@ -186,13 +186,13 @@ impl CreateDepositAddresses {
     /// - Any other [`Error`](crate::Error) for transport, rate limiting or decoding
     ///   failures.
     pub async fn send(self) -> Result<BridgeAddresses> {
-        validate_address("address", self.address.as_str())?;
+        validate::evm_address("address", self.address.as_str())?;
         let body = DepositRequest {
             address: &self.address,
         };
         let mut request = self.client.transport.post(&["deposit"]).json(&body);
         if let Some(code) = self.builder_code {
-            validate_builder_code(&code)?;
+            validate::bytes32(BUILDER_CODE_HEADER, &code)?;
             request = request.header(BUILDER_CODE_HEADER, code);
         }
         request.send().await
@@ -231,14 +231,14 @@ impl CreateWithdrawalAddresses {
     /// - Any other [`Error`](crate::Error) for transport, rate limiting or decoding
     ///   failures.
     pub async fn send(self) -> Result<BridgeAddresses> {
-        validate_address("address", self.request.address.as_str())?;
+        validate::evm_address("address", self.request.address.as_str())?;
         let mut request = self
             .client
             .transport
             .post(&["withdraw"])
             .json(&self.request);
         if let Some(code) = self.builder_code {
-            validate_builder_code(&code)?;
+            validate::bytes32(BUILDER_CODE_HEADER, &code)?;
             request = request.header(BUILDER_CODE_HEADER, code);
         }
         request.send().await
