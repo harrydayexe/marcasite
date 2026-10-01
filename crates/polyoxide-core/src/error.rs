@@ -28,6 +28,9 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Maximum number of bytes of a response body retained in errors.
 pub(crate) const MAX_ERROR_BODY_BYTES: usize = 4096;
 
+/// Maximum number of bytes of a deserializer's message shown by [`DecodeError`].
+const MAX_DECODE_REASON_BYTES: usize = 512;
+
 /// A Polymarket service (REST API or WebSocket channel).
 ///
 /// Used in errors and logs to say which service a failure relates to.
@@ -82,6 +85,27 @@ impl fmt::Display for Service {
 ///
 /// The enum is `#[non_exhaustive]`: new failure kinds may be added in minor releases, so
 /// include a wildcard arm when matching.
+///
+/// # Display and cause chain
+///
+/// `Display` describes this failure with its context (service, method, URL without the
+/// query string, status, ...) but does not repeat the underlying cause, such as the HTTP
+/// client's or the WebSocket library's error. The cause is available through
+/// [`std::error::Error::source`], so a reporter that walks the chain shows each message
+/// once: for example `anyhow`'s `{:#}`, or a loop over `source()`:
+///
+/// ```
+/// fn report(err: &polyoxide_core::Error) -> String {
+///     let mut text = err.to_string();
+///     let mut cause = std::error::Error::source(err);
+///     while let Some(inner) = cause {
+///         text.push_str(&format!(": {inner}"));
+///         cause = inner.source();
+///     }
+///     text
+/// }
+/// # let _ = report;
+/// ```
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -379,13 +403,14 @@ impl std::error::Error for ApiError {}
 /// The request could not be completed at the transport level.
 ///
 /// The underlying cause (from the HTTP client) is available through
-/// [`std::error::Error::source`].
+/// [`std::error::Error::source`]; `Display` does not repeat it.
 #[derive(Debug)]
 pub struct TransportError {
     pub(crate) service: Service,
     pub(crate) method: Method,
     pub(crate) url: String,
     pub(crate) is_connect: bool,
+    pub(crate) is_timeout: bool,
     pub(crate) source: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
@@ -419,12 +444,17 @@ impl fmt::Display for TransportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} request {} {} failed: {}",
+            "{} request {} {} failed",
             self.service,
             self.method,
             redact_query(&self.url),
-            self.source
-        )
+        )?;
+        if self.is_timeout {
+            f.write_str(" (timed out)")?;
+        } else if self.is_connect {
+            f.write_str(" (could not connect)")?;
+        }
+        Ok(())
     }
 }
 
@@ -438,7 +468,8 @@ impl std::error::Error for TransportError {
 ///
 /// This usually means the API changed shape or returned a value the documentation does not
 /// describe. [`DecodeError::path`] points at the offending field and
-/// [`DecodeError::body_snippet`] shows the surrounding JSON.
+/// [`DecodeError::body_snippet`] shows the surrounding JSON. `Display` includes the
+/// deserializer's message; there is no further [`source`](std::error::Error::source).
 #[derive(Debug)]
 pub struct DecodeError {
     pub(crate) service: Service,
@@ -498,6 +529,7 @@ impl DecodeError {
 
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The deserializer's message can quote a whole (long) string value.
         write!(
             f,
             "failed to decode {} response from {} {} at `{}`: {}",
@@ -505,7 +537,7 @@ impl fmt::Display for DecodeError {
             self.method,
             redact_query(&self.url),
             self.path,
-            self.source
+            truncate(self.source.to_string(), MAX_DECODE_REASON_BYTES)
         )?;
         if !self.snippet.is_empty() {
             write!(f, " (near: `{}`)", self.snippet)?;
@@ -514,11 +546,7 @@ impl fmt::Display for DecodeError {
     }
 }
 
-impl std::error::Error for DecodeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
-    }
-}
+impl std::error::Error for DecodeError {}
 
 /// A request parameter violates a documented constraint; the request was not sent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -675,6 +703,9 @@ impl fmt::Display for WebSocketErrorKind {
 
 /// A WebSocket connection failed, closed unexpectedly, or received a message that could
 /// not be decoded. [`WebSocketError::kind`] tells these apart.
+///
+/// The underlying cause, if any (e.g. the WebSocket library's error), is available through
+/// [`std::error::Error::source`]; `Display` does not repeat it.
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
 #[derive(Debug)]
@@ -791,9 +822,6 @@ impl fmt::Display for WebSocketError {
                 Some(reason) if !reason.is_empty() => write!(f, ": {reason})")?,
                 _ => f.write_str(")")?,
             }
-        }
-        if let Some(source) = &self.source {
-            write!(f, ": {source}")?;
         }
         Ok(())
     }
@@ -949,6 +977,87 @@ mod tests {
         assert!(limited(Some(true)).is_retryable());
         assert!(!limited(Some(false)).is_retryable());
         assert!(!Error::from(ValidationError::new("x", "y")).is_retryable());
+    }
+
+    /// Each message in the cause chain, as a chain-walking reporter prints them.
+    fn chain(err: &(dyn std::error::Error + 'static)) -> Vec<String> {
+        let mut out = vec![err.to_string()];
+        let mut cause = err.source();
+        while let Some(inner) = cause {
+            out.push(inner.to_string());
+            cause = inner.source();
+        }
+        out
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("connection refused by peer")]
+    struct Cause;
+
+    #[test]
+    fn causes_are_not_repeated_in_display() {
+        let transport = |is_connect, is_timeout| {
+            Error::Transport(Box::new(TransportError {
+                service: Service::Gamma,
+                method: Method::GET,
+                url: "https://gamma-api.polymarket.com/tags?limit=1".to_owned(),
+                is_connect,
+                is_timeout,
+                source: Box::new(Cause),
+            }))
+        };
+        assert_eq!(
+            chain(&transport(true, false)),
+            [
+                "gamma request GET https://gamma-api.polymarket.com/tags failed (could not connect)",
+                "connection refused by peer",
+            ]
+        );
+        assert_eq!(
+            transport(false, true).to_string(),
+            "gamma request GET https://gamma-api.polymarket.com/tags failed (timed out)"
+        );
+        assert_eq!(
+            transport(false, false).to_string(),
+            "gamma request GET https://gamma-api.polymarket.com/tags failed"
+        );
+
+        #[cfg(feature = "ws")]
+        {
+            let ws = Error::WebSocket(Box::new(
+                WebSocketError::new(
+                    Service::PolyBolt,
+                    WebSocketErrorKind::Protocol,
+                    "connection error",
+                )
+                .with_source(Cause),
+            ));
+            assert_eq!(
+                chain(&ws),
+                [
+                    "polybolt websocket error: connection error",
+                    "connection refused by peer"
+                ]
+            );
+        }
+
+        let source = serde_json::from_str::<u8>("300").unwrap_err();
+        let decode = Error::Decode(Box::new(DecodeError {
+            service: Service::Data,
+            method: Method::GET,
+            url: "https://data-api.polymarket.com/v2/trades".to_owned(),
+            status: StatusCode::OK,
+            path: "data[0].size".to_owned(),
+            trace_id: None,
+            snippet: String::new(),
+            source,
+        }));
+        let messages = chain(&decode);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(
+            messages[0].contains("at `data[0].size`: invalid value: integer `300`"),
+            "{messages:?}"
+        );
     }
 
     #[test]

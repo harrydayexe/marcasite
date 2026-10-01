@@ -92,9 +92,8 @@
 //!   channels documents array frames; they are accepted defensively.)
 //! - A recognised message that does not match its documented schema is yielded as an
 //!   `Err(`[`Error::WebSocket`]`)` of kind [`WebSocketErrorKind::Decode`] whose message
-//!   quotes the offending JSON and whose [`source`](std::error::Error::source) is the
-//!   `serde_json` error. This is **not** fatal: the stream continues with the next
-//!   message.
+//!   quotes the offending JSON and says why it did not decode. This is **not** fatal: the
+//!   stream continues with the next message.
 //! - A connection failure is yielded as one final `Err(`[`Error::WebSocket`]`)`, after
 //!   which the stream ends. Its [`kind`](crate::WebSocketError::kind) is [`Closed`] for an
 //!   abnormal close (with the server's close code and reason when there is one) or a

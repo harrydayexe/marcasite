@@ -469,6 +469,7 @@ fn transport_error(service: Service, method: &Method, url: &Url, err: reqwest::E
         method: method.clone(),
         url: url.to_string(),
         is_connect: err.is_connect(),
+        is_timeout,
         source: Box::new(err.without_url()),
     });
     if is_timeout {

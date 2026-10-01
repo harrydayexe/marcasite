@@ -152,8 +152,9 @@ impl<E: DeserializeOwned> EventStream<E> {
 ///   plain-text message becomes the event type's catch-all variant instead of an error.
 /// - A JSON array is flattened: each element is decoded on its own.
 /// - An element that fails to decode yields a non-fatal `Err(Error::WebSocket)` of kind
-///   [`WebSocketErrorKind::Decode`] whose source is the `serde_json` error; the other
-///   elements are unaffected.
+///   [`WebSocketErrorKind::Decode`] whose message quotes the element and the deserializer's
+///   message (like [`DecodeError`](polyoxide_core::DecodeError), it has no `source`); the
+///   other elements are unaffected.
 pub(crate) fn decode_frame<E: DeserializeOwned>(
     service: Service,
     text: &str,
@@ -177,20 +178,24 @@ fn decode_value<E: DeserializeOwned>(service: Service, value: Value) -> Result<E
     E::deserialize(&value).map_err(|source| {
         let snippet = snippet(&value);
         tracing::debug!(service = %service, error = %source, message = %snippet, "failed to decode message");
-        Error::WebSocket(Box::new(
-            WebSocketError::new(
-                service,
-                WebSocketErrorKind::Decode,
-                format!("failed to decode message `{snippet}`"),
-            )
-            .with_source(source),
-        ))
+        Error::WebSocket(Box::new(WebSocketError::new(
+            service,
+            WebSocketErrorKind::Decode,
+            format!(
+                "failed to decode message `{snippet}`: {}",
+                shorten(source.to_string())
+            ),
+        )))
     })
 }
 
 /// The compact JSON of `value`, truncated on a char boundary.
 fn snippet(value: &Value) -> String {
-    let mut text = value.to_string();
+    shorten(value.to_string())
+}
+
+/// `text` truncated to [`MAX_SNIPPET_BYTES`] on a char boundary, with `…` if cut.
+fn shorten(mut text: String) -> String {
     if text.len() > MAX_SNIPPET_BYTES {
         let mut end = MAX_SNIPPET_BYTES;
         while end > 0 && !text.is_char_boundary(end) {
@@ -238,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_errors_carry_a_snippet_and_source() {
+    fn decode_errors_carry_a_snippet_and_the_reason() {
         let mut out = VecDeque::new();
         decode_frame::<u32>(
             Service::SportsChannel,
@@ -251,8 +256,12 @@ mod tests {
         };
         assert_eq!(ws.kind(), WebSocketErrorKind::Decode);
         assert!(ws.message().starts_with("failed to decode message `\"xxx"));
-        assert!(ws.message().ends_with("…`"));
-        assert!(std::error::Error::source(ws.as_ref()).is_some());
+        let (quoted, reason) = ws.message().split_once("…`: ").unwrap();
+        assert!(quoted.len() < 300, "{quoted}");
+        assert!(reason.starts_with("invalid type: string \"xxx"), "{reason}");
+        assert!(reason.ends_with('…'), "{reason}");
+        assert!(reason.len() < 300, "{reason}");
+        assert!(std::error::Error::source(ws.as_ref()).is_none());
     }
 
     #[test]
