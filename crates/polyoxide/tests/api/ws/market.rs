@@ -363,3 +363,59 @@ async fn connection_failure_is_a_websocket_error() {
     };
     assert_eq!(ws.kind(), WebSocketErrorKind::Connect);
 }
+
+#[tokio::test]
+async fn keeps_heartbeating_and_subscribing_while_the_consumer_lags() {
+    const FLOOD: usize = 20;
+    let (flooded_tx, flooded_rx) = tokio::sync::oneshot::channel();
+    let (url, server) = serve("/ws/market", |mut socket| async move {
+        recv_json(&mut socket).await;
+        for _ in 0..FLOOD {
+            send(&mut socket, BOOK).await;
+        }
+        // The consumer does not poll, so the one-frame buffer is full; `PING`s still come.
+        for _ in 0..3 {
+            assert_eq!(recv_text(&mut socket).await, "PING");
+        }
+        flooded_tx.send(()).unwrap();
+        // So does a subscription change made meanwhile.
+        loop {
+            let text = recv_text(&mut socket).await;
+            if text != "PING" {
+                let update: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(
+                    update,
+                    json!({"operation": "subscribe", "assets_ids": [ASSET_B]})
+                );
+                break;
+            }
+        }
+        close(&mut socket, 1000, "bye").await;
+    })
+    .await;
+
+    let mut channel = MarketChannel::builder()
+        .url(&url)
+        .buffer(1)
+        .heartbeat_interval(Duration::from_millis(20))
+        .connect(MarketSubscription::new([ASSET_A]))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), flooded_rx)
+        .await
+        .expect("no heartbeat while the consumer lagged")
+        .unwrap();
+    channel.subscribe([ASSET_B]).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("no subscription change while the consumer lagged")
+        .unwrap();
+
+    // Every event received meanwhile is still delivered, then the normal close.
+    for _ in 0..FLOOD {
+        let Some(Ok(MarketEvent::Book(_))) = next(&mut channel).await else {
+            panic!("expected a book");
+        };
+    }
+    assert!(next(&mut channel).await.is_none());
+}

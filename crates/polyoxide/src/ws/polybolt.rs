@@ -24,7 +24,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream, str_field};
+use super::frame::{ConnectOptions, EventStream, IdleTimeout, str_field};
 
 /// Documented limit of active `(channel, filter)` subscriptions per connection.
 const MAX_ACTIVE_SUBSCRIPTIONS: usize = 64;
@@ -324,7 +324,9 @@ fn encode(value: &impl Serialize) -> Result<String> {
 ///
 /// The server keeps the connection alive with protocol-level pings every 25 seconds, which
 /// are answered automatically. [`ping`](Self::ping) sends the optional application-level
-/// ping.
+/// ping. If nothing at all arrives for [`DEFAULT_IDLE_TIMEOUT`](Self::DEFAULT_IDLE_TIMEOUT)
+/// (configurable with [`PolyBoltChannelBuilder::idle_timeout`]), the connection is
+/// considered dead and the stream ends with an error.
 ///
 /// The documented per-connection limits are enforced client-side, returning
 /// [`Error::Validation`] instead of letting the server close the connection with `4008`:
@@ -394,6 +396,10 @@ impl PolyBoltChannel {
     /// The production URL.
     pub const DEFAULT_URL: &'static str = "wss://ws-live-v2.polymarket.com/ws";
 
+    /// The default idle timeout: three times the documented 25-second interval of the
+    /// server's protocol-level pings (see [`PolyBoltChannelBuilder::idle_timeout`]).
+    pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(75);
+
     /// Connects to the production URL. Nothing is subscribed until
     /// [`subscribe`](Self::subscribe) is called.
     ///
@@ -404,7 +410,7 @@ impl PolyBoltChannel {
         Self::builder().connect().await
     }
 
-    /// Returns a builder for a custom URL, buffer size or timeout.
+    /// Returns a builder for a custom URL, buffer size or timeouts.
     pub fn builder() -> PolyBoltChannelBuilder {
         PolyBoltChannelBuilder::default()
     }
@@ -744,9 +750,9 @@ impl PolyBoltChannelBuilder {
         self
     }
 
-    /// Sets how many received frames may be buffered before the connection applies
-    /// back-pressure (default
-    /// [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER)).
+    /// Sets how many received frames may be buffered before the connection stops reading
+    /// from the socket (default [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER); see
+    /// [back-pressure](super#back-pressure)).
     pub fn buffer(mut self, buffer: usize) -> Self {
         self.options.buffer = Some(buffer);
         self
@@ -759,17 +765,43 @@ impl PolyBoltChannelBuilder {
         self
     }
 
+    /// Sets the idle timeout (default [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`]).
+    ///
+    /// If no frame of any kind (data, heartbeat or heartbeat reply) arrives for this long,
+    /// the stream yields a final [`Error::WebSocket`](crate::Error::WebSocket) of kind
+    /// [`Timeout`](crate::WebSocketErrorKind::Timeout) and ends, so that a connection that
+    /// died without closing is noticed. The timer does not run while the receive buffer is
+    /// full (see [back-pressure](super#back-pressure)). A zero timeout makes `connect` fail
+    /// with [`Error::Config`](crate::Error::Config).
+    pub fn idle_timeout(mut self, timeout: Duration) -> Self {
+        self.options.idle_timeout = IdleTimeout::After(timeout);
+        self
+    }
+
+    /// Disables the idle timeout. A connection that dies without closing then leaves the
+    /// stream pending until the operating system reports the connection as broken, which
+    /// may never happen.
+    pub fn no_idle_timeout(mut self) -> Self {
+        self.options.idle_timeout = IdleTimeout::Disabled;
+        self
+    }
+
     /// Connects.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Config`] if the URL is invalid, or [`Error::WebSocket`] if the
-    /// connection cannot be established (a refused handshake, e.g. HTTP `429` or `503`,
-    /// included).
+    /// Returns [`Error::Config`] if the URL is invalid or the idle timeout is zero, or
+    /// [`Error::WebSocket`] if the connection cannot be established. For a refused
+    /// handshake (e.g. HTTP `429` or `503`), the error's
+    /// [`http_status`](crate::WebSocketError::http_status) and
+    /// [`retry_after`](crate::WebSocketError::retry_after) (also
+    /// [`Error::retry_after`]) give the status and the `Retry-After` delay.
     pub async fn connect(self) -> Result<PolyBoltChannel> {
-        let config = self
-            .options
-            .config(Service::PolyBolt, PolyBoltChannel::DEFAULT_URL)?;
+        let config = self.options.config(
+            Service::PolyBolt,
+            PolyBoltChannel::DEFAULT_URL,
+            PolyBoltChannel::DEFAULT_IDLE_TIMEOUT,
+        )?;
         let conn = WsConnection::connect(config).await?;
         let handle = PolyBoltChannelHandle {
             sender: conn.sender(),

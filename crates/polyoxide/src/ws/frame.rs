@@ -22,12 +22,24 @@ use serde_json::Value;
 /// Maximum number of bytes of a frame quoted in a decode error message.
 const MAX_SNIPPET_BYTES: usize = 256;
 
+/// The idle timeout chosen on a channel builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdleTimeout {
+    /// The channel's default, derived from its documented heartbeat cadence.
+    Default,
+    /// No idle timeout.
+    Disabled,
+    /// A custom timeout.
+    After(Duration),
+}
+
 /// Connection settings shared by every channel builder.
 #[derive(Debug, Clone)]
 pub(crate) struct ConnectOptions {
     pub(crate) url: Option<String>,
     pub(crate) buffer: Option<usize>,
     pub(crate) connect_timeout: Option<Duration>,
+    pub(crate) idle_timeout: IdleTimeout,
 }
 
 impl ConnectOptions {
@@ -36,12 +48,20 @@ impl ConnectOptions {
             url: None,
             buffer: None,
             connect_timeout: None,
+            idle_timeout: IdleTimeout::Default,
         }
     }
 
     /// Builds the driver configuration for `service`, using `default_url` unless a URL
-    /// was set.
-    pub(crate) fn config(&self, service: Service, default_url: &str) -> Result<WsConfig> {
+    /// was set and `default_idle_timeout` unless an idle timeout was set or disabled.
+    ///
+    /// Fails with [`Error::Config`] for an invalid URL or a zero idle timeout.
+    pub(crate) fn config(
+        &self,
+        service: Service,
+        default_url: &str,
+        default_idle_timeout: Duration,
+    ) -> Result<WsConfig> {
         let url = parse_ws_url(self.url.as_deref().unwrap_or(default_url))?;
         let mut config = WsConfig::new(service, url);
         if let Some(buffer) = self.buffer {
@@ -49,6 +69,18 @@ impl ConnectOptions {
         }
         if let Some(timeout) = self.connect_timeout {
             config = config.connect_timeout(timeout);
+        }
+        match self.idle_timeout {
+            IdleTimeout::Default => config = config.idle_timeout(default_idle_timeout),
+            IdleTimeout::After(timeout) => {
+                if timeout.is_zero() {
+                    return Err(
+                        ConfigError::new("the idle timeout must be greater than zero").into(),
+                    );
+                }
+                config = config.idle_timeout(timeout);
+            }
+            IdleTimeout::Disabled => {}
         }
         Ok(config)
     }
@@ -221,6 +253,28 @@ mod tests {
         assert!(ws.message().starts_with("failed to decode message `\"xxx"));
         assert!(ws.message().ends_with("…`"));
         assert!(std::error::Error::source(ws.as_ref()).is_some());
+    }
+
+    #[test]
+    fn idle_timeout_choices() {
+        let default = Duration::from_secs(15);
+        let mut options = ConnectOptions::new();
+        assert!(
+            options
+                .config(Service::SportsChannel, "ws://127.0.0.1:1", default)
+                .is_ok()
+        );
+        options.idle_timeout = IdleTimeout::Disabled;
+        assert!(
+            options
+                .config(Service::SportsChannel, "ws://127.0.0.1:1", default)
+                .is_ok()
+        );
+        options.idle_timeout = IdleTimeout::After(Duration::ZERO);
+        assert!(matches!(
+            options.config(Service::SportsChannel, "ws://127.0.0.1:1", default),
+            Err(Error::Config(_))
+        ));
     }
 
     #[test]

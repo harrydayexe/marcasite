@@ -8,8 +8,10 @@
 //!
 //! Each channel type is a [`Stream`] of typed events (`Item = polyoxide::Result<Event>`).
 //! Connect with defaults via `connect`, or use `builder()` to override the URL (e.g. for a
-//! mock server), the receive buffer size and the handshake timeout. Connecting must happen
-//! inside a Tokio runtime.
+//! mock server), the receive buffer size, the handshake timeout and the idle timeout.
+//! Connecting must happen inside a Tokio runtime with the I/O and time drivers enabled (as
+//! `#[tokio::main]` does); outside a runtime, `connect` fails with an error of kind
+//! [`Connect`].
 //!
 //! To change subscriptions from another task while the stream is consumed, take a
 //! cloneable handle with [`MarketChannel::handle`] ([`MarketChannelHandle`]) or
@@ -48,6 +50,39 @@
 //!   automatically (two missed pongs close the connection with `4002`). The optional
 //!   application-level ping is [`PolyBoltChannel::ping`].
 //!
+//! # Liveness and timeouts
+//!
+//! A connection can die without being closed (the server vanishes, a NAT mapping is
+//! dropped), which would leave a stream pending forever. Every channel therefore has an
+//! **idle timeout**: if no frame of any kind (data, heartbeat or heartbeat reply) arrives
+//! for that long, the stream yields a final error of kind [`Timeout`] and ends. The
+//! defaults are three times the documented heartbeat cadence:
+//!
+//! | Channel | Documented heartbeat | Default idle timeout |
+//! |---|---|---|
+//! | Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`] (30 s; three heartbeat intervals) |
+//! | Sports | server `ping` every 5 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`] (15 s) |
+//! | PolyBolt | server protocol ping every 25 s | [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`] (75 s) |
+//!
+//! Change it with the builders' `idle_timeout`, or disable it with `no_idle_timeout`.
+//!
+//! Writing a frame to the socket may take at most 10 seconds; a write that does not
+//! complete in time (e.g. because the peer of a half-open connection stopped reading) also
+//! ends the stream with an error of kind [`Timeout`]. When either side closes the
+//! connection, the close handshake is completed, waiting at most 2 seconds for the other
+//! side.
+//!
+//! # Back-pressure
+//!
+//! Received frames wait in a bounded buffer (the builders' `buffer`, default
+//! [`DEFAULT_BUFFER`]) until the stream is polled. When the buffer is full, the connection
+//! stops reading from the socket until there is room again, but keeps sending: heartbeats,
+//! subscription changes and a close still go out. Server pings that arrive meanwhile are
+//! only answered once the stream is polled again, so a consumer that stalls for longer
+//! than the server tolerates (a `pong` within 10 s for the sports `ping`; two missed pongs
+//! for PolyBolt, which then closes with `4002`) is disconnected by the server. The idle
+//! timeout does not run while reading is paused.
+//!
 //! # Events and errors
 //!
 //! - Every documented server message has a typed variant. A message the library does not
@@ -63,13 +98,17 @@
 //! - A connection failure is yielded as one final `Err(`[`Error::WebSocket`]`)`, after
 //!   which the stream ends. Its [`kind`](crate::WebSocketError::kind) is [`Closed`] for an
 //!   abnormal close (with the server's close code and reason when there is one) or a
-//!   connection that dropped, [`Protocol`] for a socket or protocol error, or [`Send`] if a
-//!   frame could not be written. A normal close ends the stream without an error. Every
-//!   channel implements [`FusedStream`]: `is_terminated()` reports whether the stream has
-//!   ended.
-//! - `connect` fails with kind [`Connect`] if the connection cannot be established, and
-//!   sending on a connection that has ended (e.g. [`MarketChannel::subscribe`]) fails with
-//!   kind [`Closed`].
+//!   connection that dropped, [`Protocol`] for a socket or protocol error, [`Send`] if a
+//!   frame could not be written, or [`Timeout`] for an idle or stalled connection (see
+//!   [Liveness and timeouts](#liveness-and-timeouts)). A normal close ends the stream
+//!   without an error. Every channel implements [`FusedStream`]: `is_terminated()` reports
+//!   whether the stream has ended.
+//! - `connect` fails with kind [`Connect`] if the connection cannot be established. If the
+//!   server refused the handshake with an HTTP status, the error carries it
+//!   ([`WebSocketError::http_status`](crate::WebSocketError::http_status), also
+//!   [`Error::status`](crate::Error::status)) and the `Retry-After` delay
+//!   ([`Error::retry_after`](crate::Error::retry_after)). Sending on a connection that has
+//!   ended (e.g. [`MarketChannel::subscribe`]) fails with kind [`Closed`].
 //! - Requests that break a documented constraint (for example an empty PolyBolt
 //!   subscription, or more than 64 active PolyBolt subscriptions) fail with
 //!   [`Error::Validation`] before anything is sent.
@@ -110,7 +149,8 @@
 //! [`PolyBoltCloseCode`]): `4003` (draining) reconnect after a random 0 to 10 s delay;
 //! `4002` (slow consumer) and abnormal disconnects retry with exponential backoff and
 //! jitter (1 s up to 30 s); `4001` and `4008` need a client fix before reconnecting. If the
-//! handshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay.
+//! handshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay
+//! ([`Error::retry_after`](crate::Error::retry_after)).
 //! The market and sports channel documentation specifies no reconnection policy;
 //! exponential backoff with jitter is a reasonable default.
 //!
@@ -148,7 +188,13 @@
 //!                 }
 //!             }
 //!         }
-//!         Err(err) => eprintln!("failed to connect: {err}"),
+//!         Err(err) => {
+//!             eprintln!("failed to connect: {err}");
+//!             // A handshake refused with HTTP 429 or 503 may say how long to wait.
+//!             if let Some(retry_after) = err.retry_after() {
+//!                 delay = delay.max(retry_after);
+//!             }
+//!         }
 //!     }
 //!     // Add random jitter to `delay` in real code.
 //!     tokio::time::sleep(delay).await;
@@ -173,6 +219,7 @@
 //! [`Protocol`]: crate::WebSocketErrorKind::Protocol
 //! [`Send`]: crate::WebSocketErrorKind::Send
 //! [`Connect`]: crate::WebSocketErrorKind::Connect
+//! [`Timeout`]: crate::WebSocketErrorKind::Timeout
 
 mod frame;
 mod market;

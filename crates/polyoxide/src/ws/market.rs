@@ -19,7 +19,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream, check_interval, str_field};
+use super::frame::{ConnectOptions, EventStream, IdleTimeout, check_interval, str_field};
 
 /// The text frame the client sends as a heartbeat.
 const PING: &str = "PING";
@@ -273,8 +273,11 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// tick size changes and market lifecycle events for the subscribed assets.
 ///
 /// The channel is a [`Stream`] of [`MarketEvent`]s. It sends the documented `PING`
-/// heartbeat every 10 seconds and drops the server's `PONG` replies. See the
-/// [module documentation](super) for error handling and reconnection.
+/// heartbeat every 10 seconds and drops the server's `PONG` replies. If nothing at all
+/// arrives for [`DEFAULT_IDLE_TIMEOUT`](Self::DEFAULT_IDLE_TIMEOUT) (configurable with
+/// [`MarketChannelBuilder::idle_timeout`]), the connection is considered dead and the
+/// stream ends with an error. See the [module documentation](super) for error handling and
+/// reconnection.
 ///
 /// To change the subscription from another task while the stream is consumed, use a
 /// [`MarketChannelHandle`] from [`handle`](Self::handle).
@@ -329,6 +332,12 @@ impl MarketChannel {
 
     /// The documented heartbeat interval: the client sends `PING` every 10 seconds.
     pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
+    /// The default idle timeout: three times the documented 10-second heartbeat interval,
+    /// since the server answers every `PING` with `PONG`. When the heartbeat interval is
+    /// changed with [`MarketChannelBuilder::heartbeat_interval`] and no idle timeout is
+    /// set, the default is three times that interval instead.
+    pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
     /// Connects to the production URL and sends `subscription`.
     ///
@@ -517,9 +526,9 @@ impl MarketChannelBuilder {
         self
     }
 
-    /// Sets how many received frames may be buffered before the connection applies
-    /// back-pressure (default
-    /// [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER)).
+    /// Sets how many received frames may be buffered before the connection stops reading
+    /// from the socket (default [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER); see
+    /// [back-pressure](super#back-pressure)).
     pub fn buffer(mut self, buffer: usize) -> Self {
         self.options.buffer = Some(buffer);
         self
@@ -539,17 +548,43 @@ impl MarketChannelBuilder {
         self
     }
 
+    /// Sets the idle timeout (default [`MarketChannel::DEFAULT_IDLE_TIMEOUT`], or three
+    /// times the heartbeat interval when that was changed).
+    ///
+    /// If no frame of any kind (data, heartbeat or heartbeat reply) arrives for this long,
+    /// the stream yields a final [`Error::WebSocket`](crate::Error::WebSocket) of kind
+    /// [`Timeout`](crate::WebSocketErrorKind::Timeout) and ends, so that a connection that
+    /// died without closing is noticed. The timer does not run while the receive buffer is
+    /// full (see [back-pressure](super#back-pressure)). A zero timeout makes `connect` fail
+    /// with [`Error::Config`](crate::Error::Config).
+    pub fn idle_timeout(mut self, timeout: Duration) -> Self {
+        self.options.idle_timeout = IdleTimeout::After(timeout);
+        self
+    }
+
+    /// Disables the idle timeout. A connection that dies without closing then leaves the
+    /// stream pending until the operating system reports the connection as broken, which
+    /// may never happen.
+    pub fn no_idle_timeout(mut self) -> Self {
+        self.options.idle_timeout = IdleTimeout::Disabled;
+        self
+    }
+
     /// Connects and sends `subscription`.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Config`] if the URL is invalid or the heartbeat interval is zero,
-    /// or [`Error::WebSocket`] if the connection cannot be established.
+    /// Returns [`Error::Config`] if the URL is invalid or the heartbeat interval or idle
+    /// timeout is zero, or [`Error::WebSocket`] if the connection cannot be established.
     pub async fn connect(self, subscription: MarketSubscription) -> Result<MarketChannel> {
         check_interval(self.heartbeat_interval)?;
         let config = self
             .options
-            .config(Service::MarketChannel, MarketChannel::DEFAULT_URL)?
+            .config(
+                Service::MarketChannel,
+                MarketChannel::DEFAULT_URL,
+                self.heartbeat_interval.saturating_mul(3),
+            )?
             .heartbeat(self.heartbeat_interval, PING)
             .ignore(PONG)
             .initial_message(subscription.to_json()?);

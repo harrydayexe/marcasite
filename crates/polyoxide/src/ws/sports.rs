@@ -14,7 +14,7 @@ use polyoxide_core::{Result, Service, serde_util, ws::WsConnection};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream};
+use super::frame::{ConnectOptions, EventStream, IdleTimeout};
 
 /// The server's heartbeat text frame.
 const PING: &str = "ping";
@@ -27,7 +27,10 @@ const PONG: &str = "pong";
 /// No subscription is needed: the server broadcasts every update to every client. The
 /// server sends `ping` every 5 seconds and closes connections that do not answer `pong`
 /// within 10 seconds; this channel answers automatically and does not surface the
-/// heartbeats. See the [module documentation](super) for error handling and reconnection.
+/// heartbeats. If nothing at all arrives for [`DEFAULT_IDLE_TIMEOUT`](Self::DEFAULT_IDLE_TIMEOUT)
+/// (configurable with [`SportsChannelBuilder::idle_timeout`]), the connection is considered
+/// dead and the stream ends with an error. See the [module documentation](super) for error
+/// handling and reconnection.
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/sports>.
 ///
@@ -69,6 +72,10 @@ impl SportsChannel {
     /// The production URL.
     pub const DEFAULT_URL: &'static str = "wss://sports-api.polymarket.com/ws";
 
+    /// The default idle timeout: three times the documented 5-second interval of the
+    /// server's `ping` (see [`SportsChannelBuilder::idle_timeout`]).
+    pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
+
     /// Connects to the production URL.
     ///
     /// # Errors
@@ -79,7 +86,7 @@ impl SportsChannel {
         Self::builder().connect().await
     }
 
-    /// Returns a builder for a custom URL, buffer size or timeout.
+    /// Returns a builder for a custom URL, buffer size or timeouts.
     pub fn builder() -> SportsChannelBuilder {
         SportsChannelBuilder::default()
     }
@@ -132,9 +139,9 @@ impl SportsChannelBuilder {
         self
     }
 
-    /// Sets how many received frames may be buffered before the connection applies
-    /// back-pressure (default
-    /// [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER)).
+    /// Sets how many received frames may be buffered before the connection stops reading
+    /// from the socket (default [`DEFAULT_BUFFER`](super::DEFAULT_BUFFER); see
+    /// [back-pressure](super#back-pressure)).
     pub fn buffer(mut self, buffer: usize) -> Self {
         self.options.buffer = Some(buffer);
         self
@@ -147,17 +154,42 @@ impl SportsChannelBuilder {
         self
     }
 
+    /// Sets the idle timeout (default [`SportsChannel::DEFAULT_IDLE_TIMEOUT`]).
+    ///
+    /// If no frame of any kind (data, heartbeat or heartbeat reply) arrives for this long,
+    /// the stream yields a final [`Error::WebSocket`](crate::Error::WebSocket) of kind
+    /// [`Timeout`](crate::WebSocketErrorKind::Timeout) and ends, so that a connection that
+    /// died without closing is noticed. The timer does not run while the receive buffer is
+    /// full (see [back-pressure](super#back-pressure)). A zero timeout makes `connect` fail
+    /// with [`Error::Config`](crate::Error::Config).
+    pub fn idle_timeout(mut self, timeout: Duration) -> Self {
+        self.options.idle_timeout = IdleTimeout::After(timeout);
+        self
+    }
+
+    /// Disables the idle timeout. A connection that dies without closing then leaves the
+    /// stream pending until the operating system reports the connection as broken, which
+    /// may never happen.
+    pub fn no_idle_timeout(mut self) -> Self {
+        self.options.idle_timeout = IdleTimeout::Disabled;
+        self
+    }
+
     /// Connects.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Config`](crate::Error::Config) if the URL is invalid, or
-    /// [`Error::WebSocket`](crate::Error::WebSocket) if the connection cannot be
-    /// established.
+    /// Returns [`Error::Config`](crate::Error::Config) if the URL is invalid or the idle
+    /// timeout is zero, or [`Error::WebSocket`](crate::Error::WebSocket) if the connection
+    /// cannot be established.
     pub async fn connect(self) -> Result<SportsChannel> {
         let config = self
             .options
-            .config(Service::SportsChannel, SportsChannel::DEFAULT_URL)?
+            .config(
+                Service::SportsChannel,
+                SportsChannel::DEFAULT_URL,
+                SportsChannel::DEFAULT_IDLE_TIMEOUT,
+            )?
             .auto_reply(PING, PONG);
         let conn = WsConnection::connect(config).await?;
         Ok(SportsChannel {
