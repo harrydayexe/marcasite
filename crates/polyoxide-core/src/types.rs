@@ -271,6 +271,49 @@ string_id! {
     pub struct Address;
 }
 
+string_id! {
+    /// A Gamma market id: Polymarket's own identifier for a market, e.g. `"239826"`.
+    ///
+    /// The Gamma API sends it as a **string** in responses (a market's `id`) and takes it as
+    /// an **integer** in paths and filters (e.g. `GET /markets/{id}`, `?id=`); the newtype
+    /// keeps the digits as a string and also accepts a JSON integer. The Data API
+    /// (`market_id`), the CLOB rewards endpoints (`market_id`) and the CLOB market
+    /// WebSocket channel (`id` of a `new_market` or `market_resolved` message) carry the
+    /// same Gamma ids.
+    ///
+    /// Not the on-chain condition id: that is a [`ConditionId`] (which the CLOB API calls
+    /// `market`).
+    pub struct MarketId;
+}
+
+string_id! {
+    /// A Gamma event id: Polymarket's own identifier for an event (a group of markets),
+    /// e.g. `"16167"`.
+    ///
+    /// The Gamma API sends it as a **string** in responses (an event's `id`) and takes it as
+    /// an **integer** in paths and filters (e.g. `GET /events/{id}`, `?id=`); the newtype
+    /// keeps the digits as a string and also accepts a JSON integer. The Data API
+    /// (`event_id`), the CLOB rewards endpoints (`event_id`) and the CLOB market WebSocket
+    /// channel (`event_message.id` of a `new_market` or `market_resolved` message) carry
+    /// the same Gamma ids.
+    ///
+    /// Not a [`ConditionId`]: an event groups one or more markets, each with its own
+    /// condition id.
+    pub struct EventId;
+}
+
+string_id! {
+    /// A UMA question id: the identifier of the question a market resolves through.
+    ///
+    /// The Data API documents it as `0x` plus 64 hexadecimal characters (`question_id`);
+    /// the Gamma API types it as a plain string (a market's `questionID`, filtered with
+    /// `question_ids`). The value is kept exactly as given or received; it is not
+    /// validated.
+    ///
+    /// Not a [`ConditionId`], although both have the same shape.
+    pub struct QuestionId;
+}
+
 string_enum! {
     /// The side of an order or trade.
     pub enum Side {
@@ -293,6 +336,19 @@ mod tests {
         let numeric: TokenId = serde_json::from_str("123").unwrap();
         assert_eq!(numeric, id);
         assert!(serde_json::from_str::<TokenId>("[1]").is_err());
+    }
+
+    #[test]
+    fn gamma_ids_accept_strings_and_integers() {
+        // Gamma sends ids as strings; integers are accepted too.
+        let market: MarketId = serde_json::from_str("\"239826\"").unwrap();
+        assert_eq!(market, MarketId::from("239826"));
+        assert_eq!(serde_json::from_str::<MarketId>("239826").unwrap(), market);
+        assert_eq!(serde_json::to_string(&market).unwrap(), "\"239826\"");
+        let event: EventId = serde_json::from_str("16167").unwrap();
+        assert_eq!(event.as_str(), "16167");
+        let question: QuestionId = serde_json::from_str("\"0xabc\"").unwrap();
+        assert_eq!(question, "0xabc");
     }
 
     #[test]

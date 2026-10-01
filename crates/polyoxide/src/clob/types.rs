@@ -33,19 +33,6 @@ polyoxide_core::string_id! {
     pub struct OrderId;
 }
 
-polyoxide_core::string_id! {
-    /// A Polymarket market id as used by the rewards endpoints (e.g. `"248849"`).
-    ///
-    /// Not to be confused with a [`ConditionId`](crate::types::ConditionId), which the CLOB
-    /// calls `market`.
-    pub struct MarketId;
-}
-
-polyoxide_core::string_id! {
-    /// A Polymarket event id as used by the rewards endpoints (e.g. `"12345"`).
-    pub struct EventId;
-}
-
 /// One page of a CLOB cursor-paginated listing whose envelope fields are all required
 /// (rewards listings and builder trades).
 ///

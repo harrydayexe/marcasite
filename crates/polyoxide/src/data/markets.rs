@@ -10,11 +10,10 @@ use serde::{Deserialize, Serialize};
 use super::{
     DataClient,
     types::{
-        EventId, Page, QuestionId, check_limit, check_list, check_required_list, collect_ids,
-        distinct, page_stream,
+        Page, check_limit, check_list, check_required_list, collect_ids, distinct, page_stream,
     },
 };
-use crate::types::{Address, ConditionId, TokenId};
+use crate::types::{Address, ConditionId, EventId, QuestionId, TokenId};
 
 const HOLDERS: &[&str] = &["v2", "holders"];
 const PRICES_HISTORY: &[&str] = &["v2", "prices-history"];

@@ -13,6 +13,7 @@ use polyoxide_core::{
     Query, Result, ValidationError,
     pagination::{CursorPage, cursor_stream, offset_stream},
     serde_util,
+    types::EventId,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -22,12 +23,6 @@ use super::{
     Series, SeriesId, Tag, TagId, Template,
     util::{Lookup, PageParams, rfc3339, setters, validate_keyset_limit},
 };
-
-polyoxide_core::string_id! {
-    /// A Gamma event id (sent as a string in responses, e.g. `"16167"`; an integer in
-    /// paths and filters).
-    pub struct EventId;
-}
 
 polyoxide_core::string_id! {
     /// An event creator id.

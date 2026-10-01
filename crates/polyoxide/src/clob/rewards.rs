@@ -5,14 +5,14 @@ use chrono::{DateTime, NaiveDate, Utc};
 use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError, serde_util,
-    types::{Address, ConditionId, TokenId},
+    types::{Address, ConditionId, EventId, MarketId, TokenId},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{
     ClobClient,
-    types::{EventId, MarketId, Page, page_stream},
+    types::{Page, page_stream},
 };
 
 /// Maximum `page_size` of [`ClobClient::get_markets_with_rewards`].

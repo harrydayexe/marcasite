@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 use super::{
     DataClient,
     types::{
-        ComboLeg, EventId, FilterType, Page, SortDirection, check_limit, check_list, collect_ids,
-        distinct, page_stream, timestamp_micros, timestamp_micros_option,
+        ComboLeg, FilterType, Page, SortDirection, check_limit, check_list, collect_ids, distinct,
+        page_stream, timestamp_micros, timestamp_micros_option,
     },
 };
-use crate::types::{Address, ConditionId, TokenId};
+use crate::types::{Address, ConditionId, EventId, TokenId};
 
 const POSITIONS: &[&str] = &["v2", "positions"];
 const COMBO_POSITIONS: &[&str] = &["v2", "positions", "combos"];

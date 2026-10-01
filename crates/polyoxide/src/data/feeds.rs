@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use super::{
     DataClient,
     types::{
-        ComboLeg, EventId, FilterType, Page, SortDirection, check_limit, check_list, collect_ids,
+        ComboLeg, FilterType, Page, SortDirection, check_limit, check_list, collect_ids,
         page_stream,
     },
 };
-use crate::types::{Address, ConditionId, Side, TokenId};
+use crate::types::{Address, ConditionId, EventId, Side, TokenId};
 
 const TRADES: &[&str] = &["v2", "trades"];
 const ACTIVITY: &[&str] = &["v2", "activity"];

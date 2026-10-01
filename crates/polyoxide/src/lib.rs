@@ -132,6 +132,11 @@ pub use rust_decimal::Decimal;
 pub use chrono;
 
 /// Identifier newtypes and enums shared by several services.
+///
+/// The service modules re-export the ones they use, so for example `polyoxide::gamma::MarketId`
+/// and `polyoxide::types::MarketId` are the same type.
 pub mod types {
-    pub use polyoxide_core::types::{Address, ConditionId, Side, TokenId};
+    pub use polyoxide_core::types::{
+        Address, ConditionId, EventId, MarketId, QuestionId, Side, TokenId,
+    };
 }

@@ -13,7 +13,7 @@ use polyoxide_core::{
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::types::{ConditionId, TokenId};
+use crate::types::{ConditionId, EventId, MarketId, TokenId};
 
 use super::DataClient;
 
@@ -26,23 +26,6 @@ pub const UNLABELED_OUTCOME_INDEX: i32 = 999;
 /// The maximum number of distinct values accepted by the comma-separated `condition` and
 /// `event_id` list parameters.
 pub const MAX_LIST_VALUES: usize = 20;
-
-polyoxide_core::string_id! {
-    /// A Gamma market id (`market_id`), as served by the Gamma API's `/markets` routes.
-    ///
-    /// Not the on-chain condition id: that is a [`ConditionId`].
-    pub struct MarketId;
-}
-
-polyoxide_core::string_id! {
-    /// A Gamma event id (`event_id`), as served by the Gamma API's `/events` routes.
-    pub struct EventId;
-}
-
-polyoxide_core::string_id! {
-    /// A UMA question id (`question_id`): `0x` followed by 64 hexadecimal characters.
-    pub struct QuestionId;
-}
 
 /// One page of a cursor-paginated Data API v2 listing (the `{ data, pagination }` envelope).
 ///

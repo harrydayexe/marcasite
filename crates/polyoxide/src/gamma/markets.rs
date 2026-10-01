@@ -8,7 +8,7 @@ use polyoxide_core::{
     Query, Result,
     pagination::{CursorPage, cursor_stream, offset_stream},
     serde_util,
-    types::{ConditionId, TokenId},
+    types::{ConditionId, MarketId, QuestionId, TokenId},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -17,17 +17,6 @@ use super::{
     Category, Event, GammaClient, ImageOptimization, Tag, TagId,
     util::{Lookup, integer_id, rfc3339, setters, validate_keyset_limit},
 };
-
-polyoxide_core::string_id! {
-    /// A Gamma market id (sent as a string in responses, e.g. `"239826"`; an integer in
-    /// paths and filters).
-    pub struct MarketId;
-}
-
-polyoxide_core::string_id! {
-    /// A market's question id (`questionID`), used by the `question_ids` filters.
-    pub struct QuestionId;
-}
 
 /// A market (`components/schemas/Market`).
 ///

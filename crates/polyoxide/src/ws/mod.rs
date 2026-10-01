@@ -142,8 +142,8 @@ mod sports;
 pub use polyoxide_core::ws::{DEFAULT_BUFFER, DEFAULT_CONNECT_TIMEOUT};
 
 pub use market::{
-    BestBidAskEvent, BookEvent, EventId, EventMessage, LastTradePriceEvent, MarketChannel,
-    MarketChannelBuilder, MarketEvent, MarketId, MarketResolvedEvent, MarketSubscription,
+    BestBidAskEvent, BookEvent, EventMessage, LastTradePriceEvent, MarketChannel,
+    MarketChannelBuilder, MarketEvent, MarketResolvedEvent, MarketSubscription,
     MarketSubscriptionUpdate, NewMarketEvent, OrderSummary, PriceChange, PriceChangeEvent,
     SubscriptionLevel, TickSizeChangeEvent,
 };
@@ -153,6 +153,10 @@ pub use polybolt::{
     PricePolymarketEnvelope, PriceProvider,
 };
 pub use sports::{SportResult, SportsChannel, SportsChannelBuilder, SportsEvent};
+
+/// Shared identifiers, re-exported here for discoverability (also available from
+/// [`crate::types`]).
+pub use crate::types::{EventId, MarketId};
 
 #[cfg(test)]
 mod tests {

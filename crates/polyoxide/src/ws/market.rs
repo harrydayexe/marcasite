@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{
     Error, Result, Service, ValidationError, WebSocketError, serde_util,
-    types::{ConditionId, Side, TokenId},
+    types::{ConditionId, EventId, MarketId, Side, TokenId},
     ws::WsConnection,
 };
 use rust_decimal::Decimal;
@@ -25,22 +25,6 @@ use super::frame::{ConnectOptions, EventStream, check_interval, str_field};
 const PING: &str = "PING";
 /// The server's reply to [`PING`]; dropped by the driver.
 const PONG: &str = "PONG";
-
-polyoxide_core::string_id! {
-    /// A Gamma market id (`id` of a `new_market` or `market_resolved` message), e.g.
-    /// `"1031769"`.
-    ///
-    /// See <https://docs.polymarket.com/api-reference/wss/market>.
-    pub struct MarketId;
-}
-
-polyoxide_core::string_id! {
-    /// A Gamma event id (`event_message.id` of a `new_market` or `market_resolved`
-    /// message), e.g. `"125819"`.
-    ///
-    /// See <https://docs.polymarket.com/api-reference/wss/market>.
-    pub struct EventId;
-}
 
 /// The subscription `level` of the market channel (`1`, `2` or `3`; the server defaults
 /// to `2`).

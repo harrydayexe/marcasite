@@ -109,6 +109,9 @@ mod service;
 mod types;
 mod wallet;
 
+/// Shared identifiers, re-exported here for discoverability (also available from
+/// [`crate::types`]).
+pub use crate::types::{EventId, MarketId, QuestionId};
 pub use boards::{
     BiggestWinner, BuilderCode, BuilderStanding, BuilderVolumePoint, GetBuildersLeaderboard,
     GetBuildersVolume, GetLeaderboard, GetLeaderboardStanding, LeaderboardEntry, LeaderboardSortBy,
@@ -130,9 +133,8 @@ pub use service::{
     ServingMechanismName,
 };
 pub use types::{
-    ComboLeg, ComboLegEvent, ComboLegMarket, ComboLegStatus, ErrorCode, EventId, FilterType,
-    MAX_LIST_VALUES, MarketId, Page, Pagination, QuestionId, SortDirection, TimePeriod,
-    UNLABELED_OUTCOME_INDEX,
+    ComboLeg, ComboLegEvent, ComboLegMarket, ComboLegStatus, ErrorCode, FilterType,
+    MAX_LIST_VALUES, Page, Pagination, SortDirection, TimePeriod, UNLABELED_OUTCOME_INDEX,
 };
 pub use wallet::{
     ApprovalContract, Approvals, ComboPosition, ComboPositionSortBy, ComboPositionStatus,

@@ -41,13 +41,12 @@ pub use comments::{
     GetCommentsById, ListComments, ListCommentsByUser, Reaction,
 };
 pub use events::{
-    Event, EventCreator, EventCreatorId, EventId, EventTweetCount, EventsKeysetPage, EventsPage,
-    GetEvent, ListEventCreators, ListEvents, ListEventsKeyset, ListEventsPaginated,
-    ListSportEventResults,
+    Event, EventCreator, EventCreatorId, EventTweetCount, EventsKeysetPage, EventsPage, GetEvent,
+    ListEventCreators, ListEvents, ListEventsKeyset, ListEventsPaginated, ListSportEventResults,
 };
 pub use markets::{
     FeeSchedule, GetMarket, GetMarketsInformation, ListMarkets, ListMarketsKeyset, Market,
-    MarketDescription, MarketId, MarketsKeysetPage, QuestionId,
+    MarketDescription, MarketsKeysetPage,
 };
 pub use profiles::{Profile, PublicProfile, PublicProfileUser};
 pub use search::{Search, SearchResults, SearchTag};
@@ -58,3 +57,7 @@ pub use tags::{
     Tag, TagId,
 };
 pub use types::{Category, Chat, Collection, ImageOptimization, Pagination, Template};
+
+/// Shared identifiers, re-exported here for discoverability (also available from
+/// [`crate::types`]).
+pub use crate::types::{EventId, MarketId, QuestionId};

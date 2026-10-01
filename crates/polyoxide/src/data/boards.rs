@@ -23,7 +23,12 @@ const MAX_BOARD_LIMIT: u32 = 1000;
 const MAX_BUILDERS_VOLUME_LIMIT: u32 = 90;
 
 polyoxide_core::string_id! {
-    /// A builder's stable identifier (`builder_code`).
+    /// A builder's stable identifier (`builder_code`) on the builder boards.
+    ///
+    /// The Data API documents it only as a string ("Stable identifier of the builder"),
+    /// with no format, so it is kept exactly as received and never validated. It is a
+    /// separate type from the CLOB's `BuilderCode` (documented as `0x` followed by 64 hex
+    /// characters) because the Data API does not document the same wire format.
     pub struct BuilderCode;
 }
 

@@ -52,6 +52,8 @@ pub use rewards::{
     RewardsConfig, RewardsMarketsOrderBy, RewardsToken, SortDirection,
 };
 pub use trades::{BuilderTrade, GetBuilderTrades};
-pub use types::{
-    BookRequest, BuilderCode, END_CURSOR, EventId, MarketId, MarketsPage, OrderId, Page, TradeId,
-};
+pub use types::{BookRequest, BuilderCode, END_CURSOR, MarketsPage, OrderId, Page, TradeId};
+
+/// Shared identifiers, re-exported here for discoverability (also available from
+/// [`crate::types`]).
+pub use crate::types::{EventId, MarketId};
