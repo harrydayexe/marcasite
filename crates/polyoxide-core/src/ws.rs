@@ -40,6 +40,9 @@ use crate::error::{ConfigError, Error, Result, Service, WebSocketError};
 /// Default capacity of the incoming-message buffer.
 pub const DEFAULT_BUFFER: usize = 1024;
 
+/// The shortest heartbeat interval accepted by [`WsConfig::heartbeat`].
+pub const MIN_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(10);
+
 /// Default handshake timeout.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -82,9 +85,11 @@ impl WsConfig {
     }
 
     /// Sends `message` every `interval` to keep the connection alive.
+    ///
+    /// Intervals shorter than [`MIN_HEARTBEAT_INTERVAL`] (including zero) are raised to it.
     pub fn heartbeat(mut self, interval: Duration, message: impl Into<String>) -> Self {
         self.heartbeat = Some(Heartbeat {
-            interval,
+            interval: interval.max(MIN_HEARTBEAT_INTERVAL),
             message: message.into(),
         });
         self
@@ -428,6 +433,16 @@ fn tls_connector(service: Service) -> Result<Connector> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_heartbeat_is_clamped() {
+        let url = parse_ws_url("ws://127.0.0.1:1").unwrap();
+        let config = WsConfig::new(Service::MarketChannel, url).heartbeat(Duration::ZERO, "PING");
+        assert_eq!(
+            config.heartbeat.map(|hb| hb.interval),
+            Some(MIN_HEARTBEAT_INTERVAL)
+        );
+    }
 
     #[test]
     fn ws_url_validation() {
