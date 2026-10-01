@@ -69,9 +69,21 @@ Base URLs must be configurable (e.g. for tests against a mock server), with thes
 
 ## Architecture
 
-Decisions not yet made (async runtime, HTTP/WS client crates, signing/crypto crates, crate
-vs. workspace layout, MSRV, feature-flag split per service) **must be confirmed with the user
-before implementing**. Propose options with trade-offs; do not pick silently.
+Decisions confirmed with the user (2026-10-01):
+
+- Async runtime **tokio**; HTTP via **reqwest** (rustls); WebSockets via **tokio-tungstenite**
+  (rustls, explicit aws-lc-rs provider, native roots).
+- Layout: services are **modules of the `polyoxide` crate**, each behind a Cargo feature
+  (`gamma`, `clob`, `data`, `relayer`, `bridge`, `combos`, `ws`; all default). Shared transport,
+  config, errors, pagination, serde helpers and id newtypes live in `polyoxide-core`.
+- String enums: `#[non_exhaustive]` with an `Unknown(String)` catch-all
+  (use `polyoxide_core::string_enum!`). Id newtypes: `polyoxide_core::string_id!`.
+- Money/price/size: `rust_decimal::Decimal`. Timestamps: `chrono::DateTime<Utc>` (helpers in
+  `polyoxide_core::serde_util`).
+- Scope so far: **unauthenticated endpoints only**. `ENDPOINTS.md` (repo root) is the checklist of
+  every endpoint with doc links and implementation status. **Update it with every endpoint change.**
+
+Still undecided (ask the user before choosing): signing/crypto crates and auth design, MSRV.
 
 Principles once decided:
 
@@ -130,6 +142,22 @@ Principles once decided:
   `cargo test`. Live tests, if any, are `#[ignore]` and read-only.
 - Test error paths: non-2xx bodies, malformed JSON, rate limiting, unknown enum values.
 - Signing/auth code needs deterministic test vectors.
+
+## Implementation patterns (follow the existing code)
+
+- Each service client (`crates/polyoxide/src/<service>/client.rs`) wraps a
+  `polyoxide_core::Transport`; endpoints are methods added in `impl <Service>Client` blocks in the
+  topic module (e.g. `gamma/tags.rs`). `gamma/tags.rs` is the reference implementation.
+- Only required params → `async fn`. Optional params → method returns a `#[must_use]` request
+  builder (owns a client clone) with setters and `async fn send(self)`. Paginated endpoints also
+  get `into_stream()` via `polyoxide_core::pagination::{cursor_stream, offset_stream}`.
+- Paths are built from segments (`transport.get(&["tags", id.as_str()])`), which percent-encodes
+  user input. Query strings via `polyoxide_core::Query` (`push_all` = repeated keys, `push_csv` =
+  comma-separated).
+- Enforce documented limits (batch sizes, ranges) client-side with `ValidationError` before
+  sending.
+- Unit tests for (de)serialization next to the types; mock-server tests in
+  `crates/polyoxide/tests/api/<service>/` (one test binary).
 
 ## Commands
 

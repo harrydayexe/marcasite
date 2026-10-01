@@ -5,16 +5,44 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 
+[features]
+default = []
+## WebSocket transport (tokio-tungstenite over rustls).
+ws = [
+    "dep:tokio-tungstenite",
+    "dep:rustls",
+    "dep:rustls-native-certs",
+    "tokio/macros",
+    "tokio/net",
+]
+
 [dependencies]
+chrono.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+http.workspace = true
+reqwest = { workspace = true, features = ["rustls"] }
+rust_decimal.workspace = true
+rustls = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+serde_path_to_error.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "time", "sync"] }
+tokio-tungstenite = { workspace = true, optional = true }
 tracing.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true
