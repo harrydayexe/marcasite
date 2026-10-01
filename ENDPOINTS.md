@@ -158,7 +158,7 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-o
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | |
+| [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` |
 
 ## WebSocket channels (public)
 
