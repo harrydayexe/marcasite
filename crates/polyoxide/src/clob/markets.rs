@@ -1,8 +1,8 @@
 //! CLOB markets: simplified and sampling market listings, CLOB market info, market lookup by
 //! token and live-activity summaries.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result,
     pagination::{CursorPage, cursor_stream},
@@ -422,11 +422,7 @@ async fn fetch_markets_page<T: DeserializeOwned>(
 }
 
 /// Streams every item of a market listing, starting at `start`.
-fn markets_stream<T>(
-    client: ClobClient,
-    path: &'static str,
-    start: Option<String>,
-) -> impl Stream<Item = Result<T>> + Send + 'static
+fn markets_stream<T>(client: ClobClient, path: &'static str, start: Option<String>) -> Paginated<T>
 where
     T: DeserializeOwned + Send + 'static,
 {
@@ -472,7 +468,7 @@ impl GetSimplifiedMarkets {
 
     /// Streams every market from the configured cursor onwards, fetching pages lazily until
     /// the last page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<SimplifiedMarket>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<SimplifiedMarket> {
         markets_stream(self.client, "simplified-markets", self.next_cursor)
     }
 }
@@ -509,7 +505,7 @@ impl GetSamplingMarkets {
 
     /// Streams every market from the configured cursor onwards, fetching pages lazily until
     /// the last page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Market>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Market> {
         markets_stream(self.client, "sampling-markets", self.next_cursor)
     }
 }
@@ -546,7 +542,7 @@ impl GetSamplingSimplifiedMarkets {
 
     /// Streams every market from the configured cursor onwards, fetching pages lazily until
     /// the last page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<SimplifiedMarket>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<SimplifiedMarket> {
         markets_stream(self.client, "sampling-simplified-markets", self.next_cursor)
     }
 }

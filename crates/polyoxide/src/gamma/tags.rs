@@ -1,7 +1,7 @@
 //! Tags: `/tags`, `/tags/{id}`, `/tags/slug/{slug}` and the related-tags endpoints.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use serde::{Deserialize, Serialize};
 
@@ -246,7 +246,7 @@ impl ListTags {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Tag>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Tag> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();

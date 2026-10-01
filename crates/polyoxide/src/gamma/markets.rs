@@ -2,8 +2,8 @@
 //! `/markets/{id}/description`, `/markets/keyset`, `/markets/information` and
 //! `/markets/abridged`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result,
     pagination::{CursorPage, cursor_stream, offset_stream},
@@ -692,7 +692,7 @@ impl ListMarkets {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Market>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Market> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
@@ -911,7 +911,7 @@ impl ListMarketsKeyset {
 
     /// Streams every market from [`after_cursor`](Self::after_cursor) (or the beginning)
     /// onwards, fetching pages lazily until a page has no `next_cursor`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Market>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Market> {
         let start = self.params.after_cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();

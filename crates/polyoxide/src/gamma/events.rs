@@ -7,8 +7,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError,
     pagination::{CursorPage, cursor_stream, offset_stream},
@@ -646,7 +646,7 @@ impl ListEvents {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
@@ -724,7 +724,7 @@ impl ListEventsPaginated {
     /// The stream ends after a page whose `pagination.hasMore` is `false`, or at the first
     /// empty page. A page shorter than [`limit`](Self::limit) does not end it while
     /// `hasMore` is not `false`, because the server may cap the page size.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.offset.unwrap_or(0);
         let exhausted = Arc::new(AtomicBool::new(false));
         offset_stream(start, move |offset| {
@@ -787,7 +787,7 @@ impl ListSportEventResults {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
@@ -904,7 +904,7 @@ impl ListEventCreators {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<EventCreator>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<EventCreator> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
@@ -1143,7 +1143,7 @@ impl ListEventsKeyset {
 
     /// Streams every event from [`after_cursor`](Self::after_cursor) (or the beginning)
     /// onwards, fetching pages lazily until a page has no `next_cursor`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.after_cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();

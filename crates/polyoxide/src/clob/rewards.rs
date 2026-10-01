@@ -1,8 +1,8 @@
 //! Liquidity rewards configurations (public endpoints): `/rewards/markets/current`,
 //! `/rewards/markets/{condition_id}` and `/rewards/markets/multi`.
 
+use crate::Paginated;
 use chrono::{DateTime, NaiveDate, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError, serde_util,
     types::{Address, ConditionId, EventId, MarketId, TokenId},
@@ -313,7 +313,7 @@ impl GetCurrentRewards {
 
     /// Streams every configuration from the configured cursor onwards, fetching pages
     /// lazily until the last page (`next_cursor` `"LTE="`).
-    pub fn into_stream(self) -> impl Stream<Item = Result<CurrentReward>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<CurrentReward> {
         let start = self.next_cursor.clone();
         page_stream(self, start, Self::fetch)
     }
@@ -370,7 +370,7 @@ impl GetRawRewardsForMarket {
 
     /// Streams every configured market entry from the configured cursor onwards, fetching
     /// pages lazily until the last page (`next_cursor` `"LTE="`).
-    pub fn into_stream(self) -> impl Stream<Item = Result<MarketReward>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<MarketReward> {
         let start = self.next_cursor.clone();
         page_stream(self, start, Self::fetch)
     }
@@ -533,7 +533,7 @@ impl GetMarketsWithRewards {
 
     /// Streams every market from the configured cursor onwards, fetching pages lazily until
     /// the last page (`next_cursor` `"LTE="`).
-    pub fn into_stream(self) -> impl Stream<Item = Result<MultiMarketInfo>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<MultiMarketInfo> {
         let start = self.next_cursor.clone();
         page_stream(self, start, Self::fetch)
     }

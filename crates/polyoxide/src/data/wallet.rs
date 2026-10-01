@@ -1,8 +1,8 @@
 //! Wallet: `/v2/positions`, `/v2/positions/combos`, `/v2/value`, `/v2/approvals`,
 //! `/v2/user-pnl`, `/v2/user-stats`, `/v2/user-volume`.
 
+use crate::Paginated;
 use chrono::{DateTime, NaiveDate, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, ValidationError, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -802,7 +802,7 @@ impl ListPositions {
     /// as the API requires (a bare cursor is rejected, and `title` and the `start`/`end`
     /// window are not carried by the cursor). The stream ends when `next_cursor` is
     /// `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Position>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Position> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, POSITIONS, start, move |cursor| self.query(cursor))
@@ -943,7 +943,7 @@ impl ListComboPositions {
     ///
     /// Every page re-sends `user` (always required on this route) and the same filters
     /// with the cursor. The stream ends when `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<ComboPosition>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<ComboPosition> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, COMBO_POSITIONS, start, move |cursor| {

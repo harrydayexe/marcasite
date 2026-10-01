@@ -1,7 +1,7 @@
 //! Feeds: `/v2/trades`, `/v2/activity`, `/v2/activity/combos`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, ValidationError, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -438,7 +438,7 @@ impl ListTrades {
     /// The cursor carries only the seek anchor and page size, so every page re-sends the
     /// same filters (changing one mid-walk would silently re-anchor the feed). The stream
     /// ends when `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Trade>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Trade> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, TRADES, start, move |cursor| self.query(cursor))
@@ -592,7 +592,7 @@ impl ListActivity {
     /// The cursor carries only the seek anchor, page size and sort direction, so every
     /// page re-sends the same filters (changing one mid-walk would silently re-anchor the
     /// feed). The stream ends when `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Activity>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Activity> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, ACTIVITY, start, move |cursor| self.query(cursor))
@@ -662,7 +662,7 @@ impl ListComboActivity {
     /// Every page re-sends `user` and the same filters with the cursor (the feed rule:
     /// changing a filter mid-walk re-anchors it). The stream ends when `next_cursor` is
     /// `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<ComboActivity>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<ComboActivity> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, COMBO_ACTIVITY, start, move |cursor| {

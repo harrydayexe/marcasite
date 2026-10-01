@@ -1,8 +1,8 @@
 //! Markets: `/v2/holders`, `/v2/oi`, `/v2/live-volume`, `/v2/prices-history`,
 //! `/v2/resolutions`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, ValidationError, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -554,7 +554,7 @@ impl ListHolders {
     /// Page walks advance every token group together, so a token's holders are spread
     /// over several groups: merge them by [`HolderGroup::token_id`]. The stream ends when
     /// `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<HolderGroup>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<HolderGroup> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, HOLDERS, start, move |cursor| self.query(cursor))
@@ -743,7 +743,7 @@ impl GetPricesHistory {
     /// Every page re-sends the same token and window with the cursor. The terminal point
     /// (the latest observation in the window) and a resolved market's settlement point
     /// arrive on the final page. The stream ends when `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<PricePoint>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<PricePoint> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, PRICES_HISTORY, start, move |cursor| {

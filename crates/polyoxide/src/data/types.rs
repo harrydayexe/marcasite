@@ -3,8 +3,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Error, Query, Result, Service, ValidationError,
     pagination::{CursorPage, cursor_stream},
@@ -290,7 +290,7 @@ pub(crate) fn page_stream<T, F>(
     path: &'static [&'static str],
     start: Option<String>,
     mut query: F,
-) -> impl Stream<Item = Result<T>> + Send + 'static
+) -> Paginated<T>
 where
     T: DeserializeOwned + Send + 'static,
     F: FnMut(Option<&str>) -> Result<Query> + Send + 'static,

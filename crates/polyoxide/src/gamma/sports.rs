@@ -1,7 +1,7 @@
 //! Sports: `/teams`, `/teams/{id}`, `/sports` and `/sports/market-types`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use serde::{Deserialize, Serialize};
 
@@ -194,7 +194,7 @@ impl ListTeams {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Team>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Team> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();

@@ -87,6 +87,46 @@ async fn list_tags_stream_walks_offsets() {
 }
 
 #[tokio::test]
+async fn list_tags_stream_is_a_named_unpin_stream() {
+    use futures_util::StreamExt as _;
+    use polyoxide::{Paginated, gamma::Tag};
+
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/tags"))
+        .and(query_param("offset", "0"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(r#"[{"id":"1"}]"#, "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/tags"))
+        .and(query_param("offset", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("[]", "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Named (storable in a struct) and `Unpin` (a plain `while let` loop works).
+    struct Holder {
+        tags: Paginated<Tag>,
+    }
+    let mut holder = Holder {
+        tags: common::polymarket(&server)
+            .gamma()
+            .list_tags()
+            .into_stream(),
+    };
+    let mut ids = Vec::new();
+    while let Some(tag) = holder.tags.next().await {
+        ids.push(tag.unwrap().id.unwrap());
+    }
+    assert_eq!(ids, vec![TagId::from("1")]);
+}
+
+#[tokio::test]
 async fn get_tag_encodes_path_and_reports_404() {
     let server = common::server().await;
     Mock::given(method("GET"))

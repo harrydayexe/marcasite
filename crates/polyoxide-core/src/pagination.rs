@@ -3,7 +3,8 @@
 //! Service clients expose each paginated endpoint twice:
 //!
 //! - `send()` fetches a single page (raw page access, including the cursor), and
-//! - `into_stream()` walks every page lazily and yields individual items.
+//! - `into_stream()` walks every page lazily and yields individual items, as a
+//!   [`Paginated`] stream.
 //!
 //! The helpers here implement the walking for the two pagination styles the APIs use:
 //! opaque cursors ([`cursor_stream`]) and numeric offsets ([`offset_stream`]).
@@ -14,11 +15,104 @@
 //!
 //! [`Stream`]: futures_core::Stream
 
-use std::{collections::VecDeque, future::Future};
+use std::{
+    collections::VecDeque,
+    fmt,
+    future::Future,
+    pin::Pin,
+    sync::{Mutex, PoisonError},
+    task::{Context, Poll, ready},
+};
 
-use futures_core::Stream;
+use futures_core::{FusedStream, Stream};
 
 use crate::Result;
+
+/// The items of a paginated endpoint, fetched page by page as the stream is polled.
+///
+/// Every `into_stream()` returns this type. It yields `Ok(item)` for each item, in order,
+/// and ends after the last page, or right after yielding the first error. It is
+/// [`Unpin`], so it can be polled directly in a `while let` loop, and it is a named type,
+/// so it can be stored in a struct. It is `Send + Sync + 'static`, and it implements
+/// [`FusedStream`].
+///
+/// ```
+/// # async fn run() -> polyoxide_core::Result<()> {
+/// use futures_util::StreamExt as _;
+/// use polyoxide_core::pagination::{Paginated, offset_stream};
+///
+/// // A stand-in for a service's `into_stream()`.
+/// let mut stream: Paginated<u64> = offset_stream(0, |offset| async move {
+///     Ok(if offset < 3 { vec![offset] } else { Vec::new() })
+/// });
+/// while let Some(item) = stream.next().await {
+///     println!("{}", item?);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[must_use = "streams do nothing unless polled"]
+pub struct Paginated<T> {
+    // The mutex is never locked by `poll_next`, which has `&mut self` and uses
+    // `Mutex::get_mut`. It only makes the type `Sync` without requiring the boxed stream
+    // to be `Sync`.
+    inner: Mutex<Pin<Box<dyn Stream<Item = Result<T>> + Send + 'static>>>,
+    terminated: bool,
+}
+
+impl<T> Paginated<T> {
+    /// Wraps a stream of items.
+    pub fn new<S>(stream: S) -> Self
+    where
+        S: Stream<Item = Result<T>> + Send + 'static,
+    {
+        Self {
+            inner: Mutex::new(Box::pin(stream)),
+            terminated: false,
+        }
+    }
+}
+
+impl<T> Stream for Paginated<T> {
+    type Item = Result<T>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.terminated {
+            return Poll::Ready(None);
+        }
+        let inner = this.inner.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let item = ready!(inner.as_mut().poll_next(cx));
+        if item.is_none() {
+            this.terminated = true;
+        }
+        Poll::Ready(item)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.terminated {
+            return (0, Some(0));
+        }
+        match self.inner.try_lock() {
+            Ok(inner) => inner.size_hint(),
+            Err(_) => (0, None),
+        }
+    }
+}
+
+impl<T> FusedStream for Paginated<T> {
+    fn is_terminated(&self) -> bool {
+        self.terminated
+    }
+}
+
+impl<T> fmt::Debug for Paginated<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Paginated")
+            .field("terminated", &self.terminated)
+            .finish_non_exhaustive()
+    }
+}
 
 /// One page of a cursor-paginated listing, as consumed by [`cursor_stream`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,10 +138,7 @@ impl<T> CursorPage<T> {
 /// has no next cursor, when the next cursor is empty, or when the server repeats the cursor
 /// it was just given (which would otherwise loop forever). Service-specific end sentinels
 /// (such as the CLOB's `"LTE="`) must be mapped to `None` by `fetch`.
-pub fn cursor_stream<T, F, Fut>(
-    start: Option<String>,
-    fetch: F,
-) -> impl Stream<Item = Result<T>> + Send + 'static
+pub fn cursor_stream<T, F, Fut>(start: Option<String>, fetch: F) -> Paginated<T>
 where
     T: Send + 'static,
     F: FnMut(Option<String>) -> Fut + Send + 'static,
@@ -66,31 +157,34 @@ where
         buffer: VecDeque::new(),
         done: false,
     };
-    futures_util::stream::unfold(state, |mut state| async move {
-        loop {
-            if let Some(item) = state.buffer.pop_front() {
-                return Some((Ok(item), state));
-            }
-            if state.done {
-                return None;
-            }
-            let requested = state.cursor.clone();
-            match (state.fetch)(requested.clone()).await {
-                Ok(page) => {
-                    state.done = match &page.next_cursor {
-                        None => true,
-                        Some(next) => next.is_empty() || Some(next) == requested.as_ref(),
-                    };
-                    state.cursor = page.next_cursor;
-                    state.buffer = page.items.into();
+    Paginated::new(futures_util::stream::unfold(
+        state,
+        |mut state| async move {
+            loop {
+                if let Some(item) = state.buffer.pop_front() {
+                    return Some((Ok(item), state));
                 }
-                Err(err) => {
-                    state.done = true;
-                    return Some((Err(err), state));
+                if state.done {
+                    return None;
+                }
+                let requested = state.cursor.clone();
+                match (state.fetch)(requested.clone()).await {
+                    Ok(page) => {
+                        state.done = match &page.next_cursor {
+                            None => true,
+                            Some(next) => next.is_empty() || Some(next) == requested.as_ref(),
+                        };
+                        state.cursor = page.next_cursor;
+                        state.buffer = page.items.into();
+                    }
+                    Err(err) => {
+                        state.done = true;
+                        return Some((Err(err), state));
+                    }
                 }
             }
-        }
-    })
+        },
+    ))
 }
 
 /// Lazily walks an offset-paginated endpoint, yielding every item.
@@ -104,10 +198,7 @@ where
 /// truncate the listing. The cost is one final request that returns an empty page. When an
 /// endpoint reports the end explicitly (e.g. `hasMore: false`), `fetch` can return an empty
 /// page without sending a request once it has seen that signal.
-pub fn offset_stream<T, F, Fut>(
-    start: u64,
-    fetch: F,
-) -> impl Stream<Item = Result<T>> + Send + 'static
+pub fn offset_stream<T, F, Fut>(start: u64, fetch: F) -> Paginated<T>
 where
     T: Send + 'static,
     F: FnMut(u64) -> Fut + Send + 'static,
@@ -126,28 +217,31 @@ where
         buffer: VecDeque::new(),
         done: false,
     };
-    futures_util::stream::unfold(state, |mut state| async move {
-        loop {
-            if let Some(item) = state.buffer.pop_front() {
-                return Some((Ok(item), state));
-            }
-            if state.done {
-                return None;
-            }
-            match (state.fetch)(state.offset).await {
-                Ok(items) => {
-                    let len = u64::try_from(items.len()).unwrap_or(u64::MAX);
-                    state.done = len == 0;
-                    state.offset = state.offset.saturating_add(len);
-                    state.buffer = items.into();
+    Paginated::new(futures_util::stream::unfold(
+        state,
+        |mut state| async move {
+            loop {
+                if let Some(item) = state.buffer.pop_front() {
+                    return Some((Ok(item), state));
                 }
-                Err(err) => {
-                    state.done = true;
-                    return Some((Err(err), state));
+                if state.done {
+                    return None;
+                }
+                match (state.fetch)(state.offset).await {
+                    Ok(items) => {
+                        let len = u64::try_from(items.len()).unwrap_or(u64::MAX);
+                        state.done = len == 0;
+                        state.offset = state.offset.saturating_add(len);
+                        state.buffer = items.into();
+                    }
+                    Err(err) => {
+                        state.done = true;
+                        return Some((Err(err), state));
+                    }
                 }
             }
-        }
-    })
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -203,6 +297,29 @@ mod tests {
         let results: Vec<_> = stream.collect().await;
         assert_eq!(results.len(), 1);
         assert!(results[0].is_err());
+    }
+
+    #[tokio::test]
+    async fn paginated_is_unpin_fused_and_debug() {
+        fn assert_traits<T: Unpin + Send + Sync + 'static + fmt::Debug + FusedStream>() {}
+        assert_traits::<Paginated<String>>();
+
+        let mut stream = cursor_stream(None, |cursor| async move {
+            Ok(match cursor.as_deref() {
+                None => CursorPage::new(vec![1, 2], Some("a".to_owned())),
+                _ => CursorPage::new(vec![3], None),
+            })
+        });
+        assert_eq!(format!("{stream:?}"), "Paginated { terminated: false, .. }");
+        // The usual loop works without pinning.
+        let mut items = Vec::new();
+        while let Some(item) = stream.next().await {
+            items.push(item.unwrap());
+        }
+        assert_eq!(items, vec![1, 2, 3]);
+        assert!(stream.is_terminated());
+        assert!(stream.next().await.is_none());
+        assert_eq!(stream.size_hint(), (0, Some(0)));
     }
 
     #[tokio::test]

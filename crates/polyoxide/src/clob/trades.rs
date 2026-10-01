@@ -1,7 +1,7 @@
 //! Builder trades: `GET /builder/trades`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError, serde_util,
     types::{Address, ConditionId, Side, TokenId},
@@ -196,7 +196,7 @@ impl GetBuilderTrades {
 
     /// Streams every trade from the configured cursor onwards, fetching pages lazily until
     /// the last page (`next_cursor` `"LTE="`).
-    pub fn into_stream(self) -> impl Stream<Item = Result<BuilderTrade>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<BuilderTrade> {
         let start = self.next_cursor.clone();
         page_stream(self, start, Self::fetch)
     }

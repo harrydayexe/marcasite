@@ -46,7 +46,26 @@
 //! # Pagination
 //!
 //! Paginated endpoints return one page from `.send()` (including the cursor or offset needed
-//! for the next page), and every page lazily as a [`Stream`] of items from `.into_stream()`:
+//! for the next page), and every item of every page from `.into_stream()`, as a
+//! [`Paginated`] [`Stream`] that fetches the pages lazily. It ends after the last page, or
+//! right after yielding the first error. [`Paginated`] is `Unpin`, so a plain `while let`
+//! loop works:
+//!
+//! ```no_run
+//! # #[cfg(feature = "gamma")]
+//! # async fn run() -> polyoxide::Result<()> {
+//! use futures_util::StreamExt as _;
+//!
+//! let pm = polyoxide::Polymarket::new()?;
+//! let mut tags = pm.gamma().list_tags().limit(100).into_stream();
+//! while let Some(tag) = tags.next().await {
+//!     println!("{:?}", tag?.label);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! The usual stream adapters apply, for example to collect a bounded number of items:
 //!
 //! ```no_run
 //! # #[cfg(feature = "gamma")]
@@ -117,6 +136,7 @@ pub mod relayer;
 pub mod ws;
 
 pub use client::{Polymarket, PolymarketBuilder};
+pub use polyoxide_core::pagination::Paginated;
 pub use polyoxide_core::{
     ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Result, RetryPolicy,
     Service, StatusCode, TransportError, ValidationError,

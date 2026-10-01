@@ -1,8 +1,8 @@
 //! Series: `/series`, `/series/{id}`, `/series/{id}/comments/count` and
 //! `/series-summary/...`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -309,7 +309,7 @@ impl ListSeries {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Series>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Series> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();

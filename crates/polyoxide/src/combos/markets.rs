@@ -1,6 +1,6 @@
 //! Combo markets: `GET /v1/rfq/combo-markets`.
 
-use futures_core::Stream;
+use crate::Paginated;
 use polyoxide_core::{
     Query, Result, ValidationError,
     pagination::{CursorPage, cursor_stream},
@@ -217,7 +217,7 @@ impl ListComboMarkets {
     ///
     /// The stream yields the first error (including the validation errors of
     /// [`send`](Self::send)) and then ends.
-    pub fn into_stream(self) -> impl Stream<Item = Result<ComboMarket>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<ComboMarket> {
         let start = self.cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();

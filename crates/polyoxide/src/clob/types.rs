@@ -1,7 +1,7 @@
 //! Types shared by several CLOB endpoints: pagination pages, batch request items, id
 //! newtypes and client-side validation helpers.
 
-use futures_core::Stream;
+use crate::Paginated;
 use polyoxide_core::{
     Result, ValidationError,
     pagination::{CursorPage, cursor_stream},
@@ -176,11 +176,7 @@ pub(crate) fn next_page_cursor(raw: Option<&str>) -> Option<&str> {
 ///
 /// `fetch(request, cursor)` fetches the page at `cursor` (`None` for the first page) using a
 /// clone of `request`; walking starts at `start` and stops at the [`END_CURSOR`] sentinel.
-pub(crate) fn page_stream<R, T, F, Fut>(
-    request: R,
-    start: Option<String>,
-    fetch: F,
-) -> impl Stream<Item = Result<T>> + Send + 'static
+pub(crate) fn page_stream<R, T, F, Fut>(request: R, start: Option<String>, fetch: F) -> Paginated<T>
 where
     R: Clone + Send + 'static,
     T: Send + 'static,

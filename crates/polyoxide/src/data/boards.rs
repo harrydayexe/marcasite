@@ -1,8 +1,8 @@
 //! Boards: `/v2/leaderboard`, `/v2/biggest-winners`, `/v2/builders/leaderboard`,
 //! `/v2/builders/volume`.
 
+use crate::Paginated;
 use chrono::{DateTime, NaiveDate, Utc};
-use futures_core::Stream;
 use polyoxide_core::{Query, Result, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -351,7 +351,7 @@ impl GetLeaderboard {
     /// Every page restates the same board parameters with the cursor (allowed, since they
     /// agree with the board the cursor pins). The stream ends when `next_cursor` is
     /// `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<LeaderboardEntry>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<LeaderboardEntry> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, LEADERBOARD, start, move |cursor| self.query(cursor))
@@ -462,7 +462,7 @@ impl ListBiggestWinners {
     ///
     /// Every page restates the same window and category with the cursor. The stream ends
     /// when `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<BiggestWinner>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<BiggestWinner> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, BIGGEST_WINNERS, start, move |cursor| {
@@ -526,7 +526,7 @@ impl GetBuildersLeaderboard {
     ///
     /// Every page restates the same window with the cursor. The stream ends when
     /// `next_cursor` is `null`.
-    pub fn into_stream(self) -> impl Stream<Item = Result<BuilderStanding>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<BuilderStanding> {
         let client = self.client.clone();
         let start = self.cursor.clone();
         page_stream(client, BUILDERS_LEADERBOARD, start, move |cursor| {

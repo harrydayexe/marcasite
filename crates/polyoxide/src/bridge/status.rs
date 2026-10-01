@@ -1,7 +1,7 @@
 //! Transfer status: `GET /status/{address}`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result, ValidationError,
     pagination::{CursorPage, cursor_stream},
@@ -211,7 +211,7 @@ impl GetTransactionStatus {
     ///
     /// The stream yields the first error (including the validation errors of
     /// [`send`](Self::send)) and then ends.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Transaction>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Transaction> {
         let start = self.cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();

@@ -1,7 +1,7 @@
 //! Comments: `/comments`, `/comments/{id}` and `/comments/user_address/{user_address}`.
 
+use crate::Paginated;
 use chrono::{DateTime, Utc};
-use futures_core::Stream;
 use polyoxide_core::{
     Query, Result,
     pagination::offset_stream,
@@ -269,7 +269,7 @@ impl ListComments {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Comment>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Comment> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
@@ -359,7 +359,7 @@ impl ListCommentsByUser {
     /// The stream ends at the first empty page. A page shorter than
     /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
     /// the last request returns an empty page.
-    pub fn into_stream(self) -> impl Stream<Item = Result<Comment>> + Send + 'static {
+    pub fn into_stream(self) -> Paginated<Comment> {
         let start = self.params.offset.unwrap_or(0);
         offset_stream(start, move |offset| {
             let request = self.clone();
