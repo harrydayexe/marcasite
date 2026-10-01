@@ -31,7 +31,7 @@ impl RelayerClient {
     /// Checks whether the wallet at `address` is deployed onchain (`GET /deployed`).
     ///
     /// Without [`CheckDeployed::wallet_type`] the server checks a Gnosis Safe
-    /// ([`WalletType::Safe`]).
+    /// ([`WalletType::Safe`]). Errors are reported by [`CheckDeployed::send`].
     ///
     /// See <https://docs.polymarket.com/api-reference/relayer/check-if-a-wallet-is-deployed>.
     ///
