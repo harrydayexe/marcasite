@@ -60,7 +60,7 @@
 //!
 //! | Channel | Documented heartbeat | Default idle timeout |
 //! |---|---|---|
-//! | Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`] (30 s; three heartbeat intervals) |
+//! | Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`] (30 s; three heartbeat intervals if a longer interval is configured) |
 //! | Sports | server `ping` every 5 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`] (15 s) |
 //! | PolyBolt | server protocol ping every 25 s | [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`] (75 s) |
 //!

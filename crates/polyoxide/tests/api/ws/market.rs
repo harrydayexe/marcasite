@@ -398,6 +398,7 @@ async fn keeps_heartbeating_and_subscribing_while_the_consumer_lags() {
         .url(&url)
         .buffer(1)
         .heartbeat_interval(Duration::from_millis(20))
+        .no_idle_timeout()
         .connect(MarketSubscription::new([ASSET_A]))
         .await
         .unwrap();

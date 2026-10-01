@@ -335,8 +335,8 @@ impl MarketChannel {
 
     /// The default idle timeout: three times the documented 10-second heartbeat interval,
     /// since the server answers every `PING` with `PONG`. When the heartbeat interval is
-    /// changed with [`MarketChannelBuilder::heartbeat_interval`] and no idle timeout is
-    /// set, the default is three times that interval instead.
+    /// raised with [`MarketChannelBuilder::heartbeat_interval`] and no idle timeout is set,
+    /// the default becomes three times that interval (it never drops below this value).
     pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
     /// Connects to the production URL and sends `subscription`.
@@ -548,8 +548,8 @@ impl MarketChannelBuilder {
         self
     }
 
-    /// Sets the idle timeout (default [`MarketChannel::DEFAULT_IDLE_TIMEOUT`], or three
-    /// times the heartbeat interval when that was changed).
+    /// Sets the idle timeout (default: three times the heartbeat interval, and at least
+    /// [`MarketChannel::DEFAULT_IDLE_TIMEOUT`]).
     ///
     /// If no frame of any kind (data, heartbeat or heartbeat reply) arrives for this long,
     /// the stream yields a final [`Error::WebSocket`](crate::Error::WebSocket) of kind
@@ -583,7 +583,9 @@ impl MarketChannelBuilder {
             .config(
                 Service::MarketChannel,
                 MarketChannel::DEFAULT_URL,
-                self.heartbeat_interval.saturating_mul(3),
+                self.heartbeat_interval
+                    .saturating_mul(3)
+                    .max(MarketChannel::DEFAULT_IDLE_TIMEOUT),
             )?
             .heartbeat(self.heartbeat_interval, PING)
             .ignore(PONG)

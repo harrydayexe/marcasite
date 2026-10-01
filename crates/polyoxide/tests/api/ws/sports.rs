@@ -78,7 +78,7 @@ async fn idle_timeout_ends_a_silent_connection() {
 
     let mut channel = SportsChannel::builder()
         .url(&url)
-        .idle_timeout(Duration::from_millis(200))
+        .idle_timeout(Duration::from_millis(500))
         .connect()
         .await
         .unwrap();

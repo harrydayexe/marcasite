@@ -38,6 +38,12 @@
 //! the server tolerates unanswered pings is disconnected by the server. The idle timeout
 //! does not run while reading is paused.
 //!
+//! If a write fails (for example because the server has already closed the connection
+//! while reading was paused), the driver stops writing but keeps reading until the
+//! connection ends, so the frames the server sent before, and its close frame with the
+//! close code, still reach the consumer. The write error is reported only if no close
+//! frame arrives. A write that times out abandons the connection at once.
+//!
 //! # Timeouts
 //!
 //! - **Handshake**: [`WsConfig::connect_timeout`] (default [`DEFAULT_CONNECT_TIMEOUT`]).
@@ -499,6 +505,26 @@ async fn drive(
     // A received message waiting for room in the full `incoming` buffer. While it is set,
     // the socket is not read (back-pressure), but commands and heartbeats are still sent.
     let mut pending: Option<Result<String>> = None;
+    // Set when a write failed (other than by timing out). Frames the server sent before
+    // the failure, possibly ending with a close frame and its code, may still be waiting to
+    // be read (typically under back-pressure), so nothing more is written but reading goes
+    // on until the connection ends.
+    let mut write_failure: Option<Error> = None;
+
+    // Handles the result of a write: a timeout abandons the connection; any other failure
+    // stops writing (see `write_failure`).
+    macro_rules! check_write {
+        ($write:expr) => {
+            if let Err(err) = $write {
+                if is_timeout(&err) {
+                    break (Some(err), Shutdown::Abandon);
+                }
+                tracing::debug!(service = %service, error = %err, "write failed, reading what the server already sent");
+                write_failure = Some(err);
+                heartbeat = None;
+            }
+        };
+    }
 
     let (failure, shutdown) = loop {
         let tick = async {
@@ -509,27 +535,33 @@ async fn drive(
                 None => std::future::pending::<()>().await,
             }
         };
+        // How to leave the socket if the connection ends now without a server close frame.
+        let fallback = if write_failure.is_some() {
+            Shutdown::Abandon
+        } else {
+            Shutdown::Close
+        };
         tokio::select! {
             command = commands.recv() => match command {
                 Some(Command::Send(text)) => {
+                    if write_failure.is_some() {
+                        tracing::debug!(service = %service, bytes = text.len(), "dropping a message: the connection can no longer be written");
+                        continue;
+                    }
                     tracing::trace!(service = %service, bytes = text.len(), "sending message");
                     let frame = Some(Message::text(text));
-                    if let Err(err) = write(&mut socket, frame, service, write_timeout, "send a message").await {
-                        break (Some(err), Shutdown::Abandon);
-                    }
+                    check_write!(write(&mut socket, frame, service, write_timeout, "send a message").await);
                 }
                 Some(Command::Close) | None => {
                     tracing::debug!(service = %service, "closing websocket");
-                    break (None, Shutdown::Close);
+                    break (write_failure.take(), fallback);
                 }
             },
             () = tick => {
                 if let Some((_, message)) = &heartbeat {
                     tracing::trace!(service = %service, "sending heartbeat");
                     let frame = Some(Message::text(*message));
-                    if let Err(err) = write(&mut socket, frame, service, write_timeout, "send a heartbeat").await {
-                        break (Some(err), Shutdown::Abandon);
-                    }
+                    check_write!(write(&mut socket, frame, service, write_timeout, "send a heartbeat").await);
                 }
             },
             permit = incoming.reserve(), if pending.is_some() => match permit {
@@ -541,14 +573,17 @@ async fn drive(
                     // Frames were not read while paused: do not count that time as idle.
                     last_activity = Instant::now();
                 }
-                // The handle was dropped.
-                Err(_) => break (None, Shutdown::Close),
+                // The handle was dropped: nobody is left to report to.
+                Err(_) => break (None, fallback),
             },
             () = &mut idle, if pending.is_none() && idle_timeout.is_some() => {
                 if let Some(timeout) = idle_timeout {
                     match last_activity.checked_add(timeout) {
                         Some(deadline) if deadline > Instant::now() => idle.as_mut().reset(deadline),
-                        Some(_) => break (Some(idle_error(service, timeout)), Shutdown::Abandon),
+                        Some(_) => break (
+                            Some(write_failure.take().unwrap_or_else(|| idle_error(service, timeout))),
+                            Shutdown::Abandon,
+                        ),
                         // Too far in the future to ever fire.
                         None => idle_timeout = None,
                     }
@@ -560,10 +595,10 @@ async fn drive(
                     Some(Ok(Message::Text(text))) => {
                         let text = text.as_str();
                         if let Some((_, reply)) = config.auto_replies.iter().find(|(r, _)| r == text) {
-                            tracing::trace!(service = %service, received = %text, "answering server heartbeat");
-                            let frame = Some(Message::text(reply.as_str()));
-                            if let Err(err) = write(&mut socket, frame, service, write_timeout, "answer a server heartbeat").await {
-                                break (Some(err), Shutdown::Abandon);
+                            if write_failure.is_none() {
+                                tracing::trace!(service = %service, received = %text, "answering server heartbeat");
+                                let frame = Some(Message::text(reply.as_str()));
+                                check_write!(write(&mut socket, frame, service, write_timeout, "answer a server heartbeat").await);
                             }
                             continue;
                         }
@@ -572,32 +607,46 @@ async fn drive(
                         }
                         tracing::trace!(service = %service, message = %text, "received message");
                         if !deliver(&incoming, &mut pending, text.to_owned(), service) {
-                            break (None, Shutdown::Close);
+                            break (None, fallback);
                         }
                     }
                     Some(Ok(Message::Binary(bytes))) => match String::from_utf8(bytes.to_vec()) {
                         Ok(text) => {
                             if !deliver(&incoming, &mut pending, text, service) {
-                                break (None, Shutdown::Close);
+                                break (None, fallback);
                             }
                         }
                         Err(_) => tracing::debug!(service = %service, "ignoring non-UTF-8 binary frame"),
                     },
                     Some(Ok(Message::Ping(_))) => {
                         // tungstenite queues the pong; flush so it is sent promptly.
-                        if let Err(err) = write(&mut socket, None, service, write_timeout, "answer a ping").await {
-                            break (Some(err), Shutdown::Abandon);
+                        if write_failure.is_none() {
+                            check_write!(write(&mut socket, None, service, write_timeout, "answer a ping").await);
                         }
                     }
                     Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
-                    Some(Ok(Message::Close(frame))) => break (close_error(service, frame), Shutdown::Reply),
-                    Some(Err(e)) => break (Some(read_error(service, e)), Shutdown::Abandon),
+                    // The server's close frame says why the connection ended, even after a
+                    // failed write.
+                    Some(Ok(Message::Close(frame))) => {
+                        let shutdown = if write_failure.is_some() {
+                            Shutdown::Abandon
+                        } else {
+                            Shutdown::Reply
+                        };
+                        break (close_error(service, frame), shutdown);
+                    }
+                    Some(Err(e)) => break (
+                        Some(write_failure.take().unwrap_or_else(|| read_error(service, e))),
+                        Shutdown::Abandon,
+                    ),
                     None => break (
-                        Some(ws_error(
-                            service,
-                            WebSocketErrorKind::Closed,
-                            "connection closed without a close frame",
-                        )),
+                        Some(write_failure.take().unwrap_or_else(|| {
+                            ws_error(
+                                service,
+                                WebSocketErrorKind::Closed,
+                                "connection closed without a close frame",
+                            )
+                        })),
                         Shutdown::Abandon,
                     ),
                 }
@@ -638,6 +687,11 @@ fn deliver(
         }
         Err(TrySendError::Closed(_)) => false,
     }
+}
+
+/// Whether `err` is a [`WebSocketErrorKind::Timeout`] error.
+fn is_timeout(err: &Error) -> bool {
+    matches!(err, Error::WebSocket(ws) if ws.kind() == WebSocketErrorKind::Timeout)
 }
 
 /// Writes `message` (or, with `None`, flushes frames tungstenite queued itself, such as a
@@ -1022,14 +1076,16 @@ mod tests {
             }
             // Stay silent for longer than the idle timeout: it must not run while the
             // client is not reading.
-            tokio::time::sleep(Duration::from_millis(300)).await;
+            tokio::time::sleep(Duration::from_millis(1200)).await;
             socket.close(None).await.unwrap();
         })
         .await;
         let config = WsConfig::new(Service::MarketChannel, url)
             .buffer(1)
             .heartbeat(Duration::from_millis(20), "PING")
-            .idle_timeout(Duration::from_millis(100));
+            // Far shorter than the server's silence below, but long enough for the flood to
+            // arrive (and pause reading) on a loaded machine.
+            .idle_timeout(Duration::from_millis(400));
         let mut conn = WsConnection::connect(config).await.unwrap();
         tokio::time::timeout(TIMEOUT, flooded_rx)
             .await
@@ -1050,12 +1106,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn frames_and_close_code_survive_a_failed_write_under_back_pressure() {
+        const FLOOD: usize = 20;
+        let (url, server) = serve(|mut socket| async move {
+            for i in 0..FLOOD {
+                socket.send(Message::text(format!("m{i}"))).await.unwrap();
+            }
+            socket
+                .close(Some(CloseFrame {
+                    code: CloseCode::from(4002),
+                    reason: "slow consumer".into(),
+                }))
+                .await
+                .unwrap();
+            // Then drop the connection without reading the client's frames, so that the
+            // client's heartbeats fail.
+        })
+        .await;
+        let config = WsConfig::new(Service::PolyBolt, url)
+            .buffer(1)
+            .heartbeat(Duration::from_millis(10), "PING");
+        let mut conn = WsConnection::connect(config).await.unwrap();
+        server.await.unwrap();
+        // The consumer does not read while the heartbeats hit the dead connection.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // What the server sent before closing is still delivered, then its close code.
+        for i in 0..FLOOD {
+            assert_eq!(next(&mut conn).await.unwrap().unwrap(), format!("m{i}"));
+        }
+        let err = next(&mut conn).await.unwrap().unwrap_err();
+        let Error::WebSocket(ws) = &err else {
+            panic!("expected a websocket error, got {err:?}");
+        };
+        assert_eq!(ws.kind(), WebSocketErrorKind::Closed, "{err}");
+        assert_eq!(ws.close_code(), Some(4002));
+        assert!(next(&mut conn).await.is_none());
+    }
+
+    #[tokio::test]
     async fn idle_timeout_ends_a_silent_connection() {
         let (url, server) = serve(|mut socket| async move {
-            // Ignored heartbeat replies count as activity.
-            for _ in 0..6 {
+            // Ignored heartbeat replies count as activity: they span more than twice the
+            // idle timeout.
+            for _ in 0..9 {
                 socket.send(Message::text("PONG")).await.unwrap();
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
             socket.send(Message::text("data")).await.unwrap();
             // Then silence, until the client gives up and goes away.
@@ -1064,7 +1160,7 @@ mod tests {
         .await;
         let config = WsConfig::new(Service::SportsChannel, url)
             .ignore("PONG")
-            .idle_timeout(Duration::from_millis(150));
+            .idle_timeout(Duration::from_millis(400));
         let mut conn = WsConnection::connect(config).await.unwrap();
         assert_eq!(next(&mut conn).await.unwrap().unwrap(), "data");
         let err = next(&mut conn).await.unwrap().unwrap_err();
