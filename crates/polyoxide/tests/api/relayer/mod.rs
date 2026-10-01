@@ -1,1 +1,5 @@
-//! relayer integration tests.
+//! Relayer API integration tests.
+
+mod nonce;
+mod transactions;
+mod wallets;

@@ -135,10 +135,10 @@ Base URL `https://relayer-v2.polymarket.com`, spec [`docs/specs/relayer-openapi.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [ ] | `GET` | `/transaction` | [local](docs/api-reference/relayer/get-a-transaction-by-id.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id) | |
-| [ ] | `GET` | `/nonce` | [local](docs/api-reference/relayer/get-current-nonce-for-a-user.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-current-nonce-for-a-user) | |
-| [ ] | `GET` | `/relay-payload` | [local](docs/api-reference/relayer/get-relayer-address-and-nonce.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce) | |
-| [ ] | `GET` | `/deployed` | [local](docs/api-reference/relayer/check-if-a-wallet-is-deployed.md) / [online](https://docs.polymarket.com/api-reference/relayer/check-if-a-wallet-is-deployed) | |
+| [x] | `GET` | `/transaction` | [local](docs/api-reference/relayer/get-a-transaction-by-id.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id) | `RelayerClient::get_transaction` |
+| [x] | `GET` | `/nonce` | [local](docs/api-reference/relayer/get-current-nonce-for-a-user.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-current-nonce-for-a-user) | `RelayerClient::get_nonce` |
+| [x] | `GET` | `/relay-payload` | [local](docs/api-reference/relayer/get-relayer-address-and-nonce.md) / [online](https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce) | `RelayerClient::get_relay_payload` |
+| [x] | `GET` | `/deployed` | [local](docs/api-reference/relayer/check-if-a-wallet-is-deployed.md) / [online](https://docs.polymarket.com/api-reference/relayer/check-if-a-wallet-is-deployed) | `RelayerClient::check_deployed` |
 
 ## Bridge API
 
