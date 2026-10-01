@@ -177,7 +177,6 @@ Not implemented yet. Listed so coverage gaps are explicit.
 
 | Service | Method | Path | Docs |
 |---|---|---|---|
-
 | CLOB API | `POST` | `/order` | [local](docs/api-reference/trade/post-a-new-order.md) / [online](https://docs.polymarket.com/api-reference/trade/post-a-new-order) |
 | CLOB API | `DELETE` | `/order` | [local](docs/api-reference/trade/cancel-single-order.md) / [online](https://docs.polymarket.com/api-reference/trade/cancel-single-order) |
 | CLOB API | `POST` | `/orders` | [local](docs/api-reference/trade/post-multiple-orders.md) / [online](https://docs.polymarket.com/api-reference/trade/post-multiple-orders) |

@@ -28,6 +28,16 @@ polyoxide = { version = "0.1", default-features = false, features = ["gamma", "c
 
 ## Quick start
 
+The examples use [`tokio`](https://docs.rs/tokio) (with the `macros` and `rt-multi-thread`
+features) and [`futures-util`](https://docs.rs/futures-util) for stream combinators:
+
+```toml
+[dependencies]
+polyoxide = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures-util = "0.3"
+```
+
 ```rust,no_run
 use futures_util::TryStreamExt as _;
 use polyoxide::Polymarket;
