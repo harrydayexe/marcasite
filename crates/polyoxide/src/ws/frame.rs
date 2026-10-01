@@ -13,7 +13,7 @@ use std::{
 use futures_core::Stream;
 
 use polyoxide_core::{
-    ConfigError, Error, Result, Service, WebSocketError,
+    ConfigError, Error, Result, Service, WebSocketError, WebSocketErrorKind,
     ws::{WsConfig, WsConnection, parse_ws_url},
 };
 use serde::de::DeserializeOwned;
@@ -119,8 +119,9 @@ impl<E: DeserializeOwned> EventStream<E> {
 /// - A frame that is not JSON is passed to `E` as a JSON string, so that an undocumented
 ///   plain-text message becomes the event type's catch-all variant instead of an error.
 /// - A JSON array is flattened: each element is decoded on its own.
-/// - An element that fails to decode yields a non-fatal `Err(Error::WebSocket)` whose
-///   source is the `serde_json` error; the other elements are unaffected.
+/// - An element that fails to decode yields a non-fatal `Err(Error::WebSocket)` of kind
+///   [`WebSocketErrorKind::Decode`] whose source is the `serde_json` error; the other
+///   elements are unaffected.
 pub(crate) fn decode_frame<E: DeserializeOwned>(
     service: Service,
     text: &str,
@@ -145,8 +146,12 @@ fn decode_value<E: DeserializeOwned>(service: Service, value: Value) -> Result<E
         let snippet = snippet(&value);
         tracing::debug!(service = %service, error = %source, message = %snippet, "failed to decode message");
         Error::WebSocket(Box::new(
-            WebSocketError::new(service, format!("failed to decode message `{snippet}`"))
-                .with_source(source),
+            WebSocketError::new(
+                service,
+                WebSocketErrorKind::Decode,
+                format!("failed to decode message `{snippet}`"),
+            )
+            .with_source(source),
         ))
     })
 }
@@ -212,6 +217,7 @@ mod tests {
         let Error::WebSocket(ws) = &err else {
             panic!("unexpected error {err:?}");
         };
+        assert_eq!(ws.kind(), WebSocketErrorKind::Decode);
         assert!(ws.message().starts_with("failed to decode message `\"xxx"));
         assert!(ws.message().ends_with("…`"));
         assert!(std::error::Error::source(ws.as_ref()).is_some());

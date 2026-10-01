@@ -40,12 +40,12 @@ pub mod validate;
 pub mod ws;
 
 pub use config::{HttpClient, HttpClientBuilder, RetryPolicy};
-#[cfg(feature = "ws")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
-pub use error::WebSocketError;
 pub use error::{
     ApiError, ConfigError, DecodeError, Error, Result, Service, TransportError, ValidationError,
 };
+#[cfg(feature = "ws")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
+pub use error::{WebSocketError, WebSocketErrorKind};
 pub use query::Query;
 pub use transport::Transport;
 

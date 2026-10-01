@@ -117,13 +117,13 @@ pub mod relayer;
 pub mod ws;
 
 pub use client::{Polymarket, PolymarketBuilder};
-#[cfg(feature = "ws")]
-#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
-pub use polyoxide_core::WebSocketError;
 pub use polyoxide_core::{
     ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Result, RetryPolicy,
     Service, StatusCode, TransportError, ValidationError,
 };
+#[cfg(feature = "ws")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
+pub use polyoxide_core::{WebSocketError, WebSocketErrorKind};
 
 /// Re-export of [`rust_decimal::Decimal`], used for all prices, sizes and amounts.
 pub use rust_decimal::Decimal;

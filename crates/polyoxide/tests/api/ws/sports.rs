@@ -4,7 +4,7 @@
 
 use futures_core::stream::FusedStream as _;
 use polyoxide::{
-    Error,
+    Error, WebSocketErrorKind,
     ws::{SportsChannel, SportsEvent},
 };
 use serde_json::json;
@@ -59,6 +59,7 @@ async fn answers_ping_and_decodes_updates() {
         panic!("expected a connection error");
     };
     assert_eq!(err.service(), polyoxide::Service::SportsChannel);
+    assert_eq!(err.kind(), WebSocketErrorKind::Closed, "{err}");
     assert!(next(&mut channel).await.is_none());
     assert!(channel.is_terminated());
     server.await.unwrap();

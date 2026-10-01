@@ -15,7 +15,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{
-    Error, Result, Service, ValidationError, WebSocketError, serde_util,
+    Error, Result, Service, ValidationError, WebSocketError, WebSocketErrorKind, serde_util,
     types::{ConditionId, TokenId},
     ws::WsConnection,
 };
@@ -303,7 +303,12 @@ impl PolyBoltSubscription {
 fn encode(value: &impl Serialize) -> Result<String> {
     serde_json::to_string(value).map_err(|e| {
         Error::WebSocket(Box::new(
-            WebSocketError::new(Service::PolyBolt, "failed to encode request").with_source(e),
+            WebSocketError::new(
+                Service::PolyBolt,
+                WebSocketErrorKind::Send,
+                "failed to encode request",
+            )
+            .with_source(e),
         ))
     })
 }
@@ -330,6 +335,20 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// Note: the PolyBolt overview page says subscriptions require CLOB API credentials,
 /// while the AsyncAPI spec marks `price.polymarket` as public (no auth). This type follows
 /// the spec.
+///
+/// # Stream items
+///
+/// Each item is an `Ok(`[`PolyBoltEvent`]`)` or an
+/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
+/// [`kind`](crate::WebSocketError::kind):
+///
+/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
+///   match its documented schema. **Not fatal**: the stream continues with the next
+///   message.
+/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
+///   stream ends after this item.
+///
+/// A normal close ends the stream without an error.
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/polybolt> and the [module
 /// documentation](super) for error handling and reconnection.
@@ -1040,7 +1059,8 @@ mod tests {
             assert_eq!(expected.code(), code);
         }
         let err = Error::WebSocket(Box::new(
-            WebSocketError::new(Service::PolyBolt, "closed").with_close(4008, "policy"),
+            WebSocketError::new(Service::PolyBolt, WebSocketErrorKind::Closed, "closed")
+                .with_close(4008, "policy"),
         ));
         assert_eq!(
             PolyBoltCloseCode::from_error(&err),

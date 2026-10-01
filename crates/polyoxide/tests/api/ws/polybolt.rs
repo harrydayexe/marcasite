@@ -4,7 +4,7 @@
 
 use futures_core::stream::FusedStream as _;
 use polyoxide::{
-    Decimal, Error,
+    Decimal, Error, WebSocketErrorKind,
     ws::{
         PolyBoltChannel, PolyBoltChannelName, PolyBoltCloseCode, PolyBoltErrorCode, PolyBoltEvent,
         PolyBoltSubscription,
@@ -229,6 +229,7 @@ async fn policy_close_is_reported_with_its_code() {
     let Error::WebSocket(ws) = &err else {
         panic!("expected a websocket error, got {err:?}");
     };
+    assert_eq!(ws.kind(), WebSocketErrorKind::Closed);
     assert_eq!(ws.close_reason(), Some("policy violation"));
     assert!(next(&mut channel).await.is_none());
     assert!(channel.is_terminated());

@@ -11,7 +11,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{
-    Error, Result, Service, ValidationError, WebSocketError, serde_util,
+    Error, Result, Service, ValidationError, WebSocketError, WebSocketErrorKind, serde_util,
     types::{ConditionId, EventId, MarketId, Side, TokenId},
     ws::WsConnection,
 };
@@ -259,7 +259,12 @@ impl MarketSubscriptionUpdate {
 fn encode(value: &impl Serialize) -> Result<String> {
     serde_json::to_string(value).map_err(|e| {
         Error::WebSocket(Box::new(
-            WebSocketError::new(Service::MarketChannel, "failed to encode request").with_source(e),
+            WebSocketError::new(
+                Service::MarketChannel,
+                WebSocketErrorKind::Send,
+                "failed to encode request",
+            )
+            .with_source(e),
         ))
     })
 }
@@ -270,6 +275,20 @@ fn encode(value: &impl Serialize) -> Result<String> {
 /// The channel is a [`Stream`] of [`MarketEvent`]s. It sends the documented `PING`
 /// heartbeat every 10 seconds and drops the server's `PONG` replies. See the
 /// [module documentation](super) for error handling and reconnection.
+///
+/// # Stream items
+///
+/// Each item is an `Ok(`[`MarketEvent`]`)` or an
+/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
+/// [`kind`](crate::WebSocketError::kind):
+///
+/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
+///   match its documented schema. **Not fatal**: the stream continues with the next
+///   message.
+/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
+///   stream ends after this item.
+///
+/// A normal close ends the stream without an error.
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/market>.
 ///

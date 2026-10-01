@@ -52,17 +52,48 @@
 //! - A frame holding a JSON array is flattened into one event per element. (None of the
 //!   channels documents array frames; they are accepted defensively.)
 //! - A recognised message that does not match its documented schema is yielded as an
-//!   `Err(`[`Error::WebSocket`]`)` whose message quotes the offending JSON and whose
-//!   [`source`](std::error::Error::source) is the `serde_json` error. This is **not**
-//!   fatal: the stream continues with the next message.
-//! - A connection failure (an abnormal close, with the server's close code and reason
-//!   when there is one, or a socket error) is yielded as one final `Err(`[`Error::WebSocket`]`)`,
-//!   after which the stream ends. A normal close ends the stream without an error. Every
+//!   `Err(`[`Error::WebSocket`]`)` of kind [`WebSocketErrorKind::Decode`] whose message
+//!   quotes the offending JSON and whose [`source`](std::error::Error::source) is the
+//!   `serde_json` error. This is **not** fatal: the stream continues with the next
+//!   message.
+//! - A connection failure is yielded as one final `Err(`[`Error::WebSocket`]`)`, after
+//!   which the stream ends. Its [`kind`](crate::WebSocketError::kind) is [`Closed`] for an
+//!   abnormal close (with the server's close code and reason when there is one) or a
+//!   connection that dropped, [`Protocol`] for a socket or protocol error, or [`Send`] if a
+//!   frame could not be written. A normal close ends the stream without an error. Every
 //!   channel implements [`FusedStream`]: `is_terminated()` reports whether the stream has
 //!   ended.
+//! - `connect` fails with kind [`Connect`] if the connection cannot be established, and
+//!   sending on a connection that has ended (e.g. [`MarketChannel::subscribe`]) fails with
+//!   kind [`Closed`].
 //! - Requests that break a documented constraint (for example an empty PolyBolt
 //!   subscription, or more than 64 active PolyBolt subscriptions) fail with
 //!   [`Error::Validation`] before anything is sent.
+//!
+//! ```no_run
+//! # async fn run() -> polyoxide::Result<()> {
+//! use futures_util::StreamExt as _;
+//! use polyoxide::{
+//!     Error, WebSocketErrorKind,
+//!     ws::{SportsChannel, SportsEvent},
+//! };
+//!
+//! let mut channel = SportsChannel::connect().await?;
+//! while let Some(item) = channel.next().await {
+//!     match item {
+//!         Ok(SportsEvent::Update(result)) => println!("{}: {:?}", result.slug, result.score),
+//!         Ok(_) => {}
+//!         // Not fatal: skip the malformed message.
+//!         Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {
+//!             eprintln!("skipping a message: {err}");
+//!         }
+//!         // Terminal: the stream ends after this item.
+//!         Err(err) => return Err(err),
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Reconnecting
 //!
@@ -133,6 +164,11 @@
 //! [`FusedStream`]: futures_core::stream::FusedStream
 //! [`Error::WebSocket`]: crate::Error::WebSocket
 //! [`Error::Validation`]: crate::Error::Validation
+//! [`WebSocketErrorKind::Decode`]: crate::WebSocketErrorKind::Decode
+//! [`Closed`]: crate::WebSocketErrorKind::Closed
+//! [`Protocol`]: crate::WebSocketErrorKind::Protocol
+//! [`Send`]: crate::WebSocketErrorKind::Send
+//! [`Connect`]: crate::WebSocketErrorKind::Connect
 
 mod frame;
 mod market;

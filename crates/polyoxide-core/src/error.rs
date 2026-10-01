@@ -585,12 +585,69 @@ impl std::error::Error for ConfigError {
     }
 }
 
-/// A WebSocket connection failed or closed unexpectedly.
+/// What went wrong on a WebSocket connection; see [`WebSocketError::kind`].
+///
+/// Every kind except [`Decode`](Self::Decode) means the connection is unusable (or was
+/// never established): a stream yields at most one such error, as its last item.
+/// [`Decode`](Self::Decode) errors are **not fatal**: the stream continues with the next
+/// message.
+///
+/// The enum is `#[non_exhaustive]`: include a wildcard arm when matching.
+#[cfg(feature = "ws")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WebSocketErrorKind {
+    /// The connection could not be established: the TCP connection, the TLS or WebSocket
+    /// handshake failed (including a handshake refused with an HTTP status such as `429`
+    /// or `503`), the handshake timed out, or the messages to send right after connecting
+    /// (e.g. a subscription) could not be sent.
+    Connect,
+    /// The connection is closed: the server closed it with a close code other than `1000`
+    /// (normal), see [`WebSocketError::close_code`]; it ended without a close frame; or a
+    /// frame was queued after the connection had already terminated.
+    Closed,
+    /// The established connection failed at the socket or protocol level (an I/O or TLS
+    /// error, or a WebSocket protocol violation).
+    Protocol,
+    /// A frame could not be sent: writing it to the socket failed (which ends the
+    /// connection), or the request could not be encoded.
+    Send,
+    /// A received message could not be decoded into the expected type. Not fatal: the
+    /// connection stays open and the stream continues with the next message.
+    Decode,
+}
+
+#[cfg(feature = "ws")]
+impl WebSocketErrorKind {
+    /// A short, stable, human-readable name for the kind (e.g. `"decode"`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Closed => "closed",
+            Self::Protocol => "protocol",
+            Self::Send => "send",
+            Self::Decode => "decode",
+        }
+    }
+}
+
+#[cfg(feature = "ws")]
+impl fmt::Display for WebSocketErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// A WebSocket connection failed, closed unexpectedly, or received a message that could
+/// not be decoded. [`WebSocketError::kind`] tells these apart.
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
 #[derive(Debug)]
 pub struct WebSocketError {
     pub(crate) service: Service,
+    pub(crate) kind: WebSocketErrorKind,
     pub(crate) message: Cow<'static, str>,
     pub(crate) close_code: Option<u16>,
     pub(crate) close_reason: Option<String>,
@@ -599,11 +656,16 @@ pub struct WebSocketError {
 
 #[cfg(feature = "ws")]
 impl WebSocketError {
-    /// Creates a WebSocket error for `service` with a message.
+    /// Creates a WebSocket error of the given `kind` for `service` with a message.
     #[must_use]
-    pub fn new(service: Service, message: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(
+        service: Service,
+        kind: WebSocketErrorKind,
+        message: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             service,
+            kind,
             message: message.into(),
             close_code: None,
             close_reason: None,
@@ -630,6 +692,14 @@ impl WebSocketError {
     #[must_use]
     pub fn service(&self) -> Service {
         self.service
+    }
+
+    /// What kind of failure this is. In particular, [`WebSocketErrorKind::Decode`] marks a
+    /// non-fatal decode error, after which the stream continues; every other kind is
+    /// terminal.
+    #[must_use]
+    pub fn kind(&self) -> WebSocketErrorKind {
+        self.kind
     }
 
     /// A description of what went wrong.
@@ -728,6 +798,31 @@ mod tests {
             "data API returned 400 Bad Request for GET https://data-api.polymarket.com/v2/positions: \
              offset is not supported (code: invalid_request) (parameter: offset) (trace id: abc)"
         );
+    }
+
+    #[cfg(feature = "ws")]
+    #[test]
+    fn websocket_error_exposes_kind_and_close() {
+        let err = WebSocketError::new(
+            Service::PolyBolt,
+            WebSocketErrorKind::Closed,
+            "server closed the connection",
+        )
+        .with_close(4008, "policy violation");
+        assert_eq!(err.kind(), WebSocketErrorKind::Closed);
+        assert_eq!(err.service(), Service::PolyBolt);
+        assert_eq!(err.close_code(), Some(4008));
+        assert_eq!(
+            err.to_string(),
+            "polybolt websocket error: server closed the connection (close code 4008: policy violation)"
+        );
+        assert_eq!(WebSocketErrorKind::Decode.to_string(), "decode");
+        let err = Error::WebSocket(Box::new(WebSocketError::new(
+            Service::MarketChannel,
+            WebSocketErrorKind::Decode,
+            "failed to decode message",
+        )));
+        assert_eq!(err.service(), Some(Service::MarketChannel));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use futures_core::stream::FusedStream as _;
 use polyoxide::{
-    Decimal, Error,
+    Decimal, Error, WebSocketErrorKind,
     types::Side,
     ws::{
         MarketChannel, MarketEvent, MarketSubscription, MarketSubscriptionUpdate, SubscriptionLevel,
@@ -205,6 +205,7 @@ async fn decode_errors_do_not_end_the_stream() {
         panic!("expected a decode error");
     };
     assert_eq!(err.service(), polyoxide::Service::MarketChannel);
+    assert_eq!(err.kind(), WebSocketErrorKind::Decode);
     assert!(err.message().contains(r#""event_type":"book""#), "{err}");
     assert!(err.to_string().contains("invalid `book` event"), "{err}");
     assert_eq!(err.close_code(), None);
@@ -235,15 +236,16 @@ async fn abnormal_close_yields_a_final_error() {
     let Some(Err(Error::WebSocket(err))) = next(&mut channel).await else {
         panic!("expected a close error");
     };
+    assert_eq!(err.kind(), WebSocketErrorKind::Closed);
     assert_eq!(err.close_code(), Some(1011));
     assert_eq!(err.close_reason(), Some("internal error"));
     assert!(next(&mut channel).await.is_none());
     assert!(channel.is_terminated());
     // Sending on a terminated connection fails.
-    assert!(matches!(
-        channel.subscribe([ASSET_B]),
-        Err(Error::WebSocket(_))
-    ));
+    let Err(Error::WebSocket(err)) = channel.subscribe([ASSET_B]) else {
+        panic!("expected a websocket error");
+    };
+    assert_eq!(err.kind(), WebSocketErrorKind::Closed);
     server.await.unwrap();
 }
 
@@ -277,5 +279,8 @@ async fn connection_failure_is_a_websocket_error() {
         .connect(MarketSubscription::new([ASSET_A]))
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::WebSocket(_)), "{err:?}");
+    let Error::WebSocket(ws) = &err else {
+        panic!("expected a websocket error, got {err:?}");
+    };
+    assert_eq!(ws.kind(), WebSocketErrorKind::Connect);
 }

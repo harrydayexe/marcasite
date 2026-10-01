@@ -29,6 +29,20 @@ const PONG: &str = "pong";
 /// within 10 seconds; this channel answers automatically and does not surface the
 /// heartbeats. See the [module documentation](super) for error handling and reconnection.
 ///
+/// # Stream items
+///
+/// Each item is an `Ok(`[`SportsEvent`]`)` or an
+/// `Err(`[`Error::WebSocket`](crate::Error::WebSocket)`)`. Check the error's
+/// [`kind`](crate::WebSocketError::kind):
+///
+/// - [`WebSocketErrorKind::Decode`](crate::WebSocketErrorKind::Decode): a message did not
+///   match its documented schema. **Not fatal**: the stream continues with the next
+///   message.
+/// - Any other kind is terminal: the connection failed or was closed abnormally, and the
+///   stream ends after this item.
+///
+/// A normal close ends the stream without an error.
+///
 /// See <https://docs.polymarket.com/api-reference/wss/sports>.
 ///
 /// ```no_run

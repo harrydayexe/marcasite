@@ -11,6 +11,11 @@
 //! - answers protocol-level ping frames,
 //! - reports an abnormal close or socket error as one final [`Error::WebSocket`] item.
 //!
+//! Every [`WebSocketError`] it produces carries a [`WebSocketErrorKind`]: `Connect` for
+//! handshake failures (returned by [`WsConnection::connect`]), `Closed` for an abnormal
+//! close, a connection that ended without a close frame, or a send on a terminated
+//! connection, `Protocol` for socket and protocol errors, and `Send` for failed writes.
+//!
 //! Dropping the handle closes the connection. The driver does not reconnect: when the
 //! stream ends, create a new connection (and re-subscribe).
 //!
@@ -35,7 +40,7 @@ use tokio_tungstenite::{
 };
 use url::Url;
 
-use crate::error::{ConfigError, Error, Result, Service, WebSocketError};
+use crate::error::{ConfigError, Error, Result, Service, WebSocketError, WebSocketErrorKind};
 
 /// Default capacity of the incoming-message buffer.
 pub const DEFAULT_BUFFER: usize = 1024;
@@ -203,10 +208,18 @@ impl WsConnection {
         let (mut socket, response) =
             match tokio::time::timeout(config.connect_timeout, handshake).await {
                 Ok(Ok(ok)) => ok,
-                Ok(Err(e)) => return Err(ws_error(service, "failed to connect", Some(e))),
+                Ok(Err(e)) => {
+                    return Err(ws_error(
+                        service,
+                        WebSocketErrorKind::Connect,
+                        "failed to connect",
+                        Some(e),
+                    ));
+                }
                 Err(_) => {
                     return Err(ws_error(
                         service,
+                        WebSocketErrorKind::Connect,
                         format!(
                             "handshake timed out after {}s",
                             config.connect_timeout.as_secs()
@@ -225,7 +238,14 @@ impl WsConnection {
             socket
                 .send(Message::text(message.as_str()))
                 .await
-                .map_err(|e| ws_error(service, "failed to send initial message", Some(e)))?;
+                .map_err(|e| {
+                    ws_error(
+                        service,
+                        WebSocketErrorKind::Connect,
+                        "failed to send initial message",
+                        Some(e),
+                    )
+                })?;
         }
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -250,9 +270,14 @@ impl WsConnection {
     ///
     /// Returns [`Error::WebSocket`] if the connection has already terminated.
     pub fn send_text(&self, text: impl Into<String>) -> Result<()> {
-        self.commands
-            .send(Command::Send(text.into()))
-            .map_err(|_| ws_error(self.service, "connection is closed", None))
+        self.commands.send(Command::Send(text.into())).map_err(|_| {
+            ws_error(
+                self.service,
+                WebSocketErrorKind::Closed,
+                "connection is closed",
+                None,
+            )
+        })
     }
 
     /// Receives the next incoming text frame; `None` once the connection has ended.
@@ -311,7 +336,7 @@ async fn drive(
                 Some(Command::Send(text)) => {
                     tracing::trace!(service = %service, message = %text, "sending message");
                     if let Err(e) = socket.send(Message::text(text)).await {
-                        break Some(ws_error(service, "failed to send message", Some(e)));
+                        break Some(send_error(service, "failed to send message", e));
                     }
                 }
                 Some(Command::Close) | None => {
@@ -324,7 +349,7 @@ async fn drive(
                 if let Some((_, message)) = &heartbeat {
                     tracing::trace!(service = %service, "sending heartbeat");
                     if let Err(e) = socket.send(Message::text(message.as_str())).await {
-                        break Some(ws_error(service, "failed to send heartbeat", Some(e)));
+                        break Some(send_error(service, "failed to send heartbeat", e));
                     }
                 }
             },
@@ -334,7 +359,7 @@ async fn drive(
                     if let Some((_, reply)) = config.auto_replies.iter().find(|(r, _)| r == text) {
                         tracing::trace!(service = %service, received = %text, "answering server heartbeat");
                         if let Err(e) = socket.send(Message::text(reply.as_str())).await {
-                            break Some(ws_error(service, "failed to answer heartbeat", Some(e)));
+                            break Some(send_error(service, "failed to answer heartbeat", e));
                         }
                         continue;
                     }
@@ -360,13 +385,18 @@ async fn drive(
                 Some(Ok(Message::Ping(_))) => {
                     // tungstenite queues the pong; flush so it is sent promptly.
                     if let Err(e) = socket.flush().await {
-                        break Some(ws_error(service, "failed to answer ping", Some(e)));
+                        break Some(send_error(service, "failed to answer ping", e));
                     }
                 }
                 Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
                 Some(Ok(Message::Close(frame))) => break close_error(service, frame),
-                Some(Err(e)) => break Some(ws_error(service, "connection error", Some(e))),
-                None => break Some(ws_error(service, "connection closed without a close frame", None)),
+                Some(Err(e)) => break Some(read_error(service, e)),
+                None => break Some(ws_error(
+                    service,
+                    WebSocketErrorKind::Closed,
+                    "connection closed without a close frame",
+                    None,
+                )),
             },
         }
     };
@@ -390,18 +420,42 @@ fn close_error(service: Service, frame: Option<CloseFrame>) -> Option<Error> {
             None
         }
         Some(frame) => Some(Error::WebSocket(Box::new(
-            WebSocketError::new(service, "server closed the connection")
-                .with_close(u16::from(frame.code), frame.reason.as_str()),
+            WebSocketError::new(
+                service,
+                WebSocketErrorKind::Closed,
+                "server closed the connection",
+            )
+            .with_close(u16::from(frame.code), frame.reason.as_str()),
         ))),
     }
 }
 
+/// An error writing to the socket ([`WebSocketErrorKind::Send`]).
+fn send_error(service: Service, message: &'static str, error: tungstenite::Error) -> Error {
+    ws_error(service, WebSocketErrorKind::Send, message, Some(error))
+}
+
+/// An error reading from an established connection: the peer going away is
+/// [`WebSocketErrorKind::Closed`], anything else [`WebSocketErrorKind::Protocol`].
+fn read_error(service: Service, error: tungstenite::Error) -> Error {
+    let kind = match &error {
+        tungstenite::Error::ConnectionClosed
+        | tungstenite::Error::AlreadyClosed
+        | tungstenite::Error::Protocol(
+            tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ) => WebSocketErrorKind::Closed,
+        _ => WebSocketErrorKind::Protocol,
+    };
+    ws_error(service, kind, "connection error", Some(error))
+}
+
 fn ws_error(
     service: Service,
+    kind: WebSocketErrorKind,
     message: impl Into<std::borrow::Cow<'static, str>>,
     source: Option<tungstenite::Error>,
 ) -> Error {
-    let mut err = WebSocketError::new(service, message);
+    let mut err = WebSocketError::new(service, kind, message);
     if let Some(source) = source {
         err = err.with_source(source);
     }
