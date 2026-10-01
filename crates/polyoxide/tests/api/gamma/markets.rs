@@ -142,6 +142,14 @@ async fn list_markets_stream_walks_offsets() {
         .expect(1)
         .mount(&server)
         .await;
+    // A short page does not end the stream (the server may cap `limit`); an empty one does.
+    Mock::given(method("GET"))
+        .and(path("/markets"))
+        .and(query_param("offset", "3"))
+        .respond_with(json("[]"))
+        .expect(1)
+        .mount(&server)
+        .await;
 
     let ids: Vec<_> = common::polymarket(&server)
         .gamma()

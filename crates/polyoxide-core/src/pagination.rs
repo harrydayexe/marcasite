@@ -97,11 +97,15 @@ where
 ///
 /// `fetch` is called with the offset of the page to fetch, starting at `start`, and
 /// returns that page's items. The next offset is the previous one plus the number of items
-/// returned. Walking stops at the first empty page, or at the first page shorter than
-/// `page_size` when the page size is known.
+/// returned. Walking stops at the first empty page (or after the first error).
+///
+/// A page shorter than the requested `limit` is **not** treated as the last page: a server
+/// may cap the page size below the requested `limit`, and stopping there would silently
+/// truncate the listing. The cost is one final request that returns an empty page. When an
+/// endpoint reports the end explicitly (e.g. `hasMore: false`), `fetch` can return an empty
+/// page without sending a request once it has seen that signal.
 pub fn offset_stream<T, F, Fut>(
     start: u64,
-    page_size: Option<u64>,
     fetch: F,
 ) -> impl Stream<Item = Result<T>> + Send + 'static
 where
@@ -122,7 +126,7 @@ where
         buffer: VecDeque::new(),
         done: false,
     };
-    futures_util::stream::unfold(state, move |mut state| async move {
+    futures_util::stream::unfold(state, |mut state| async move {
         loop {
             if let Some(item) = state.buffer.pop_front() {
                 return Some((Ok(item), state));
@@ -133,7 +137,7 @@ where
             match (state.fetch)(state.offset).await {
                 Ok(items) => {
                     let len = u64::try_from(items.len()).unwrap_or(u64::MAX);
-                    state.done = len == 0 || page_size.is_some_and(|size| len < size);
+                    state.done = len == 0;
                     state.offset = state.offset.saturating_add(len);
                     state.buffer = items.into();
                 }
@@ -202,21 +206,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn walks_offsets() {
-        let stream = offset_stream(0, Some(2), |offset| async move {
-            Ok(match offset {
-                0 => vec![1, 2],
-                2 => vec![3],
-                other => panic!("unexpected offset {other}"),
-            })
+    async fn walks_offsets_until_an_empty_page() {
+        // Short pages (the server capping `limit`) do not end the walk; only an empty page
+        // does.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let stream = offset_stream(0, move |offset| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(match offset {
+                    0 => vec![1, 2],
+                    2 => vec![3],
+                    3 => vec![],
+                    other => panic!("unexpected offset {other}"),
+                })
+            }
         });
         let items: Vec<i32> = stream.try_collect().await.unwrap();
         assert_eq!(items, vec![1, 2, 3]);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
 
-        let stream = offset_stream(5, None, |offset| async move {
+        let stream = offset_stream(5, |offset| async move {
             Ok(if offset < 7 { vec![offset] } else { vec![] })
         });
         let items: Vec<u64> = stream.try_collect().await.unwrap();
         assert_eq!(items, vec![5, 6]);
+    }
+
+    #[tokio::test]
+    async fn offset_stream_yields_error_then_ends() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let stream = offset_stream(0, move |offset| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if offset == 0 {
+                    Ok(vec![1])
+                } else {
+                    Err(Error::from(ValidationError::new("x", "boom")))
+                }
+            }
+        });
+        let results: Vec<Result<i32>> = stream.collect().await;
+        assert_eq!(results.len(), 2);
+        assert!(matches!(results.first(), Some(Ok(1))));
+        assert!(matches!(results.get(1), Some(Err(Error::Validation(_)))));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

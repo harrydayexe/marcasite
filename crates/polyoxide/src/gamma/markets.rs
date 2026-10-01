@@ -689,12 +689,12 @@ impl ListMarkets {
 
     /// Streams every market from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page or the first page shorter than
-    /// [`limit`](Self::limit) (when set).
+    /// The stream ends at the first empty page. A page shorter than
+    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
+    /// the last request returns an empty page.
     pub fn into_stream(self) -> impl Stream<Item = Result<Market>> + Send + 'static {
         let start = self.params.offset.unwrap_or(0);
-        let page_size = self.params.limit;
-        offset_stream(start, page_size, move |offset| {
+        offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
         })

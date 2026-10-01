@@ -61,6 +61,14 @@ async fn list_tags_stream_walks_offsets() {
         )
         .mount(&server)
         .await;
+    // A short page does not end the stream (the server may cap `limit`); an empty one does.
+    Mock::given(method("GET"))
+        .and(path("/tags"))
+        .and(query_param("offset", "3"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw("[]", "application/json"))
+        .expect(1)
+        .mount(&server)
+        .await;
 
     let pm = common::polymarket(&server);
     let ids: Vec<_> = pm

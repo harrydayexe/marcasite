@@ -643,12 +643,12 @@ impl ListEvents {
 
     /// Streams every event from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page or the first page shorter than
-    /// [`limit`](Self::limit) (when set).
+    /// The stream ends at the first empty page. A page shorter than
+    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
+    /// the last request returns an empty page.
     pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
         let start = self.params.offset.unwrap_or(0);
-        let page_size = self.params.limit;
-        offset_stream(start, page_size, move |offset| {
+        offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
         })
@@ -721,13 +721,13 @@ impl ListEventsPaginated {
 
     /// Streams every event from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends after a page whose `pagination.hasMore` is `false`, at the first
-    /// empty page, or at the first page shorter than [`limit`](Self::limit) (when set).
+    /// The stream ends after a page whose `pagination.hasMore` is `false`, or at the first
+    /// empty page. A page shorter than [`limit`](Self::limit) does not end it while
+    /// `hasMore` is not `false`, because the server may cap the page size.
     pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
         let start = self.params.offset.unwrap_or(0);
-        let page_size = self.params.limit;
         let exhausted = Arc::new(AtomicBool::new(false));
-        offset_stream(start, page_size, move |offset| {
+        offset_stream(start, move |offset| {
             let request = self.clone();
             let exhausted = Arc::clone(&exhausted);
             async move {
@@ -784,12 +784,12 @@ impl ListSportEventResults {
 
     /// Streams every event from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page or the first page shorter than
-    /// [`limit`](Self::limit) (when set).
+    /// The stream ends at the first empty page. A page shorter than
+    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
+    /// the last request returns an empty page.
     pub fn into_stream(self) -> impl Stream<Item = Result<Event>> + Send + 'static {
         let start = self.params.offset.unwrap_or(0);
-        let page_size = self.params.limit;
-        offset_stream(start, page_size, move |offset| {
+        offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
         })
@@ -901,12 +901,12 @@ impl ListEventCreators {
 
     /// Streams every creator from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page or the first page shorter than
-    /// [`limit`](Self::limit) (when set).
+    /// The stream ends at the first empty page. A page shorter than
+    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
+    /// the last request returns an empty page.
     pub fn into_stream(self) -> impl Stream<Item = Result<EventCreator>> + Send + 'static {
         let start = self.params.offset.unwrap_or(0);
-        let page_size = self.params.limit;
-        offset_stream(start, page_size, move |offset| {
+        offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
         })

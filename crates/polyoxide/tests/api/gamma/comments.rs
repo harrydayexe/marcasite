@@ -114,6 +114,14 @@ async fn list_comments_by_user_pages_and_streams() {
         .expect(1)
         .mount(&server)
         .await;
+    // A short page does not end the stream (the server may cap `limit`); an empty one does.
+    Mock::given(method("GET"))
+        .and(path(user_path.as_str()))
+        .and(query_param("offset", "3"))
+        .respond_with(json("[]"))
+        .expect(1)
+        .mount(&server)
+        .await;
 
     let gamma = common::polymarket(&server).gamma().clone();
     let page = gamma

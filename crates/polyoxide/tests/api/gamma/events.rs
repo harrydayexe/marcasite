@@ -195,6 +195,45 @@ async fn list_events_paginated_decodes_page_and_stops_on_has_more_false() {
 }
 
 #[tokio::test]
+async fn list_events_paginated_stream_continues_after_a_short_page_while_has_more() {
+    let server = common::server().await;
+    // The server serves fewer events than `limit` but says there are more.
+    Mock::given(method("GET"))
+        .and(path("/events/pagination"))
+        .and(query_param("offset", "0"))
+        .respond_with(json(
+            r#"{"data":[{"id":"1"},{"id":"2"}],"pagination":{"hasMore":true,"totalResults":3}}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/events/pagination"))
+        .and(query_param("offset", "2"))
+        .respond_with(json(
+            r#"{"data":[{"id":"3"}],"pagination":{"hasMore":false,"totalResults":3}}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ids: Vec<_> = common::polymarket(&server)
+        .gamma()
+        .list_events_paginated()
+        .limit(3)
+        .into_stream()
+        .map_ok(|e| e.id.unwrap())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        ids,
+        vec![EventId::from("1"), EventId::from("2"), EventId::from("3")]
+    );
+    assert_eq!(requests(&server).await.len(), 2);
+}
+
+#[tokio::test]
 async fn list_sport_event_results() {
     let server = common::server().await;
     Mock::given(method("GET"))
