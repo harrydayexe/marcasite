@@ -127,6 +127,7 @@ impl Transport {
             url: self.url_for(segments),
             method,
             query: Query::new(),
+            headers: Vec::new(),
             body: None,
             idempotent,
         }
@@ -153,11 +154,20 @@ pub struct Request<'a> {
     url: Result<Url>,
     method: Method,
     query: Query,
+    headers: Vec<(&'static str, String)>,
     body: Option<std::result::Result<Vec<u8>, serde_json::Error>>,
     idempotent: bool,
 }
 
 impl Request<'_> {
+    /// Adds a request header (e.g. an optional documented header such as
+    /// `X-Builder-Code`). Invalid header values are reported as [`Error::Validation`] when
+    /// the request is sent.
+    pub fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
+    }
+
     /// Sets the query string, replacing any previous one.
     pub fn query(mut self, query: Query) -> Self {
         self.query = query;
@@ -213,6 +223,15 @@ impl Request<'_> {
             }
             None => None,
         };
+        let mut headers = HeaderMap::new();
+        for (name, value) in self.headers {
+            let name = header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| ValidationError::new(name, "invalid header name"))?;
+            let value = header::HeaderValue::from_str(&value).map_err(|_| {
+                ValidationError::new(name.as_str().to_owned(), "invalid header value")
+            })?;
+            headers.append(name, value);
+        }
         let method = self.method;
         let span = tracing::debug_span!(
             "polyoxide.request",
@@ -220,7 +239,7 @@ impl Request<'_> {
             method = %method,
             path = %url.path(),
         );
-        execute(transport, method, url, body, self.idempotent)
+        execute(transport, method, url, headers, body, self.idempotent)
             .instrument(span)
             .await
     }
@@ -316,6 +335,7 @@ async fn execute(
     transport: &Transport,
     method: Method,
     url: Url,
+    headers: HeaderMap,
     body: Option<Vec<u8>>,
     idempotent: bool,
 ) -> Result<RawResponse> {
@@ -324,7 +344,11 @@ async fn execute(
     let mut attempt: u32 = 0;
     loop {
         let started = Instant::now();
-        let mut builder = transport.http.inner.request(method.clone(), url.clone());
+        let mut builder = transport
+            .http
+            .inner
+            .request(method.clone(), url.clone())
+            .headers(headers.clone());
         if let Some(body) = &body {
             builder = builder
                 .header(header::CONTENT_TYPE, "application/json")
@@ -666,6 +690,23 @@ mod tests {
             url.as_str(),
             "http://localhost:1234/prefix/events/slug/a%20b%2Fc%3Fd"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_header_is_a_validation_error() -> Result<()> {
+        let transport = Transport::new(
+            HttpClient::new()?,
+            Service::Bridge,
+            parse_base_url("http://127.0.0.1:9")?,
+        );
+        let err = transport
+            .post(&["deposit"])
+            .header("X-Builder-Code", "bad\nvalue")
+            .send_raw()
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(_)), "{err:?}");
         Ok(())
     }
 
