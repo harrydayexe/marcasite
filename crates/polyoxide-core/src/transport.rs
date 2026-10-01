@@ -107,7 +107,10 @@ impl Transport {
     /// Starts a `GET` request to the path made of `segments`.
     ///
     /// Each segment is percent-encoded, so user-supplied ids and slugs are safe to pass
-    /// as-is: `transport.get(&["events", "slug", slug])`.
+    /// as-is: `transport.get(&["events", "slug", slug])`. A segment that would change the
+    /// request path instead of being sent verbatim (an empty segment, `.` or `..`) makes
+    /// the request fail with [`Error::Validation`] (parameter `"path"`) when it is sent,
+    /// without anything being sent.
     pub fn get(&self, segments: &[&str]) -> Request<'_> {
         self.request(Method::GET, segments)
     }
@@ -134,6 +137,7 @@ impl Transport {
     }
 
     fn url_for(&self, segments: &[&str]) -> Result<Url> {
+        check_segments(segments)?;
         let mut url = self.base_url.clone();
         {
             let mut path = url.path_segments_mut().map_err(|()| {
@@ -144,6 +148,27 @@ impl Transport {
         }
         Ok(url)
     }
+}
+
+/// Rejects path segments that the URL would not carry verbatim: an empty segment (usually
+/// an empty id or slug) produces a different path (`/markets/` instead of `/markets/{id}`),
+/// and the `url` crate resolves `.` and `..` away (`/events/..` becomes `/`), so the request
+/// would reach another endpoint.
+fn check_segments(segments: &[&str]) -> Result<()> {
+    for (index, segment) in segments.iter().enumerate() {
+        let message = match *segment {
+            "" => "is empty",
+            "." | ".." => "is a dot segment, which would change the request path",
+            _ => continue,
+        };
+        let path = segments.get(..=index).unwrap_or(segments).join("/");
+        return Err(ValidationError::new(
+            "path",
+            format!("path segment `{segment}` in `/{path}` {message}"),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// A request being built. Created by [`Transport::get`] / [`Transport::post`].
@@ -680,6 +705,49 @@ mod tests {
         assert_eq!(
             url.as_str(),
             "http://localhost:1234/prefix/events/slug/a%20b%2Fc%3Fd"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unsafe_path_segments_are_rejected_before_sending() -> Result<()> {
+        // Nothing listens on port 9: a request that was sent would be a transport error.
+        let transport = Transport::new(
+            HttpClient::new()?,
+            Service::Gamma,
+            parse_base_url("http://127.0.0.1:9/prefix")?,
+        );
+        let cases: [(&[&str], &str); 5] = [
+            (&["markets", ""], "path segment `` in `/markets/` is empty"),
+            (&["", "markets"], "path segment `` in `/` is empty"),
+            (
+                &["events", ".."],
+                "path segment `..` in `/events/..` is a dot segment, which would change the request path",
+            ),
+            (
+                &["events", "slug", "."],
+                "path segment `.` in `/events/slug/.` is a dot segment, which would change the request path",
+            ),
+            (
+                &["events", "..", "1"],
+                "path segment `..` in `/events/..` is a dot segment, which would change the request path",
+            ),
+        ];
+        for (segments, message) in cases {
+            for request in [transport.get(segments), transport.post(segments)] {
+                let err = request.send_raw().await.unwrap_err();
+                let Error::Validation(v) = &err else {
+                    panic!("expected a validation error for {segments:?}, got {err:?}");
+                };
+                assert_eq!(v.parameter(), "path");
+                assert_eq!(v.message(), message);
+            }
+        }
+        // Segments that merely contain dots are fine and sent verbatim.
+        let url = transport.url_for(&["events", "slug", "...", ".a", "a.b"])?;
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:9/prefix/events/slug/.../.a/a.b"
         );
         Ok(())
     }
