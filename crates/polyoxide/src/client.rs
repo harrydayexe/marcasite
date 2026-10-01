@@ -10,6 +10,7 @@ use polyoxide_core::{HttpClient, HttpClientBuilder, Result, RetryPolicy};
 /// configure timeouts, retries, the user agent or per-service base URLs.
 ///
 /// ```no_run
+/// # #[cfg(feature = "gamma")]
 /// # async fn run() -> polyoxide::Result<()> {
 /// use std::time::Duration;
 /// use polyoxide::{Polymarket, RetryPolicy};

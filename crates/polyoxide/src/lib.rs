@@ -21,6 +21,7 @@
 //! # Quick start
 //!
 //! ```no_run
+//! # #[cfg(feature = "gamma")]
 //! # async fn run() -> polyoxide::Result<()> {
 //! use polyoxide::Polymarket;
 //!
@@ -48,6 +49,7 @@
 //! for the next page), and every page lazily as a [`Stream`] of items from `.into_stream()`:
 //!
 //! ```no_run
+//! # #[cfg(feature = "gamma")]
 //! # async fn run() -> polyoxide::Result<()> {
 //! use futures_util::{StreamExt as _, TryStreamExt as _};
 //!
