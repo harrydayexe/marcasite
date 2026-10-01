@@ -14,6 +14,9 @@
 
 mod common;
 
+#[cfg(feature = "gamma")]
+mod client;
+
 #[cfg(feature = "bridge")]
 mod bridge;
 #[cfg(feature = "clob")]

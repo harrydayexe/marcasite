@@ -1114,6 +1114,87 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn slow_responses_are_timeout_errors() -> Result<()> {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        Mock::given(matchers::path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let http = HttpClient::builder()
+            .timeout(Duration::from_millis(100))
+            .build()?;
+        let transport = Transport::new(http, Service::Gamma, parse_base_url(&server.uri())?);
+        let err = transport.get(&["slow"]).send_raw().await.unwrap_err();
+        let Error::Timeout(inner) = &err else {
+            panic!("expected a timeout, got {err:?}");
+        };
+        assert_eq!(inner.service(), Service::Gamma);
+        assert_eq!(inner.method(), &Method::GET);
+        assert!(err.is_retryable());
+        assert!(err.to_string().ends_with("failed (timed out)"), "{err}");
+        assert!(std::error::Error::source(&err).is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refused_connections_are_connect_errors() -> Result<()> {
+        // Bind then drop a listener to get a port nothing listens on.
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let transport = Transport::new(
+            HttpClient::new()?,
+            Service::Clob,
+            parse_base_url(&format!("http://127.0.0.1:{port}"))?,
+        );
+        let err = transport.get(&["ok"]).send_raw().await.unwrap_err();
+        let Error::Transport(inner) = &err else {
+            panic!("expected a transport error, got {err:?}");
+        };
+        assert!(inner.is_connect());
+        assert_eq!(inner.url(), format!("http://127.0.0.1:{port}/ok"));
+        assert!(err.is_retryable());
+        assert!(
+            err.to_string().ends_with("failed (could not connect)"),
+            "{err}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sends_the_configured_user_agent() -> Result<()> {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        Mock::given(matchers::path("/default"))
+            .and(matchers::header(
+                "user-agent",
+                crate::config::DEFAULT_USER_AGENT,
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(matchers::path("/custom"))
+            .and(matchers::header("user-agent", "my-app/1.0"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let base = parse_base_url(&server.uri())?;
+        let default = Transport::new(HttpClient::new()?, Service::Data, base.clone());
+        default.get(&["default"]).send_raw().await?;
+        let http = HttpClient::builder().user_agent("my-app/1.0").build()?;
+        let custom = Transport::new(http, Service::Data, base);
+        custom.get(&["custom"]).send_raw().await?;
+        assert!(crate::config::DEFAULT_USER_AGENT.starts_with("polyoxide/"));
+        Ok(())
+    }
+
     #[test]
     fn snippet_points_at_error() {
         let body = br#"{"a":1,"b":"oops"}"#;
