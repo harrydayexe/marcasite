@@ -1,12 +1,16 @@
 //! `/tags` endpoints.
 
 use futures_util::TryStreamExt as _;
-use polyoxide::{Error, gamma::TagId};
+use polyoxide::{
+    Error,
+    gamma::{RelatedTagsStatus, TagId},
+};
 use wiremock::{
     Mock, ResponseTemplate,
     matchers::{method, path, query_param, query_param_is_missing},
 };
 
+use super::{fixture, json, json_value, pairs, query_of};
 use crate::common;
 
 #[tokio::test]
@@ -147,4 +151,109 @@ async fn rate_limit_is_typed_with_retry_after() {
     assert!(matches!(err, Error::RateLimited(_)), "{err:?}");
     assert_eq!(err.retry_after(), Some(std::time::Duration::from_secs(3)));
     assert!(err.is_retryable());
+}
+
+#[tokio::test]
+async fn get_tag_by_slug_with_template() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/tags/slug/politics"))
+        .and(query_param("include_template", "true"))
+        .respond_with(json_value(&fixture("Tag")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let tag = common::polymarket(&server)
+        .gamma()
+        .get_tag_by_slug("politics")
+        .include_template(true)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tag.slug.as_deref(), Some("slug-value"));
+    assert_eq!(tag.created_by, Some(7));
+}
+
+#[tokio::test]
+async fn related_tag_relationships_by_id_and_slug() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/tags/100381/related-tags"))
+        .respond_with(json(
+            r#"[{"id":"1","tagID":100381,"relatedTagID":2,"rank":1}]"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/tags/slug/politics/related-tags"))
+        .respond_with(json_value(&serde_json::json!([fixture("RelatedTag")])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gamma = common::polymarket(&server).gamma().clone();
+    let relations = gamma
+        .get_related_tag_relationships("100381")
+        .omit_empty(true)
+        .status(RelatedTagsStatus::Active)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(relations[0].tag_id, Some(TagId::from("100381")));
+    assert_eq!(relations[0].related_tag_id, Some(TagId::from("2")));
+    assert_eq!(
+        query_of(&server, 0).await,
+        pairs(&[("omit_empty", "true"), ("status", "active")])
+    );
+
+    let by_slug = gamma
+        .get_related_tag_relationships_by_slug("politics")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_slug[0].rank, Some(7));
+    assert_eq!(query_of(&server, 1).await, pairs(&[]));
+}
+
+#[tokio::test]
+async fn related_tags_by_id_and_slug() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/tags/1/related-tags/tags"))
+        .respond_with(json(r#"[{"id":"2","label":"Elections"}]"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/tags/slug/politics/related-tags/tags"))
+        .respond_with(json(r#"[{"id":"3"}]"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gamma = common::polymarket(&server).gamma().clone();
+    let tags = gamma
+        .get_related_tags("1")
+        .status(RelatedTagsStatus::All)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tags[0].label.as_deref(), Some("Elections"));
+    assert_eq!(query_of(&server, 0).await, pairs(&[("status", "all")]));
+
+    // A status value unknown to this library version is sent verbatim.
+    let tags = gamma
+        .get_related_tags_by_slug("politics")
+        .omit_empty(false)
+        .status(RelatedTagsStatus::from("upcoming"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tags[0].id, Some(TagId::from("3")));
+    assert_eq!(
+        query_of(&server, 1).await,
+        pairs(&[("omit_empty", "false"), ("status", "upcoming")])
+    );
 }

@@ -1,0 +1,11 @@
+{
+  "id": 7,
+  "name": "name-value",
+  "league": "league-value",
+  "record": "record-value",
+  "logo": "logo-value",
+  "abbreviation": "abbreviation-value",
+  "alias": "alias-value",
+  "createdAt": "2024-01-02T03:04:05Z",
+  "updatedAt": "2024-01-02T03:04:05Z"
+}
