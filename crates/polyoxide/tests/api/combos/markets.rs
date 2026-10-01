@@ -258,3 +258,81 @@ async fn missing_required_field_is_a_decode_error_with_path() {
     };
     assert_eq!(decode.path(), "markets[0]");
 }
+
+#[tokio::test]
+async fn missing_next_cursor_is_a_decode_error_not_the_end() {
+    let server = common::server().await;
+    // `next_cursor` is required (but nullable): a page without it must not end the walk
+    // silently.
+    Mock::given(method("GET"))
+        .and(path("/v1/rfq/combo-markets"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!(r#"{{"markets":[{}]}}"#, market("1")),
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let results: Vec<_> = common::polymarket(&server)
+        .combos()
+        .list_combo_markets()
+        .into_stream()
+        .collect()
+        .await;
+    assert_eq!(results.len(), 1);
+    let Err(Error::Decode(decode)) = &results[0] else {
+        panic!("expected a decode error, got {results:?}");
+    };
+    assert!(decode.to_string().contains("next_cursor"), "{decode}");
+}
+
+#[tokio::test]
+async fn page_accessors_normalize_the_cursor() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/rfq/combo-markets"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(EXAMPLE, "application/json"))
+        .mount(&server)
+        .await;
+
+    let page = common::polymarket(&server)
+        .combos()
+        .list_combo_markets()
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.next_cursor(), Some("Mg"));
+    assert_eq!(page.items().len(), 1);
+    assert_eq!(page.into_items()[0].id, ComboMarketId::from("1897034"));
+}
+
+#[tokio::test]
+async fn an_invalid_price_fails_the_whole_page() {
+    let server = common::server().await;
+    // `outcome_prices` items are strings in the spec; one that is not a decimal number is
+    // reported with its path rather than silently dropped.
+    let bad = market("2").replace(r#"["0.5","0.5"]"#, r#"["0.5",""]"#);
+    Mock::given(method("GET"))
+        .and(path("/v1/rfq/combo-markets"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!(
+                r#"{{"markets":[{},{bad}],"next_cursor":null}}"#,
+                market("1")
+            ),
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .combos()
+        .list_combo_markets()
+        .send()
+        .await
+        .unwrap_err();
+    let Error::Decode(decode) = &err else {
+        panic!("expected Error::Decode, got {err:?}")
+    };
+    assert_eq!(decode.path(), "markets[1].outcome_prices[1]");
+}
