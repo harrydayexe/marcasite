@@ -1,0 +1,22 @@
+[package]
+name = "polyoxide"
+description.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+polyoxide-core.workspace = true
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

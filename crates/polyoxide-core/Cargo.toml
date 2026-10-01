@@ -1,0 +1,20 @@
+[package]
+name = "polyoxide-core"
+description = "Shared transport, configuration and error types for polyoxide"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
