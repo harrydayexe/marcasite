@@ -199,7 +199,7 @@ given; the offline decode tests of captured rows are in
 - **Docs say**: amounts are `number` / `double`; no example shows exponent notation.
 - **Live does**: tiny amounts are JSON numbers in exponent form (`"entry_fees_usdc": 9e-6`,
   `"total_cost_usdc": 1e-6` on CLOSED positions and others).
-- **SDK does**: decodes them exactly into `Decimal` (and serializes back without an exponent).
+- **SDK does**: decodes them exactly into `Decimal` (`9e-6` is `0.000009`); amounts serialize back as JSON numbers.
 - **Pinning test**: offline `closed_position_with_exponent_decimals_and_first_entry_at`; live
   `list_positions_filters` decodes live CLOSED pages.
 
