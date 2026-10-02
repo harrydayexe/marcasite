@@ -1,22 +1,13 @@
 //! Market data: order books, prices, midpoints, spreads, last trade prices, fee rates, tick
 //! sizes and the neg-risk flag.
 //!
-//! Several of these endpoints exist in more than one documented form. The methods are named
-//! consistently:
-//!
-//! | Form | Method name | Example |
-//! |---|---|---|
-//! | `GET` with a single `token_id` query parameter | `get_<thing>` | [`ClobClient::get_midpoint`] |
-//! | `GET` with a comma-separated `token_ids` query parameter | `get_<things>` | [`ClobClient::get_midpoints`] |
-//! | `POST` with a JSON array request body | `get_<things>_by_body` | [`ClobClient::get_midpoints_by_body`] |
-//! | `GET` with the token id as a path parameter | `get_<thing>_by_path` | [`ClobClient::get_fee_rate_by_path`] |
-//!
-//! `POST /spreads` has no `GET` counterpart and is simply [`ClobClient::get_spreads`].
+//! The method naming scheme for endpoints with several documented forms (`get_<things>`,
+//! `_by_body`, `_by_path`) is described in the [`clob`](crate::clob) module docs.
 
 use std::collections::HashMap;
 
 use polyoxide_core::{
-    Query, Result, serde_util,
+    Query, Result, ValidationError, serde_util,
     types::{ConditionId, Side, TokenId},
 };
 use rust_decimal::Decimal;
@@ -24,20 +15,27 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ClobClient,
-    types::{BookRequest, require_at_most, require_non_empty},
+    types::{
+        BookRequest, require_at_most, require_id, require_list_values, require_non_empty,
+        side_or_empty,
+    },
 };
 
 /// Maximum number of token ids per last-trade-prices request
 /// ([`ClobClient::get_last_trade_prices`] and [`ClobClient::get_last_trade_prices_by_body`]).
 pub const MAX_LAST_TRADE_PRICES_TOKEN_IDS: usize = 500;
 
+/// Name of the token-id list in validation errors, for both the `GET` (`token_ids` query
+/// parameter) and the `POST` (request body) forms.
+const TOKEN_IDS: &str = "token_ids";
+
 /// A price level of an order book (`components/schemas/OrderSummary`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct OrderSummary {
-    /// Price of the level.
+    /// Price of the level (a numeric string on the wire).
     pub price: Decimal,
-    /// Total size resting at this price.
+    /// Total size resting at this price (a numeric string on the wire).
     pub size: Decimal,
 }
 
@@ -51,7 +49,7 @@ pub struct OrderBookSummary {
     pub asset_id: TokenId,
     /// Timestamp of the snapshot, exactly as sent (a numeric string, e.g. `"1234567890"`).
     ///
-    /// Kept as a string because the spec does not document its unit (seconds or
+    /// Kept as a string because the REST spec does not document its unit (seconds or
     /// milliseconds).
     pub timestamp: String,
     /// Hash of the order book summary.
@@ -60,13 +58,13 @@ pub struct OrderBookSummary {
     pub bids: Vec<OrderSummary>,
     /// Asks, sorted by price ascending.
     pub asks: Vec<OrderSummary>,
-    /// Minimum order size.
+    /// Minimum order size (a numeric string on the wire).
     pub min_order_size: Decimal,
-    /// Minimum price increment (tick size).
+    /// Minimum price increment (tick size; a numeric string on the wire).
     pub tick_size: Decimal,
     /// Whether negative risk is enabled for this market.
     pub neg_risk: bool,
-    /// Last trade price.
+    /// Last trade price (a numeric string on the wire).
     pub last_trade_price: Decimal,
 }
 
@@ -75,7 +73,7 @@ pub struct OrderBookSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Midpoint {
-    /// Midpoint price.
+    /// Midpoint price (a numeric string on the wire).
     pub mid_price: Decimal,
 }
 
@@ -83,7 +81,7 @@ pub struct Midpoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Spread {
-    /// The spread.
+    /// The spread (a numeric string on the wire).
     pub spread: Decimal,
 }
 
@@ -93,6 +91,7 @@ pub struct Spread {
 #[non_exhaustive]
 pub struct Price {
     /// Market price (a JSON number on the wire).
+    #[serde(with = "serde_util::decimal_number")]
     pub price: Decimal,
 }
 
@@ -102,11 +101,11 @@ pub struct Price {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct LastTradePrice {
-    /// Last trade price (`0.5` if there were no trades).
+    /// Last trade price (`0.5` if there were no trades; a numeric string on the wire).
     pub price: Decimal,
     /// Last trade side; `None` when the server sends the documented empty string (no
-    /// trades).
-    #[serde(deserialize_with = "serde_util::empty_string_as_none")]
+    /// trades). `None` serializes back to `""`.
+    #[serde(with = "side_or_empty")]
     pub side: Option<Side>,
 }
 
@@ -117,14 +116,15 @@ pub struct LastTradePrice {
 pub struct TokenLastTradePrice {
     /// Token id (asset id).
     pub token_id: TokenId,
-    /// Last trade price.
+    /// Last trade price (a numeric string on the wire).
     pub price: Decimal,
     /// Last trade side.
     ///
-    /// The spec documents only `BUY` / `SELL` here (unlike `GET /last-trade-price`, which
-    /// also documents an empty string); any other value, including an empty string, is
-    /// kept as [`Side::Unknown`].
-    pub side: Side,
+    /// The spec documents only `BUY` / `SELL` here. `GET /last-trade-price` documents an
+    /// empty side for a token without trades; the same value is mapped to `None` here, as
+    /// in [`LastTradePrice::side`], and `None` serializes back to `""`.
+    #[serde(with = "side_or_empty")]
+    pub side: Option<Side>,
 }
 
 /// The base fee rate of a token (`components/schemas/FeeRate`).
@@ -139,7 +139,8 @@ pub struct FeeRate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct TickSize {
-    /// Minimum tick size (price increment); a JSON number on the wire.
+    /// Minimum tick size (price increment; a JSON number on the wire).
+    #[serde(with = "serde_util::decimal_number")]
     pub minimum_tick_size: Decimal,
 }
 
@@ -151,39 +152,54 @@ pub struct NegRisk {
     pub neg_risk: bool,
 }
 
-/// Collects token ids, failing if the required list is empty.
-fn collect_token_ids(
-    parameter: &'static str,
-    token_ids: impl IntoIterator<Item = impl Into<TokenId>>,
-) -> Result<Vec<TokenId>> {
+/// Collects the token ids of a comma-separated `token_ids` query parameter, failing if the
+/// list is empty or an id is empty or contains a comma.
+fn csv_token_ids(token_ids: impl IntoIterator<Item = impl Into<TokenId>>) -> Result<Vec<TokenId>> {
     let token_ids: Vec<TokenId> = token_ids.into_iter().map(Into::into).collect();
-    require_non_empty(parameter, &token_ids)?;
+    require_non_empty(TOKEN_IDS, &token_ids)?;
+    require_list_values(TOKEN_IDS, token_ids.iter().map(TokenId::as_str), true)?;
     Ok(token_ids)
+}
+
+/// Collects the items of a batch request body, failing if there are none or a token id is
+/// empty.
+fn body_requests(
+    requests: impl IntoIterator<Item = impl Into<BookRequest>>,
+) -> Result<Vec<BookRequest>> {
+    let requests: Vec<BookRequest> = requests.into_iter().map(Into::into).collect();
+    require_non_empty(TOKEN_IDS, &requests)?;
+    require_list_values(
+        TOKEN_IDS,
+        requests.iter().map(|r| r.token_id.as_str()),
+        false,
+    )?;
+    Ok(requests)
+}
+
+/// Fails if a price request has no side (`side_parameter` names the missing parameter).
+fn require_sides(side_parameter: &'static str, requests: &[BookRequest]) -> Result<()> {
+    if requests.iter().any(|request| request.side.is_none()) {
+        return Err(ValidationError::new(
+            side_parameter,
+            "every request needs a side (each request must include both token_id and side)",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn token_ids_query(token_ids: &[TokenId]) -> Query {
     let mut query = Query::new();
-    query.push_csv("token_ids", token_ids);
+    query.push_csv(TOKEN_IDS, token_ids);
     query
 }
 
-fn token_id_query(token_id: &TokenId) -> Query {
+/// Builds the `token_id` query of the single-token endpoints, failing on an empty id.
+fn token_id_query(token_id: &TokenId) -> Result<Query> {
+    require_id("token_id", token_id.as_str())?;
     let mut query = Query::new();
     query.push("token_id", token_id);
-    query
-}
-
-fn book_requests(requests: impl IntoIterator<Item = impl Into<BookRequest>>) -> Vec<BookRequest> {
-    requests.into_iter().map(Into::into).collect()
-}
-
-fn priced_requests<T: Into<TokenId>>(
-    requests: impl IntoIterator<Item = (T, Side)>,
-) -> Vec<BookRequest> {
-    requests
-        .into_iter()
-        .map(|(token_id, side)| BookRequest::new(token_id).with_side(side))
-        .collect()
+    Ok(query)
 }
 
 impl ClobClient {
@@ -208,28 +224,33 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). A token without an order book is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. A token
+    /// without an order book is an [`Error::Api`](crate::Error::Api) with status `404`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_order_book(&self, token_id: impl Into<TokenId>) -> Result<OrderBookSummary> {
-        let query = token_id_query(&token_id.into());
+        let query = token_id_query(&token_id.into())?;
         self.transport.get(&["book"]).query(query).send().await
     }
 
     /// Gets the order books of several tokens using query parameters
     /// (`GET /books?token_ids=...`).
     ///
+    /// For long lists prefer [`ClobClient::get_order_books_by_body`], which sends the ids in
+    /// the request body (see [URL length](crate::clob#url-length)).
+    ///
     /// Documented only in the CLOB OpenAPI spec (operation `getBooksGet`); see also
     /// <https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body>.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `token_ids` is empty (the parameter
-    /// is required); otherwise see [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if
+    /// `token_ids` is empty (the parameter is required) or an id is empty or contains a
+    /// comma. See [`Error`](crate::Error) for the other cases.
     pub async fn get_order_books(
         &self,
         token_ids: impl IntoIterator<Item = impl Into<TokenId>>,
     ) -> Result<Vec<OrderBookSummary>> {
-        let token_ids = collect_token_ids("token_ids", token_ids)?;
+        let token_ids = csv_token_ids(token_ids)?;
         self.transport
             .get(&["books"])
             .query(token_ids_query(&token_ids))
@@ -239,18 +260,21 @@ impl ClobClient {
 
     /// Gets the order books of several tokens using a request body (`POST /books`).
     ///
-    /// Accepts token ids directly or [`BookRequest`]s.
+    /// Accepts token ids directly or [`BookRequest`]s. The `GET` form is
+    /// [`ClobClient::get_order_books`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if `requests`
+    /// is empty (the request body is required) or a token id is empty. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_order_books_by_body(
         &self,
         requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<Vec<OrderBookSummary>> {
-        let body = book_requests(requests);
+        let body = body_requests(requests)?;
         self.transport
             .post(&["books"])
             .json(&body)
@@ -282,10 +306,11 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). A token without an order book is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. A token
+    /// without an order book is an [`Error::Api`](crate::Error::Api) with status `404`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_price(&self, token_id: impl Into<TokenId>, side: Side) -> Result<Price> {
-        let mut query = token_id_query(&token_id.into());
+        let mut query = token_id_query(&token_id.into())?;
         query.push("side", side);
         self.transport.get(&["price"]).query(query).send().await
     }
@@ -293,23 +318,44 @@ impl ClobClient {
     /// Gets the best prices of several `(token id, side)` pairs using query parameters
     /// (`GET /prices?token_ids=...&sides=...`).
     ///
-    /// Returns a map of token id to a map of side to price.
+    /// Accepts `(token id, Side)` pairs (owned or borrowed) or [`BookRequest`]s with a side.
+    /// Returns a map of token id to a map of side to price. For long lists prefer
+    /// [`ClobClient::get_prices_by_body`] (see [URL length](crate::clob#url-length)).
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-market-prices-query-parameters>.
     ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use polyoxide::types::{Side, TokenId};
+    ///
+    /// let clob = polyoxide::clob::ClobClient::new()?;
+    /// let pairs = vec![(TokenId::from("1"), Side::Buy), (TokenId::from("2"), Side::Sell)];
+    /// let prices = clob.get_prices(&pairs).await?;
+    /// println!("{prices:?}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `requests` is empty (both
-    /// parameters are required); otherwise see [`Error`](crate::Error).
-    pub async fn get_prices<T: Into<TokenId>>(
+    /// [`Error::Validation`](crate::Error::Validation) if `requests` is empty or a token id
+    /// is empty or contains a comma (parameter `token_ids`), or if a request has no side
+    /// (parameter `sides`); both parameters are required. See [`Error`](crate::Error) for
+    /// the other cases.
+    pub async fn get_prices(
         &self,
-        requests: impl IntoIterator<Item = (T, Side)>,
+        requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<HashMap<TokenId, HashMap<Side, Decimal>>> {
-        let requests = priced_requests(requests);
-        require_non_empty("token_ids", &requests)?;
+        let requests = body_requests(requests)?;
+        require_list_values(
+            TOKEN_IDS,
+            requests.iter().map(|r| r.token_id.as_str()),
+            true,
+        )?;
+        require_sides("sides", &requests)?;
         let mut query = Query::new();
         query
-            .push_csv("token_ids", requests.iter().map(|r| &r.token_id))
+            .push_csv(TOKEN_IDS, requests.iter().map(|r| &r.token_id))
             .push_csv("sides", requests.iter().filter_map(|r| r.side.as_ref()));
         self.transport.get(&["prices"]).query(query).send().await
     }
@@ -317,18 +363,24 @@ impl ClobClient {
     /// Gets the best prices of several `(token id, side)` pairs using a request body
     /// (`POST /prices`).
     ///
-    /// Returns a map of token id to a map of side to price.
+    /// Accepts `(token id, Side)` pairs (owned or borrowed) or [`BookRequest`]s with a side.
+    /// Returns a map of token id to a map of side to price. The `GET` form is
+    /// [`ClobClient::get_prices`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-market-prices-request-body>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
-    pub async fn get_prices_by_body<T: Into<TokenId>>(
+    /// [`Error::Validation`](crate::Error::Validation) if `requests` is empty or a token id
+    /// is empty (parameter `token_ids`), or if a request has no side (parameter `side`; the
+    /// docs require "both token_id and side"). See [`Error`](crate::Error) for the other
+    /// cases.
+    pub async fn get_prices_by_body(
         &self,
-        requests: impl IntoIterator<Item = (T, Side)>,
+        requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<HashMap<TokenId, HashMap<Side, Decimal>>> {
-        let body = priced_requests(requests);
+        let body = body_requests(requests)?;
+        require_sides("side", &body)?;
         self.transport
             .post(&["prices"])
             .json(&body)
@@ -343,27 +395,32 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). A token without an order book is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. A token
+    /// without an order book is an [`Error::Api`](crate::Error::Api) with status `404`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_midpoint(&self, token_id: impl Into<TokenId>) -> Result<Midpoint> {
-        let query = token_id_query(&token_id.into());
+        let query = token_id_query(&token_id.into())?;
         self.transport.get(&["midpoint"]).query(query).send().await
     }
 
     /// Gets the midpoint prices of several tokens using query parameters
     /// (`GET /midpoints?token_ids=...`). Returns a map of token id to midpoint.
     ///
+    /// For long lists prefer [`ClobClient::get_midpoints_by_body`] (see
+    /// [URL length](crate::clob#url-length)).
+    ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-query-parameters>.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `token_ids` is empty (the parameter
-    /// is required); otherwise see [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if
+    /// `token_ids` is empty (the parameter is required) or an id is empty or contains a
+    /// comma. See [`Error`](crate::Error) for the other cases.
     pub async fn get_midpoints(
         &self,
         token_ids: impl IntoIterator<Item = impl Into<TokenId>>,
     ) -> Result<HashMap<TokenId, Decimal>> {
-        let token_ids = collect_token_ids("token_ids", token_ids)?;
+        let token_ids = csv_token_ids(token_ids)?;
         self.transport
             .get(&["midpoints"])
             .query(token_ids_query(&token_ids))
@@ -374,18 +431,21 @@ impl ClobClient {
     /// Gets the midpoint prices of several tokens using a request body
     /// (`POST /midpoints`). Returns a map of token id to midpoint.
     ///
-    /// Accepts token ids directly or [`BookRequest`]s (the side is not used).
+    /// Accepts token ids directly or [`BookRequest`]s (the side is not used). The `GET`
+    /// form is [`ClobClient::get_midpoints`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-midpoint-prices-request-body>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if `requests`
+    /// is empty (the request body is required) or a token id is empty. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_midpoints_by_body(
         &self,
         requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<HashMap<TokenId, Decimal>> {
-        let body = book_requests(requests);
+        let body = body_requests(requests)?;
         self.transport
             .post(&["midpoints"])
             .json(&body)
@@ -400,10 +460,11 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). A token without an order book is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. A token
+    /// without an order book is an [`Error::Api`](crate::Error::Api) with status `404`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_spread(&self, token_id: impl Into<TokenId>) -> Result<Spread> {
-        let query = token_id_query(&token_id.into());
+        let query = token_id_query(&token_id.into())?;
         self.transport.get(&["spread"]).query(query).send().await
     }
 
@@ -416,12 +477,14 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if `requests`
+    /// is empty (the request body is required) or a token id is empty. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_spreads(
         &self,
         requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<HashMap<TokenId, Decimal>> {
-        let body = book_requests(requests);
+        let body = body_requests(requests)?;
         self.transport
             .post(&["spreads"])
             .json(&body)
@@ -438,12 +501,13 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_last_trade_price(
         &self,
         token_id: impl Into<TokenId>,
     ) -> Result<LastTradePrice> {
-        let query = token_id_query(&token_id.into());
+        let query = token_id_query(&token_id.into())?;
         self.transport
             .get(&["last-trade-price"])
             .query(query)
@@ -454,19 +518,25 @@ impl ClobClient {
     /// Gets the last trade prices of up to [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] tokens using
     /// query parameters (`GET /last-trades-prices?token_ids=...`).
     ///
+    /// An empty side from the server (as `GET /last-trade-price` documents for a token
+    /// without trades) is mapped to a `None` [`TokenLastTradePrice::side`]. For long lists
+    /// prefer [`ClobClient::get_last_trade_prices_by_body`] (see
+    /// [URL length](crate::clob#url-length)).
+    ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-query-parameters>.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `token_ids` is empty (the parameter
-    /// is required) or has more than [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] entries; otherwise
-    /// see [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if
+    /// `token_ids` is empty (the parameter is required), has more than
+    /// [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] entries, or an id is empty or contains a comma.
+    /// See [`Error`](crate::Error) for the other cases.
     pub async fn get_last_trade_prices(
         &self,
         token_ids: impl IntoIterator<Item = impl Into<TokenId>>,
     ) -> Result<Vec<TokenLastTradePrice>> {
-        let token_ids = collect_token_ids("token_ids", token_ids)?;
-        require_at_most("token_ids", &token_ids, MAX_LAST_TRADE_PRICES_TOKEN_IDS)?;
+        let token_ids = csv_token_ids(token_ids)?;
+        require_at_most(TOKEN_IDS, &token_ids, MAX_LAST_TRADE_PRICES_TOKEN_IDS)?;
         self.transport
             .get(&["last-trades-prices"])
             .query(token_ids_query(&token_ids))
@@ -477,20 +547,24 @@ impl ClobClient {
     /// Gets the last trade prices of up to [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] tokens using a
     /// request body (`POST /last-trades-prices`).
     ///
-    /// Accepts token ids directly or [`BookRequest`]s.
+    /// Accepts token ids directly or [`BookRequest`]s. An empty side from the server is
+    /// mapped to a `None` [`TokenLastTradePrice::side`]. The `GET` form is
+    /// [`ClobClient::get_last_trade_prices`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-last-trade-prices-request-body>.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if there are more than
-    /// [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] requests; otherwise see [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `token_ids`) if `requests`
+    /// is empty (the request body is required), has more than
+    /// [`MAX_LAST_TRADE_PRICES_TOKEN_IDS`] entries, or a token id is empty. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_last_trade_prices_by_body(
         &self,
         requests: impl IntoIterator<Item = impl Into<BookRequest>>,
     ) -> Result<Vec<TokenLastTradePrice>> {
-        let body = book_requests(requests);
-        require_at_most("token_id", &body, MAX_LAST_TRADE_PRICES_TOKEN_IDS)?;
+        let body = body_requests(requests)?;
+        require_at_most(TOKEN_IDS, &body, MAX_LAST_TRADE_PRICES_TOKEN_IDS)?;
         self.transport
             .post(&["last-trades-prices"])
             .json(&body)
@@ -501,8 +575,10 @@ impl ClobClient {
 
     /// Gets the base fee rate of a token with a query parameter (`GET /fee-rate`).
     ///
-    /// The spec marks `token_id` as optional, so it is a builder setter; see
-    /// [`ClobClient::get_fee_rate_by_path`] for the path-parameter form.
+    /// The spec marks the `token_id` query parameter as optional, so it is a builder setter
+    /// here. The endpoint is documented as returning the fee rate "for a specific token ID",
+    /// and the docs do not say what the server returns when `token_id` is omitted.
+    /// [`ClobClient::get_fee_rate_by_path`] takes the token id as a required argument.
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-fee-rate>.
     pub fn get_fee_rate(&self) -> GetFeeRate {
@@ -513,16 +589,19 @@ impl ClobClient {
     }
 
     /// Gets the base fee rate of a token with a path parameter
-    /// (`GET /fee-rate/{token_id}`).
+    /// (`GET /fee-rate/{token_id}`). The query-parameter form is
+    /// [`ClobClient::get_fee_rate`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-fee-rate-by-path-parameter>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. An invalid
+    /// token id is an [`Error::Api`](crate::Error::Api) with status `400`, an unknown market
+    /// one with status `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_fee_rate_by_path(&self, token_id: impl Into<TokenId>) -> Result<FeeRate> {
         let token_id = token_id.into();
+        require_id("token_id", token_id.as_str())?;
         self.transport
             .get(&["fee-rate", token_id.as_str()])
             .send()
@@ -531,8 +610,10 @@ impl ClobClient {
 
     /// Gets the minimum tick size of a token with a query parameter (`GET /tick-size`).
     ///
-    /// The spec marks `token_id` as optional, so it is a builder setter; see
-    /// [`ClobClient::get_tick_size_by_path`] for the path-parameter form.
+    /// The spec marks the `token_id` query parameter as optional, so it is a builder setter
+    /// here. The endpoint is documented as returning the tick size "for a specific token
+    /// ID", and the docs do not say what the server returns when `token_id` is omitted.
+    /// [`ClobClient::get_tick_size_by_path`] takes the token id as a required argument.
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-tick-size>.
     pub fn get_tick_size(&self) -> GetTickSize {
@@ -543,16 +624,19 @@ impl ClobClient {
     }
 
     /// Gets the minimum tick size of a token with a path parameter
-    /// (`GET /tick-size/{token_id}`).
+    /// (`GET /tick-size/{token_id}`). The query-parameter form is
+    /// [`ClobClient::get_tick_size`].
     ///
     /// See <https://docs.polymarket.com/api-reference/market-data/get-tick-size-by-path-parameter>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. An invalid
+    /// token id is an [`Error::Api`](crate::Error::Api) with status `400`, an unknown market
+    /// one with status `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_tick_size_by_path(&self, token_id: impl Into<TokenId>) -> Result<TickSize> {
         let token_id = token_id.into();
+        require_id("token_id", token_id.as_str())?;
         self.transport
             .get(&["tick-size", token_id.as_str()])
             .send()
@@ -562,8 +646,10 @@ impl ClobClient {
     /// Gets the negative-risk flag of a token's market with a query parameter
     /// (`GET /neg-risk`).
     ///
-    /// The spec marks `token_id` as optional, so it is a builder setter; see
-    /// [`ClobClient::get_neg_risk_by_path`] for the path-parameter form.
+    /// The spec marks the `token_id` query parameter as optional, so it is a builder setter
+    /// here. The endpoint is documented as returning the flag "for a specific token ID", and
+    /// the docs do not say what the server returns when `token_id` is omitted.
+    /// [`ClobClient::get_neg_risk_by_path`] takes the token id as a required argument.
     ///
     /// Documented only in the CLOB OpenAPI spec (operation `getNegRisk`); there is no
     /// reference page. See <https://docs.polymarket.com/api-reference/predictions/overview>.
@@ -575,21 +661,33 @@ impl ClobClient {
     }
 
     /// Gets the negative-risk flag of a token's market with a path parameter
-    /// (`GET /neg-risk/{token_id}`).
+    /// (`GET /neg-risk/{token_id}`). The query-parameter form is
+    /// [`ClobClient::get_neg_risk`].
     ///
     /// Documented only in the CLOB OpenAPI spec (operation `getNegRiskByPath`); there is no
     /// reference page. See <https://docs.polymarket.com/api-reference/predictions/overview>.
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty. An invalid
+    /// token id is an [`Error::Api`](crate::Error::Api) with status `400`, an unknown market
+    /// one with status `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_neg_risk_by_path(&self, token_id: impl Into<TokenId>) -> Result<NegRisk> {
         let token_id = token_id.into();
+        require_id("token_id", token_id.as_str())?;
         self.transport
             .get(&["neg-risk", token_id.as_str()])
             .send()
             .await
+    }
+}
+
+/// Builds the optional `token_id` query of `/fee-rate`, `/tick-size` and `/neg-risk`,
+/// failing on an empty id.
+fn optional_token_id_query(token_id: Option<&TokenId>) -> Result<Query> {
+    match token_id {
+        Some(token_id) => token_id_query(token_id),
+        None => Ok(Query::new()),
     }
 }
 
@@ -602,7 +700,7 @@ pub struct GetFeeRate {
 }
 
 impl GetFeeRate {
-    /// Token id (asset id).
+    /// Token id (asset id), the `token_id` query parameter.
     pub fn token_id(mut self, token_id: impl Into<TokenId>) -> Self {
         self.token_id = Some(token_id.into());
         self
@@ -612,11 +710,12 @@ impl GetFeeRate {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if the token id is set but empty. An
+    /// invalid token id is an [`Error::Api`](crate::Error::Api) with status `400`, an
+    /// unknown market one with status `404`. See [`Error`](crate::Error) for the other
+    /// cases.
     pub async fn send(self) -> Result<FeeRate> {
-        let mut query = Query::new();
-        query.push_opt("token_id", self.token_id.as_ref());
+        let query = optional_token_id_query(self.token_id.as_ref())?;
         self.client
             .transport
             .get(&["fee-rate"])
@@ -635,7 +734,7 @@ pub struct GetTickSize {
 }
 
 impl GetTickSize {
-    /// Token id (asset id).
+    /// Token id (asset id), the `token_id` query parameter.
     pub fn token_id(mut self, token_id: impl Into<TokenId>) -> Self {
         self.token_id = Some(token_id.into());
         self
@@ -645,11 +744,12 @@ impl GetTickSize {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if the token id is set but empty. An
+    /// invalid token id is an [`Error::Api`](crate::Error::Api) with status `400`, an
+    /// unknown market one with status `404`. See [`Error`](crate::Error) for the other
+    /// cases.
     pub async fn send(self) -> Result<TickSize> {
-        let mut query = Query::new();
-        query.push_opt("token_id", self.token_id.as_ref());
+        let query = optional_token_id_query(self.token_id.as_ref())?;
         self.client
             .transport
             .get(&["tick-size"])
@@ -668,7 +768,7 @@ pub struct GetNegRisk {
 }
 
 impl GetNegRisk {
-    /// Token id (asset id).
+    /// Token id (asset id), the `token_id` query parameter.
     pub fn token_id(mut self, token_id: impl Into<TokenId>) -> Self {
         self.token_id = Some(token_id.into());
         self
@@ -678,11 +778,12 @@ impl GetNegRisk {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if the token id is set but empty. An
+    /// invalid token id is an [`Error::Api`](crate::Error::Api) with status `400`, an
+    /// unknown market one with status `404`. See [`Error`](crate::Error) for the other
+    /// cases.
     pub async fn send(self) -> Result<NegRisk> {
-        let mut query = Query::new();
-        query.push_opt("token_id", self.token_id.as_ref());
+        let query = optional_token_id_query(self.token_id.as_ref())?;
         self.client
             .transport
             .get(&["neg-risk"])
@@ -695,6 +796,7 @@ impl GetNegRisk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     fn d(s: &str) -> Decimal {
         s.parse().unwrap()
@@ -716,7 +818,7 @@ mod tests {
             "neg_risk": false,
             "last_trade_price": "0.45"
         }"#;
-        let book: OrderBookSummary = serde_json::from_str(json).unwrap();
+        let book: OrderBookSummary = round_trip(json);
         assert_eq!(book.asset_id, "0xabc123def456...");
         assert_eq!(book.timestamp, "1234567890");
         assert_eq!(book.bids.len(), 2);
@@ -725,10 +827,6 @@ mod tests {
         assert_eq!(book.tick_size, d("0.01"));
         assert!(!book.neg_risk);
         assert_eq!(book.last_trade_price, d("0.45"));
-
-        let again: OrderBookSummary =
-            serde_json::from_str(&serde_json::to_string(&book).unwrap()).unwrap();
-        assert_eq!(again, book);
     }
 
     #[test]
@@ -737,34 +835,38 @@ mod tests {
         assert!(err.to_string().contains("missing field"), "{err}");
     }
 
-    /// Examples of `GET /midpoint`, `GET /spread` and `GET /price` in
-    /// docs/specs/clob-openapi.yaml.
+    /// Examples of `GET /midpoint`, `GET /spread`, `GET /price`, `GET /fee-rate`,
+    /// `GET /tick-size` and `GET /neg-risk` in docs/specs/clob-openapi.yaml; they
+    /// re-serialize with the documented JSON types (numbers stay numbers).
     #[test]
     fn deserializes_single_values() {
-        let mid: Midpoint = serde_json::from_str(r#"{"mid_price":"0.45"}"#).unwrap();
+        let mid: Midpoint = round_trip(r#"{"mid_price":"0.45"}"#);
         assert_eq!(mid.mid_price, d("0.45"));
-        let spread: Spread = serde_json::from_str(r#"{"spread":"0.02"}"#).unwrap();
+        let spread: Spread = round_trip(r#"{"spread":"0.02"}"#);
         assert_eq!(spread.spread, d("0.02"));
-        let price: Price = serde_json::from_str(r#"{"price":0.45}"#).unwrap();
+        let price: Price = round_trip(r#"{"price":0.45}"#);
         assert_eq!(price.price, d("0.45"));
-        let fee: FeeRate = serde_json::from_str(r#"{"base_fee":30}"#).unwrap();
+        let fee: FeeRate = round_trip(r#"{"base_fee":30}"#);
         assert_eq!(fee.base_fee, 30);
-        let tick: TickSize = serde_json::from_str(r#"{"minimum_tick_size":0.01}"#).unwrap();
+        let tick: TickSize = round_trip(r#"{"minimum_tick_size":0.01}"#);
         assert_eq!(tick.minimum_tick_size, d("0.01"));
-        let neg: NegRisk = serde_json::from_str(r#"{"neg_risk":false}"#).unwrap();
+        let neg: NegRisk = round_trip(r#"{"neg_risk":false}"#);
         assert!(!neg.neg_risk);
+
+        // A numeric string is accepted for number-typed fields as well.
+        let price: Price = serde_json::from_str(r#"{"price":"0.45"}"#).unwrap();
+        assert_eq!(price.price, d("0.45"));
     }
 
     /// `GET /last-trade-price`: example `{price: '0.45', side: BUY}` and the documented
     /// "no trades" default (`"0.5"`, empty side) in docs/specs/clob-openapi.yaml.
     #[test]
     fn deserializes_last_trade_price() {
-        let last: LastTradePrice =
-            serde_json::from_str(r#"{"price":"0.45","side":"BUY"}"#).unwrap();
+        let last: LastTradePrice = round_trip(r#"{"price":"0.45","side":"BUY"}"#);
         assert_eq!(last.price, d("0.45"));
         assert_eq!(last.side, Some(Side::Buy));
 
-        let none: LastTradePrice = serde_json::from_str(r#"{"price":"0.5","side":""}"#).unwrap();
+        let none: LastTradePrice = round_trip(r#"{"price":"0.5","side":""}"#);
         assert_eq!(none.price, d("0.5"));
         assert_eq!(none.side, None);
 
@@ -779,10 +881,25 @@ mod tests {
             {"token_id": "0xabc123def456...", "price": "0.45", "side": "BUY"},
             {"token_id": "0xdef456abc123...", "price": "0.52", "side": "SELL"}
         ]"#;
-        let prices: Vec<TokenLastTradePrice> = serde_json::from_str(json).unwrap();
+        let prices: Vec<TokenLastTradePrice> = round_trip(json);
         assert_eq!(prices[0].token_id, "0xabc123def456...");
         assert_eq!(prices[1].price, d("0.52"));
-        assert_eq!(prices[1].side, Side::Sell);
+        assert_eq!(prices[1].side, Some(Side::Sell));
+    }
+
+    /// An empty side (the "no trades" value of `GET /last-trade-price`) maps to `None` in
+    /// the batch form too; any other undocumented value is kept as `Side::Unknown`.
+    #[test]
+    fn last_trade_prices_side_edge_cases() {
+        let none: TokenLastTradePrice = round_trip(r#"{"token_id":"1","price":"0.5","side":""}"#);
+        assert_eq!(none.side, None);
+        let unknown: TokenLastTradePrice =
+            round_trip(r#"{"token_id":"1","price":"0.5","side":"HOLD"}"#);
+        assert_eq!(unknown.side, Some(Side::Unknown("HOLD".to_owned())));
+        assert!(
+            serde_json::from_str::<TokenLastTradePrice>(r#"{"token_id":"1","price":"0.5"}"#)
+                .is_err()
+        );
     }
 
     /// Example responses of `GET /prices` and `GET /midpoints` in
@@ -803,5 +920,39 @@ mod tests {
         let json = r#"{"0xabc123def456...":"0.45","0xdef456abc123...":"0.52"}"#;
         let mids: HashMap<TokenId, Decimal> = serde_json::from_str(json).unwrap();
         assert_eq!(mids[&TokenId::from("0xdef456abc123...")], d("0.52"));
+    }
+
+    #[test]
+    fn request_validation() {
+        let parameter = |result: Result<Vec<BookRequest>>| match result {
+            Err(polyoxide_core::Error::Validation(v)) => v.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        };
+        assert_eq!(
+            parameter(body_requests(Vec::<BookRequest>::new())),
+            "token_ids"
+        );
+        assert_eq!(parameter(body_requests([""])), "token_ids");
+        // Commas are only a problem in comma-separated query parameters.
+        assert!(body_requests(["1,2"]).is_ok());
+        assert!(csv_token_ids(["1,2"]).is_err());
+        assert!(csv_token_ids([""]).is_err());
+        assert!(csv_token_ids(Vec::<TokenId>::new()).is_err());
+        assert_eq!(
+            csv_token_ids(["1", "2"]).unwrap(),
+            ["1", "2"].map(TokenId::from)
+        );
+
+        let unsided = [BookRequest::new("1")];
+        let err = require_sides("sides", &unsided).unwrap_err();
+        assert!(matches!(&err, polyoxide_core::Error::Validation(v) if v.parameter() == "sides"));
+        assert!(require_sides("side", &[BookRequest::from(("1", Side::Buy))]).is_ok());
+
+        assert!(token_id_query(&TokenId::from("")).is_err());
+        assert_eq!(
+            token_id_query(&TokenId::from("1")).unwrap().get("token_id"),
+            Some("1")
+        );
+        assert!(optional_token_id_query(None).unwrap().is_empty());
     }
 }

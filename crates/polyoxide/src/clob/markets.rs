@@ -4,9 +4,7 @@
 use crate::Paginated;
 use chrono::{DateTime, Utc};
 use polyoxide_core::{
-    Query, Result,
-    pagination::{CursorPage, cursor_stream},
-    serde_util,
+    Query, Result, serde_util,
     types::{Address, ConditionId, TokenId},
 };
 use rust_decimal::Decimal;
@@ -14,7 +12,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use super::{
     ClobClient,
-    types::{MarketsPage, require_non_empty},
+    types::{MarketsPage, clob_cursor_stream, require_id, require_list_values, require_non_empty},
 };
 
 /// A reward rate of a market (an item of `Rewards.rates`).
@@ -25,7 +23,8 @@ use super::{
 pub struct RewardRate {
     /// Address of the reward asset.
     pub asset_address: Option<Address>,
-    /// Daily reward rate.
+    /// Daily reward rate (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_daily_rate: Option<Decimal>,
 }
 
@@ -37,9 +36,11 @@ pub struct RewardRate {
 pub struct Rewards {
     /// Reward rates per reward asset.
     pub rates: Option<Vec<RewardRate>>,
-    /// Minimum order size to be eligible for rewards.
+    /// Minimum order size to be eligible for rewards (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub min_size: Option<Decimal>,
-    /// Maximum spread to be eligible for rewards.
+    /// Maximum spread to be eligible for rewards (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub max_spread: Option<Decimal>,
 }
 
@@ -53,15 +54,16 @@ pub struct Token {
     pub token_id: Option<TokenId>,
     /// Outcome label (e.g. `"Yes"`).
     pub outcome: Option<String>,
-    /// Price of the token.
+    /// Price of the token (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub price: Option<Decimal>,
     /// Whether this outcome won.
     pub winner: Option<bool>,
 }
 
 /// A market in its simplified form (`components/schemas/SimplifiedMarket`), as listed by
-/// [`ClobClient::get_simplified_markets`] and
-/// [`ClobClient::get_sampling_simplified_markets`].
+/// [`ClobClient::list_simplified_markets`] and
+/// [`ClobClient::list_sampling_simplified_markets`].
 ///
 /// The spec marks no field as required.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,7 +86,7 @@ pub struct SimplifiedMarket {
 }
 
 /// A CLOB market (`components/schemas/Market`), as listed by
-/// [`ClobClient::get_sampling_markets`].
+/// [`ClobClient::list_sampling_markets`].
 ///
 /// The spec marks no field as required and documents none of them; descriptions here are
 /// limited to what the field names state.
@@ -104,13 +106,18 @@ pub struct Market {
     /// Since when the market accepts orders.
     #[serde(default, with = "serde_util::datetime_option")]
     pub accepting_order_timestamp: Option<DateTime<Utc>>,
-    /// Minimum order size.
+    /// Minimum order size (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub minimum_order_size: Option<Decimal>,
-    /// Minimum tick size (price increment).
+    /// Minimum tick size, the price increment (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub minimum_tick_size: Option<Decimal>,
     /// Condition id of the market.
     pub condition_id: Option<ConditionId>,
-    /// Question id.
+    /// Question id, exactly as sent.
+    ///
+    /// Kept as a string: the spec types it as a plain string without describing it, so it
+    /// is not known to be the same id as [`QuestionId`](crate::types::QuestionId).
     pub question_id: Option<String>,
     /// The market question.
     pub question: Option<String>,
@@ -136,9 +143,9 @@ pub struct Market {
     pub notifications_enabled: Option<bool>,
     /// Whether negative risk is enabled for this market.
     pub neg_risk: Option<bool>,
-    /// Negative-risk market id.
+    /// Negative-risk market id (a string; the spec does not document it further).
     pub neg_risk_market_id: Option<String>,
-    /// Negative-risk request id.
+    /// Negative-risk request id (a string; the spec does not document it further).
     pub neg_risk_request_id: Option<String>,
     /// Icon URL.
     pub icon: Option<String>,
@@ -174,11 +181,11 @@ pub struct ClobToken {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct FeeDetails {
-    /// Fee rate (wire name `r`).
-    #[serde(rename = "r")]
+    /// Fee rate (wire name `r`; a JSON number on the wire).
+    #[serde(rename = "r", default, with = "serde_util::decimal_number_option")]
     pub rate: Option<Decimal>,
-    /// Fee curve exponent (wire name `e`).
-    #[serde(rename = "e")]
+    /// Fee curve exponent (wire name `e`; a JSON number on the wire).
+    #[serde(rename = "e", default, with = "serde_util::decimal_number_option")]
     pub exponent: Option<Decimal>,
     /// Whether fees apply to takers only (wire name `to`).
     #[serde(rename = "to")]
@@ -199,17 +206,20 @@ pub struct ClobMarketDetails {
     /// Rewards configuration (wire name `r`).
     ///
     /// The spec describes it as an object with arbitrary properties
-    /// (`components/schemas/ClobRewards`), so it is kept as raw JSON.
+    /// (`components/schemas/ClobRewards`), so it is kept as raw JSON. This deliberately
+    /// exposes [`serde_json`](crate::serde_json) 1.x in the public API (see the crate docs
+    /// on dependencies in the public API); a typed representation would replace it if the
+    /// docs ever describe the object's properties.
     #[serde(rename = "r")]
     pub rewards: Option<serde_json::Map<String, serde_json::Value>>,
     /// Tokens of this market (wire name `t`).
     #[serde(rename = "t")]
     pub tokens: Option<Vec<ClobToken>>,
-    /// Minimum order size (wire name `mos`).
-    #[serde(rename = "mos")]
+    /// Minimum order size (wire name `mos`; a JSON number on the wire).
+    #[serde(rename = "mos", default, with = "serde_util::decimal_number_option")]
     pub min_order_size: Option<Decimal>,
-    /// Minimum tick size, the price increment (wire name `mts`).
-    #[serde(rename = "mts")]
+    /// Minimum tick size, the price increment (wire name `mts`; a JSON number on the wire).
+    #[serde(rename = "mts", default, with = "serde_util::decimal_number_option")]
     pub min_tick_size: Option<Decimal>,
     /// Maker base fee in basis points (wire name `mbf`).
     #[serde(rename = "mbf")]
@@ -223,7 +233,7 @@ pub struct ClobMarketDetails {
     /// Whether the taker order delay is enabled (wire name `itode`): marketable orders are
     /// then held for the 250 ms taker-delay window before processing. The server omits the
     /// field when `false`.
-    #[serde(rename = "itode")]
+    #[serde(rename = "itode", default, skip_serializing_if = "Option::is_none")]
     pub taker_order_delay_enabled: Option<bool>,
     /// Whether the Blockaid check is enabled (wire name `ibce`).
     #[serde(rename = "ibce")]
@@ -258,6 +268,9 @@ pub struct LiveActivityMarket {
     /// Condition id of the market.
     pub condition_id: Option<ConditionId>,
     /// Internal market id (a JSON integer).
+    ///
+    /// Kept as a plain integer: the spec only calls it "Internal market ID", so it is not
+    /// known to be the same id as [`MarketId`](crate::types::MarketId).
     pub id: Option<i64>,
     /// The market question.
     pub question: Option<String>,
@@ -287,12 +300,12 @@ impl ClobClient {
     /// let clob = polyoxide::clob::ClobClient::new()?;
     ///
     /// // One page, with the cursor of the next one.
-    /// let page = clob.get_simplified_markets().send().await?;
-    /// println!("next page: {:?}", page.next_page_cursor());
+    /// let page = clob.list_simplified_markets().send().await?;
+    /// println!("{} markets, next page: {:?}", page.items().len(), page.next_cursor());
     ///
     /// // Or every market, fetching pages lazily.
     /// let first_1000: Vec<_> = clob
-    ///     .get_simplified_markets()
+    ///     .list_simplified_markets()
     ///     .into_stream()
     ///     .take(1000)
     ///     .try_collect()
@@ -301,20 +314,20 @@ impl ClobClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_simplified_markets(&self) -> GetSimplifiedMarkets {
-        GetSimplifiedMarkets {
+    pub fn list_simplified_markets(&self) -> ListSimplifiedMarkets {
+        ListSimplifiedMarkets {
             client: self.clone(),
-            next_cursor: None,
+            cursor: None,
         }
     }
 
     /// Lists sampling markets (`GET /sampling-markets`, cursor pagination).
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-sampling-markets>.
-    pub fn get_sampling_markets(&self) -> GetSamplingMarkets {
-        GetSamplingMarkets {
+    pub fn list_sampling_markets(&self) -> ListSamplingMarkets {
+        ListSamplingMarkets {
             client: self.clone(),
-            next_cursor: None,
+            cursor: None,
         }
     }
 
@@ -322,10 +335,10 @@ impl ClobClient {
     /// pagination).
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-sampling-simplified-markets>.
-    pub fn get_sampling_simplified_markets(&self) -> GetSamplingSimplifiedMarkets {
-        GetSamplingSimplifiedMarkets {
+    pub fn list_sampling_simplified_markets(&self) -> ListSamplingSimplifiedMarkets {
+        ListSamplingSimplifiedMarkets {
             client: self.clone(),
-            next_cursor: None,
+            cursor: None,
         }
     }
 
@@ -335,13 +348,15 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An invalid condition id is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// [`Error::Validation`](crate::Error::Validation) if `condition_id` is empty. An invalid
+    /// condition id is an [`Error::Api`](crate::Error::Api) with status `400`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn get_clob_market_info(
         &self,
         condition_id: impl Into<ConditionId>,
     ) -> Result<ClobMarketDetails> {
         let condition_id = condition_id.into();
+        require_id("condition_id", condition_id.as_str())?;
         self.transport
             .get(&["clob-markets", condition_id.as_str()])
             .send()
@@ -354,10 +369,12 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown token is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `token_id` is empty (which the
+    /// server documents as `400`). An unknown token is an [`Error::Api`](crate::Error::Api)
+    /// with status `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_market_by_token(&self, token_id: impl Into<TokenId>) -> Result<MarketByToken> {
         let token_id = token_id.into();
+        require_id("token_id", token_id.as_str())?;
         self.transport
             .get(&["markets-by-token", token_id.as_str()])
             .send()
@@ -371,15 +388,21 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `condition_ids` is empty (the
-    /// server rejects an empty body with `400`); otherwise see [`Error`](crate::Error).
-    /// Unknown markets are an [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `condition_ids`) if
+    /// `condition_ids` is empty (the server rejects an empty body with `400`) or a condition
+    /// id is empty. Unknown markets are an [`Error::Api`](crate::Error::Api) with status
+    /// `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_markets_live_activity(
         &self,
         condition_ids: impl IntoIterator<Item = impl Into<ConditionId>>,
     ) -> Result<Vec<LiveActivityMarket>> {
         let condition_ids: Vec<ConditionId> = condition_ids.into_iter().map(Into::into).collect();
         require_non_empty("condition_ids", &condition_ids)?;
+        require_list_values(
+            "condition_ids",
+            condition_ids.iter().map(ConditionId::as_str),
+            false,
+        )?;
         self.transport
             .post(&["markets", "live-activity"])
             .json(&condition_ids)
@@ -396,13 +419,15 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An unknown market is an
-    /// [`Error::Api`](crate::Error::Api) with status `404`.
+    /// [`Error::Validation`](crate::Error::Validation) if `condition_id` is empty. An invalid
+    /// condition id is an [`Error::Api`](crate::Error::Api) with status `400`, an unknown
+    /// market one with status `404`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_market_live_activity(
         &self,
         condition_id: impl Into<ConditionId>,
     ) -> Result<LiveActivityMarket> {
         let condition_id = condition_id.into();
+        require_id("condition_id", condition_id.as_str())?;
         self.transport
             .get(&["markets", "live-activity", condition_id.as_str()])
             .send()
@@ -426,130 +451,84 @@ fn markets_stream<T>(client: ClobClient, path: &'static str, start: Option<Strin
 where
     T: DeserializeOwned + Send + 'static,
 {
-    cursor_stream(start, move |cursor: Option<String>| {
+    clob_cursor_stream(start, move |cursor: Option<String>| {
         let client = client.clone();
         async move {
             let page: MarketsPage<T> = fetch_markets_page(&client, path, cursor.as_deref()).await?;
-            let next = page.next_page_cursor().map(str::to_owned);
-            Ok(CursorPage::new(page.data.unwrap_or_default(), next))
+            Ok((page.data.unwrap_or_default(), page.next_cursor))
         }
     })
 }
 
-/// Request builder for [`ClobClient::get_simplified_markets`].
-#[derive(Debug, Clone)]
-#[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetSimplifiedMarkets {
-    client: ClobClient,
-    next_cursor: Option<String>,
+/// Generates the request builder of a CLOB market listing.
+macro_rules! markets_listing {
+    ($(#[$meta:meta])* $name:ident, $path:literal, $item:ty) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone)]
+        #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
+        pub struct $name {
+            client: ClobClient,
+            cursor: Option<String>,
+        }
+
+        impl $name {
+            /// Cursor of the page to fetch (the `next_cursor` query parameter), from a
+            /// previous page's [`next_cursor()`](MarketsPage::next_cursor()). Omit for the
+            /// first page.
+            ///
+            /// [`END_CURSOR`](super::END_CURSOR) (or an empty cursor) means there are no
+            /// more pages: [`into_stream`](Self::into_stream) then yields nothing, while
+            /// [`send`](Self::send) still sends it as given.
+            pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+                self.cursor = Some(cursor.into());
+                self
+            }
+
+            /// Fetches one page.
+            ///
+            /// # Errors
+            ///
+            /// An invalid request (e.g. an invalid cursor) is an
+            /// [`Error::Api`](crate::Error::Api) with status `400`. See
+            /// [`Error`](crate::Error) for the other cases.
+            pub async fn send(self) -> Result<MarketsPage<$item>> {
+                fetch_markets_page(&self.client, $path, self.cursor.as_deref()).await
+            }
+
+            /// Streams every market from the configured cursor onwards, fetching pages
+            /// lazily until the last page. The stream ends after yielding the first error.
+            pub fn into_stream(self) -> Paginated<$item> {
+                markets_stream(self.client, $path, self.cursor)
+            }
+        }
+    };
 }
 
-impl GetSimplifiedMarkets {
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](MarketsPage::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
-        self
-    }
+markets_listing!(
+    /// Request builder for [`ClobClient::list_simplified_markets`].
+    ListSimplifiedMarkets,
+    "simplified-markets",
+    SimplifiedMarket
+);
 
-    /// Fetches one page.
-    ///
-    /// # Errors
-    ///
-    /// See [`Error`](crate::Error).
-    pub async fn send(self) -> Result<MarketsPage<SimplifiedMarket>> {
-        fetch_markets_page(
-            &self.client,
-            "simplified-markets",
-            self.next_cursor.as_deref(),
-        )
-        .await
-    }
+markets_listing!(
+    /// Request builder for [`ClobClient::list_sampling_markets`].
+    ListSamplingMarkets,
+    "sampling-markets",
+    Market
+);
 
-    /// Streams every market from the configured cursor onwards, fetching pages lazily until
-    /// the last page.
-    pub fn into_stream(self) -> Paginated<SimplifiedMarket> {
-        markets_stream(self.client, "simplified-markets", self.next_cursor)
-    }
-}
-
-/// Request builder for [`ClobClient::get_sampling_markets`].
-#[derive(Debug, Clone)]
-#[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetSamplingMarkets {
-    client: ClobClient,
-    next_cursor: Option<String>,
-}
-
-impl GetSamplingMarkets {
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](MarketsPage::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
-        self
-    }
-
-    /// Fetches one page.
-    ///
-    /// # Errors
-    ///
-    /// See [`Error`](crate::Error).
-    pub async fn send(self) -> Result<MarketsPage<Market>> {
-        fetch_markets_page(
-            &self.client,
-            "sampling-markets",
-            self.next_cursor.as_deref(),
-        )
-        .await
-    }
-
-    /// Streams every market from the configured cursor onwards, fetching pages lazily until
-    /// the last page.
-    pub fn into_stream(self) -> Paginated<Market> {
-        markets_stream(self.client, "sampling-markets", self.next_cursor)
-    }
-}
-
-/// Request builder for [`ClobClient::get_sampling_simplified_markets`].
-#[derive(Debug, Clone)]
-#[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetSamplingSimplifiedMarkets {
-    client: ClobClient,
-    next_cursor: Option<String>,
-}
-
-impl GetSamplingSimplifiedMarkets {
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](MarketsPage::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
-        self
-    }
-
-    /// Fetches one page.
-    ///
-    /// # Errors
-    ///
-    /// See [`Error`](crate::Error).
-    pub async fn send(self) -> Result<MarketsPage<SimplifiedMarket>> {
-        fetch_markets_page(
-            &self.client,
-            "sampling-simplified-markets",
-            self.next_cursor.as_deref(),
-        )
-        .await
-    }
-
-    /// Streams every market from the configured cursor onwards, fetching pages lazily until
-    /// the last page.
-    pub fn into_stream(self) -> Paginated<SimplifiedMarket> {
-        markets_stream(self.client, "sampling-simplified-markets", self.next_cursor)
-    }
-}
+markets_listing!(
+    /// Request builder for [`ClobClient::list_sampling_simplified_markets`].
+    ListSamplingSimplifiedMarkets,
+    "sampling-simplified-markets",
+    SimplifiedMarket
+);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     fn d(s: &str) -> Decimal {
         s.parse().unwrap()
@@ -562,8 +541,8 @@ mod tests {
     fn deserializes_simplified_markets_page() {
         let json = r#"{
             "limit": 1,
-            "count": 1,
             "next_cursor": "MQ==",
+            "count": 1,
             "data": [{
                 "condition_id": "0xbd31dc8a20211944f6b70f31557f1001557b59905b7738480ca09bd4532f84af",
                 "rewards": {
@@ -581,9 +560,9 @@ mod tests {
                 "accepting_orders": true
             }]
         }"#;
-        let page: MarketsPage<SimplifiedMarket> = serde_json::from_str(json).unwrap();
-        assert_eq!(page.next_page_cursor(), Some("MQ=="));
-        let market = &page.data.as_ref().unwrap()[0];
+        let page: MarketsPage<SimplifiedMarket> = round_trip(json);
+        assert_eq!(page.next_cursor(), Some("MQ=="));
+        let market = &page.items()[0];
         let rewards = market.rewards.as_ref().unwrap();
         assert_eq!(rewards.max_spread, Some(d("99")));
         assert_eq!(
@@ -631,7 +610,7 @@ mod tests {
             "tokens": [],
             "tags": ["politics"]
         }"#;
-        let market: Market = serde_json::from_str(json).unwrap();
+        let market: Market = round_trip(json);
         assert_eq!(
             market
                 .accepting_order_timestamp
@@ -668,7 +647,7 @@ mod tests {
             "fd": {"r": 0.02, "e": 2, "to": true},
             "oas": 0
         }"#;
-        let details: ClobMarketDetails = serde_json::from_str(json).unwrap();
+        let details: ClobMarketDetails = round_trip(json);
         assert_eq!(details.game_start_time, None);
         assert!(details.rewards.unwrap().contains_key("min_size"));
         let tokens = details.tokens.unwrap();
@@ -676,12 +655,15 @@ mod tests {
         assert_eq!(details.min_order_size, Some(d("5")));
         assert_eq!(details.min_tick_size, Some(d("0.01")));
         assert_eq!(details.rfq_enabled, Some(true));
-        // Omitted when false.
+        // `itode` is omitted when false, and stays omitted when serialized.
         assert_eq!(details.taker_order_delay_enabled, None);
         let fees = details.fee_details.unwrap();
         assert_eq!(fees.rate, Some(d("0.02")));
         assert_eq!(fees.exponent, Some(d("2")));
         assert_eq!(fees.takers_only, Some(true));
+
+        let enabled: ClobMarketDetails = serde_json::from_str(r#"{"itode":true}"#).unwrap();
+        assert_eq!(enabled.taker_order_delay_enabled, Some(true));
 
         let with_gst: ClobMarketDetails =
             serde_json::from_str(r#"{"gst":"2024-05-01T12:00:00Z","fd":{"r":null}}"#).unwrap();
@@ -701,7 +683,7 @@ mod tests {
             "primary_token_id": "71321045679252212594626385532706912750332728571942532289631379312455583992563",
             "secondary_token_id": "52114319501245915516055106046884209969926127482827954674443846427813813222426"
         }"#;
-        let market: MarketByToken = serde_json::from_str(json).unwrap();
+        let market: MarketByToken = round_trip(json);
         assert_eq!(
             market.primary_token_id,
             "71321045679252212594626385532706912750332728571942532289631379312455583992563"
@@ -724,7 +706,7 @@ mod tests {
             "image": "https://example.com/image.png",
             "tags": ["politics", "elections"]
         }"#;
-        let market: LiveActivityMarket = serde_json::from_str(json).unwrap();
+        let market: LiveActivityMarket = round_trip(json);
         assert_eq!(market.id, Some(248_849));
         assert_eq!(market.series_slug, None);
         assert_eq!(market.tags.unwrap().len(), 2);

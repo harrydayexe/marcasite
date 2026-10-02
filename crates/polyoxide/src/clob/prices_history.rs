@@ -7,7 +7,10 @@ use polyoxide_core::{Query, Result, serde_util, types::TokenId};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::{ClobClient, types::require_at_most};
+use super::{
+    ClobClient,
+    types::{require_at_most, require_id, require_list_values, require_non_empty},
+};
 
 /// Maximum number of markets per [`ClobClient::get_batch_prices_history`] request.
 pub const MAX_BATCH_PRICES_HISTORY_MARKETS: usize = 20;
@@ -15,14 +18,18 @@ pub const MAX_BATCH_PRICES_HISTORY_MARKETS: usize = 20;
 polyoxide_core::string_enum! {
     /// Time interval for price-history aggregation (the `interval` parameter).
     ///
-    /// The spec lists the values without describing them; the duration names below follow
-    /// their documented order (`max`, `all`, `1m`, `1w`, `1d`, `6h`, `1h`).
+    /// The CLOB spec lists the values (`max`, `all`, `1m`, `1w`, `1d`, `6h`, `1h`) without
+    /// describing them. The variant names follow the Data API v2 `GET /v2/prices-history`
+    /// docs, which list the same values as relative windows and size the default bucket
+    /// width of each "to their own span" (`1h`/`6h`/`1d` 60 s, `1w` 300 s, `1m` 1800 s), so
+    /// `1m` spans more than `1w`, i.e. a month. Whether the CLOB endpoints treat the values
+    /// the same way is not documented.
     pub enum PriceHistoryInterval {
         /// `max`.
         Max => "max",
         /// `all`.
         All => "all",
-        /// `1m`: one month (listed between `all` and `1w`).
+        /// `1m`: one month (see the type docs).
         OneMonth => "1m",
         /// `1w`: one week.
         OneWeek => "1w",
@@ -48,8 +55,8 @@ pub struct PricePoint {
     /// unit documented for the `start_ts` / `end_ts` filters.
     #[serde(rename = "t", default, with = "serde_util::timestamp_seconds_option")]
     pub timestamp: Option<DateTime<Utc>>,
-    /// Price at that time (wire name `p`).
-    #[serde(rename = "p")]
+    /// Price at that time (wire name `p`; a JSON number on the wire).
+    #[serde(rename = "p", default, with = "serde_util::decimal_number_option")]
     pub price: Option<Decimal>,
 }
 
@@ -94,7 +101,9 @@ struct BatchPricesHistoryRequest<'a> {
 impl ClobClient {
     /// Gets the price history of a market (`GET /prices-history`).
     ///
-    /// `market` is the token id (asset id) to query.
+    /// `market` is the token id (asset id) to query. The batch form for up to
+    /// [`MAX_BATCH_PRICES_HISTORY_MARKETS`] markets is
+    /// [`ClobClient::get_batch_prices_history`].
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-prices-history>.
     ///
@@ -131,9 +140,27 @@ impl ClobClient {
     /// Gets the price histories of up to [`MAX_BATCH_PRICES_HISTORY_MARKETS`] markets
     /// (`POST /batch-prices-history`).
     ///
-    /// `markets` are token ids (asset ids).
+    /// `markets` are token ids (asset ids). The single-market form is
+    /// [`ClobClient::get_prices_history`].
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-batch-prices-history>.
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use polyoxide::clob::PriceHistoryInterval;
+    ///
+    /// let clob = polyoxide::clob::ClobClient::new()?;
+    /// let batch = clob
+    ///     .get_batch_prices_history(["1", "2"])
+    ///     .interval(PriceHistoryInterval::OneWeek)
+    ///     .send()
+    ///     .await?;
+    /// for (token_id, points) in batch.history.unwrap_or_default() {
+    ///     println!("{token_id}: {} points", points.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn get_batch_prices_history(
         &self,
         markets: impl IntoIterator<Item = impl Into<TokenId>>,
@@ -163,12 +190,16 @@ pub struct GetPricesHistory {
 
 impl GetPricesHistory {
     /// Only points after this time (`startTs`, sent as Unix seconds).
+    ///
+    /// This endpoint's docs say only "unix timestamp"; seconds is the unit documented for
+    /// the batch form's `start_ts`.
     pub fn start_ts(mut self, start: DateTime<Utc>) -> Self {
         self.start_ts = Some(start);
         self
     }
 
-    /// Only points before this time (`endTs`, sent as Unix seconds).
+    /// Only points before this time (`endTs`, sent as Unix seconds; see
+    /// [`start_ts`](Self::start_ts) on the unit).
     pub fn end_ts(mut self, end: DateTime<Utc>) -> Self {
         self.end_ts = Some(end);
         self
@@ -190,9 +221,11 @@ impl GetPricesHistory {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). Invalid parameters are an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// [`Error::Validation`](crate::Error::Validation) if `market` is empty. Missing or
+    /// invalid parameters are an [`Error::Api`](crate::Error::Api) with status `400`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<PricesHistory> {
+        require_id("market", self.market.as_str())?;
         let mut query = Query::new();
         query
             .push("market", &self.market)
@@ -250,10 +283,14 @@ impl GetBatchPricesHistory {
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if there are more than
-    /// [`MAX_BATCH_PRICES_HISTORY_MARKETS`] markets; otherwise see [`Error`](crate::Error).
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `markets`) if there are no
+    /// markets (the field is required), more than [`MAX_BATCH_PRICES_HISTORY_MARKETS`], or
+    /// an empty one. Missing or invalid parameters are an [`Error::Api`](crate::Error::Api)
+    /// with status `400`. See [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<BatchPricesHistory> {
+        require_non_empty("markets", &self.markets)?;
         require_at_most("markets", &self.markets, MAX_BATCH_PRICES_HISTORY_MARKETS)?;
+        require_list_values("markets", self.markets.iter().map(TokenId::as_str), false)?;
         let body = BatchPricesHistoryRequest {
             markets: &self.markets,
             start_ts: self.start_ts,
@@ -276,13 +313,14 @@ mod tests {
     use chrono::TimeZone as _;
 
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     /// Field names and types from `components/schemas/PricesHistoryResponse` /
     /// `MarketPrice` in docs/specs/clob-openapi.yaml (the spec has no example).
     #[test]
     fn deserializes_prices_history() {
         let json = r#"{"history":[{"t":1700000000,"p":0.45},{"t":1700003600,"p":0.5}]}"#;
-        let history: PricesHistory = serde_json::from_str(json).unwrap();
+        let history: PricesHistory = round_trip(json);
         let points = history.history.unwrap();
         assert_eq!(
             points[0].timestamp,
@@ -299,7 +337,7 @@ mod tests {
     #[test]
     fn deserializes_batch_prices_history() {
         let json = r#"{"history":{"123":[{"t":1700000000,"p":0.45}],"456":[]}}"#;
-        let batch: BatchPricesHistory = serde_json::from_str(json).unwrap();
+        let batch: BatchPricesHistory = round_trip(json);
         let history = batch.history.unwrap();
         assert_eq!(history[&TokenId::from("123")].len(), 1);
         assert!(history[&TokenId::from("456")].is_empty());

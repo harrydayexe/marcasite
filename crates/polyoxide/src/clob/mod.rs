@@ -5,20 +5,87 @@
 //! rewards configurations, maker rebates, builder trades and the server time. Start from
 //! [`ClobClient`]; every endpoint is a method on it.
 //!
-//! Endpoints that exist both as `GET` with query parameters and as `POST` with a request
-//! body are exposed twice: the `POST` form has a `_by_body` suffix (e.g.
-//! [`ClobClient::get_midpoints`] / [`ClobClient::get_midpoints_by_body`]). Endpoints that
-//! also accept the token id as a path parameter have a `_by_path` form (e.g.
-//! [`ClobClient::get_fee_rate_by_path`]).
+//! See <https://docs.polymarket.com/api-reference/predictions/overview>.
 //!
-//! Cursor-paginated listings return a [`Page`] or [`MarketsPage`] from `.send()` and every
-//! item from `.into_stream()`. The CLOB marks the last page with the `next_cursor` value
-//! [`END_CURSOR`] (`"LTE="`).
+//! # Endpoints
+//!
+//! | Endpoint | Method |
+//! |---|---|
+//! | `GET /time` | [`ClobClient::get_server_time`] |
+//! | `GET /book` | [`ClobClient::get_order_book`] |
+//! | `GET /books` | [`ClobClient::get_order_books`] |
+//! | `POST /books` | [`ClobClient::get_order_books_by_body`] |
+//! | `GET /price` | [`ClobClient::get_price`] |
+//! | `GET /prices` | [`ClobClient::get_prices`] |
+//! | `POST /prices` | [`ClobClient::get_prices_by_body`] |
+//! | `GET /midpoint` | [`ClobClient::get_midpoint`] |
+//! | `GET /midpoints` | [`ClobClient::get_midpoints`] |
+//! | `POST /midpoints` | [`ClobClient::get_midpoints_by_body`] |
+//! | `GET /spread` | [`ClobClient::get_spread`] |
+//! | `POST /spreads` | [`ClobClient::get_spreads`] |
+//! | `GET /last-trade-price` | [`ClobClient::get_last_trade_price`] |
+//! | `GET /last-trades-prices` | [`ClobClient::get_last_trade_prices`] |
+//! | `POST /last-trades-prices` | [`ClobClient::get_last_trade_prices_by_body`] |
+//! | `GET /fee-rate` | [`ClobClient::get_fee_rate`] |
+//! | `GET /fee-rate/{token_id}` | [`ClobClient::get_fee_rate_by_path`] |
+//! | `GET /tick-size` | [`ClobClient::get_tick_size`] |
+//! | `GET /tick-size/{token_id}` | [`ClobClient::get_tick_size_by_path`] |
+//! | `GET /neg-risk` | [`ClobClient::get_neg_risk`] |
+//! | `GET /neg-risk/{token_id}` | [`ClobClient::get_neg_risk_by_path`] |
+//! | `GET /simplified-markets` | [`ClobClient::list_simplified_markets`] |
+//! | `GET /sampling-markets` | [`ClobClient::list_sampling_markets`] |
+//! | `GET /sampling-simplified-markets` | [`ClobClient::list_sampling_simplified_markets`] |
+//! | `GET /clob-markets/{condition_id}` | [`ClobClient::get_clob_market_info`] |
+//! | `GET /markets-by-token/{token_id}` | [`ClobClient::get_market_by_token`] |
+//! | `POST /markets/live-activity` | [`ClobClient::get_markets_live_activity`] |
+//! | `GET /markets/live-activity/{condition_id}` | [`ClobClient::get_market_live_activity`] |
+//! | `GET /prices-history` | [`ClobClient::get_prices_history`] |
+//! | `POST /batch-prices-history` | [`ClobClient::get_batch_prices_history`] |
+//! | `GET /rewards/markets/current` | [`ClobClient::list_current_rewards`] |
+//! | `GET /rewards/markets/{condition_id}` | [`ClobClient::list_raw_rewards_for_market`] |
+//! | `GET /rewards/markets/multi` | [`ClobClient::list_markets_with_rewards`] |
+//! | `GET /rebates/current` | [`ClobClient::get_current_rebated_fees`] |
+//! | `GET /builder/trades` | [`ClobClient::list_builder_trades`] |
 //!
 //! Authenticated CLOB endpoints (orders, trades of a user, API keys, user rewards, ...) are
 //! not implemented yet; see `ENDPOINTS.md`.
 //!
-//! See <https://docs.polymarket.com/api-reference/predictions/overview>.
+//! # Naming
+//!
+//! Cursor-paginated listings are named `list_*`; they return a [`Page`] or
+//! [`MarketsPage`] from `.send()` and every item from `.into_stream()`. The starting cursor
+//! is set with `.cursor(..)`, and `page.next_cursor()` returns the cursor of the next page,
+//! or `None` on the last one: the CLOB marks the last page with the `next_cursor` value
+//! [`END_CURSOR`] (`"LTE="`). Every other endpoint is a `get_*` method.
+//!
+//! Several market-data endpoints exist in more than one documented form, and each form has
+//! its own method:
+//!
+//! | Form | Method name | Example |
+//! |---|---|---|
+//! | `GET` with a single `token_id` query parameter | `get_<thing>` | [`ClobClient::get_midpoint`] |
+//! | `GET` with a comma-separated `token_ids` query parameter | `get_<things>` | [`ClobClient::get_midpoints`] |
+//! | `POST` with a JSON array request body | `get_<things>_by_body` | [`ClobClient::get_midpoints_by_body`] |
+//! | `GET` with the token id as a path parameter | `get_<thing>_by_path` | [`ClobClient::get_fee_rate_by_path`] |
+//!
+//! `POST /spreads` has no `GET` counterpart and is simply [`ClobClient::get_spreads`].
+//!
+//! # Validation
+//!
+//! Requests are checked before they are sent, and a violation is an
+//! [`Error::Validation`](crate::Error::Validation) naming the parameter: required ids must
+//! not be empty, required lists (including the request bodies of the batch `POST` forms)
+//! must not be empty, ids in comma-separated lists must not contain a comma, and the
+//! documented limits ([`MAX_LAST_TRADE_PRICES_TOKEN_IDS`],
+//! [`MAX_BATCH_PRICES_HISTORY_MARKETS`], [`MAX_REWARDS_MARKETS_PAGE_SIZE`]) and patterns
+//! (builder codes and markets of [`ClobClient::list_builder_trades`]) are enforced.
+//!
+//! # URL length
+//!
+//! The docs give no limit on the length of a URL. A long `token_ids` list makes a long URL
+//! (token ids are up to 78 digits each, and every comma is percent-encoded), which proxies
+//! and CDNs commonly reject. The `_by_body` forms send the same request in the body instead,
+//! so prefer them for large batches.
 
 mod client;
 mod market_data;
@@ -37,8 +104,8 @@ pub use market_data::{
     TokenLastTradePrice,
 };
 pub use markets::{
-    ClobMarketDetails, ClobToken, FeeDetails, GetSamplingMarkets, GetSamplingSimplifiedMarkets,
-    GetSimplifiedMarkets, LiveActivityMarket, Market, MarketByToken, RewardRate, Rewards,
+    ClobMarketDetails, ClobToken, FeeDetails, ListSamplingMarkets, ListSamplingSimplifiedMarkets,
+    ListSimplifiedMarkets, LiveActivityMarket, Market, MarketByToken, RewardRate, Rewards,
     SimplifiedMarket, Token,
 };
 pub use prices_history::{
@@ -47,13 +114,13 @@ pub use prices_history::{
 };
 pub use rebates::RebatedFees;
 pub use rewards::{
-    CurrentReward, CurrentRewardConfig, GetCurrentRewards, GetMarketsWithRewards,
-    GetRawRewardsForMarket, MAX_REWARDS_MARKETS_PAGE_SIZE, MarketReward, MultiMarketInfo,
+    CurrentReward, CurrentRewardConfig, ListCurrentRewards, ListMarketsWithRewards,
+    ListRawRewardsForMarket, MAX_REWARDS_MARKETS_PAGE_SIZE, MarketReward, MultiMarketInfo,
     RewardsConfig, RewardsMarketsOrderBy, RewardsToken, SortDirection,
 };
-pub use trades::{BuilderTrade, GetBuilderTrades};
+pub use trades::{BuilderTrade, ListBuilderTrades};
 pub use types::{BookRequest, BuilderCode, END_CURSOR, MarketsPage, OrderId, Page, TradeId};
 
-/// Shared identifiers, re-exported here for discoverability (also available from
-/// [`crate::types`]).
-pub use crate::types::{EventId, MarketId};
+/// Shared identifiers and enums used by this module, re-exported here for discoverability
+/// (also available from [`crate::types`]).
+pub use crate::types::{Address, ConditionId, EventId, MarketId, Side, TokenId};

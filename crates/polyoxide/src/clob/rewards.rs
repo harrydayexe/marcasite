@@ -12,14 +12,14 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ClobClient,
-    types::{Page, page_stream},
+    types::{Page, page_stream, require_id},
 };
 
-/// Maximum `page_size` of [`ClobClient::get_markets_with_rewards`].
+/// Maximum `page_size` of [`ClobClient::list_markets_with_rewards`].
 pub const MAX_REWARDS_MARKETS_PAGE_SIZE: u32 = 500;
 
 polyoxide_core::string_enum! {
-    /// Sort field of [`ClobClient::get_markets_with_rewards`] (the `order_by` parameter).
+    /// Sort field of [`ClobClient::list_markets_with_rewards`] (the `order_by` parameter).
     pub enum RewardsMarketsOrderBy {
         /// `market_id`.
         MarketId => "market_id",
@@ -75,9 +75,11 @@ pub struct CurrentRewardConfig {
     pub start_date: NaiveDate,
     /// End date of the rewards period.
     pub end_date: Option<NaiveDate>,
-    /// Daily reward rate.
+    /// Daily reward rate (a JSON number on the wire).
+    #[serde(with = "serde_util::decimal_number")]
     pub rate_per_day: Decimal,
-    /// Total rewards amount.
+    /// Total rewards amount (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_rewards: Option<Decimal>,
 }
 
@@ -87,19 +89,24 @@ pub struct CurrentRewardConfig {
 pub struct CurrentReward {
     /// Condition id of the market.
     pub condition_id: ConditionId,
-    /// Maximum spread for rewards eligibility.
+    /// Maximum spread for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_max_spread: Option<Decimal>,
-    /// Minimum order size for rewards eligibility.
+    /// Minimum order size for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_min_size: Option<Decimal>,
     /// Reward configurations.
     pub rewards_config: Option<Vec<CurrentRewardConfig>>,
-    /// Sponsored daily rate (omitted when zero).
+    /// Sponsored daily rate (a JSON number on the wire; omitted when zero).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub sponsored_daily_rate: Option<Decimal>,
     /// Number of sponsors (omitted when zero).
     pub sponsors_count: Option<u64>,
-    /// Native daily rate, excluding sponsors (omitted when zero).
+    /// Native daily rate, excluding sponsors (a JSON number on the wire; omitted when zero).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub native_daily_rate: Option<Decimal>,
-    /// Total daily rate, including sponsors (omitted when zero).
+    /// Total daily rate, including sponsors (a JSON number on the wire; omitted when zero).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_daily_rate: Option<Decimal>,
 }
 
@@ -111,7 +118,8 @@ pub struct RewardsToken {
     pub token_id: TokenId,
     /// Outcome name (e.g. `"YES"`).
     pub outcome: String,
-    /// Current price of the token.
+    /// Current price of the token (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub price: Option<Decimal>,
 }
 
@@ -127,11 +135,14 @@ pub struct RewardsConfig {
     pub start_date: NaiveDate,
     /// End date of the rewards period.
     pub end_date: Option<NaiveDate>,
-    /// Daily reward rate.
+    /// Daily reward rate (a JSON number on the wire).
+    #[serde(with = "serde_util::decimal_number")]
     pub rate_per_day: Decimal,
-    /// Total rewards amount.
+    /// Total rewards amount (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_rewards: Option<Decimal>,
-    /// Remaining reward amount.
+    /// Remaining reward amount (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub remaining_reward_amount: Option<Decimal>,
     /// Total number of days in the rewards period.
     pub total_days: Option<i64>,
@@ -151,11 +162,14 @@ pub struct MarketReward {
     pub event_slug: Option<String>,
     /// Market image URL.
     pub image: Option<String>,
-    /// Maximum spread for rewards eligibility.
+    /// Maximum spread for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_max_spread: Option<Decimal>,
-    /// Minimum order size for rewards eligibility.
+    /// Minimum order size for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_min_size: Option<Decimal>,
-    /// Competitiveness score of the market.
+    /// Competitiveness score of the market (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub market_competitiveness: Option<Decimal>,
     /// Outcome tokens.
     pub tokens: Vec<RewardsToken>,
@@ -181,21 +195,26 @@ pub struct MultiMarketInfo {
     pub group_item_title: Option<String>,
     /// Market image URL.
     pub image: Option<String>,
-    /// Competitiveness score of the market.
+    /// Competitiveness score of the market (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub market_competitiveness: Option<Decimal>,
     /// Market id.
     pub market_id: MarketId,
     /// URL slug of the market.
     pub market_slug: Option<String>,
-    /// Price change over the last 24 hours.
+    /// Price change over the last 24 hours (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub one_day_price_change: Option<Decimal>,
     /// The market question.
     pub question: String,
-    /// Maximum spread for rewards eligibility.
+    /// Maximum spread for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_max_spread: Option<Decimal>,
-    /// Minimum order size for rewards eligibility.
+    /// Minimum order size for rewards eligibility (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub rewards_min_size: Option<Decimal>,
-    /// Current spread.
+    /// Current spread (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub spread: Option<Decimal>,
     /// Market end date, exactly as sent (e.g. `"2024-08-10 00:00:00"`).
     ///
@@ -203,7 +222,8 @@ pub struct MultiMarketInfo {
     pub end_date: Option<String>,
     /// Outcome tokens.
     pub tokens: Vec<RewardsToken>,
-    /// 24-hour trading volume.
+    /// 24-hour trading volume (a JSON number on the wire).
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub volume_24hr: Option<Decimal>,
     /// Reward configurations.
     pub rewards_config: Option<Vec<RewardsConfig>>,
@@ -214,11 +234,11 @@ impl ClobClient {
     /// (`GET /rewards/markets/current`, cursor pagination, 500 items per page).
     ///
     /// See <https://docs.polymarket.com/api-reference/rewards/get-current-active-rewards-configurations>.
-    pub fn get_current_rewards(&self) -> GetCurrentRewards {
-        GetCurrentRewards {
+    pub fn list_current_rewards(&self) -> ListCurrentRewards {
+        ListCurrentRewards {
             client: self.clone(),
             sponsored: None,
-            next_cursor: None,
+            cursor: None,
         }
     }
 
@@ -226,15 +246,15 @@ impl ClobClient {
     /// (`GET /rewards/markets/{condition_id}`, cursor pagination, 100 items per page).
     ///
     /// See <https://docs.polymarket.com/api-reference/rewards/get-raw-rewards-for-a-specific-market>.
-    pub fn get_raw_rewards_for_market(
+    pub fn list_raw_rewards_for_market(
         &self,
         condition_id: impl Into<ConditionId>,
-    ) -> GetRawRewardsForMarket {
-        GetRawRewardsForMarket {
+    ) -> ListRawRewardsForMarket {
+        ListRawRewardsForMarket {
             client: self.clone(),
             condition_id: condition_id.into(),
             sponsored: None,
-            next_cursor: None,
+            cursor: None,
         }
     }
 
@@ -242,8 +262,31 @@ impl ClobClient {
     /// sorting (`GET /rewards/markets/multi`, cursor pagination).
     ///
     /// See <https://docs.polymarket.com/api-reference/rewards/get-multiple-markets-with-rewards>.
-    pub fn get_markets_with_rewards(&self) -> GetMarketsWithRewards {
-        GetMarketsWithRewards {
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use futures_util::{StreamExt as _, TryStreamExt as _};
+    /// use polyoxide::clob::{RewardsMarketsOrderBy, SortDirection};
+    ///
+    /// let clob = polyoxide::clob::ClobClient::new()?;
+    /// let markets: Vec<_> = clob
+    ///     .list_markets_with_rewards()
+    ///     .tag_slugs(["politics", "sports"])
+    ///     .order_by(RewardsMarketsOrderBy::Volume24hr)
+    ///     .position(SortDirection::Desc)
+    ///     .page_size(500)
+    ///     .into_stream()
+    ///     .take(1000)
+    ///     .try_collect()
+    ///     .await?;
+    /// for market in markets {
+    ///     println!("{}: {:?}", market.question, market.volume_24hr);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_markets_with_rewards(&self) -> ListMarketsWithRewards {
+        ListMarketsWithRewards {
             client: self.clone(),
             q: None,
             tag_slugs: Vec::new(),
@@ -257,22 +300,22 @@ impl ClobClient {
             max_spread: None,
             min_price: None,
             max_price: None,
-            next_cursor: None,
+            cursor: None,
             page_size: None,
         }
     }
 }
 
-/// Request builder for [`ClobClient::get_current_rewards`].
+/// Request builder for [`ClobClient::list_current_rewards`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetCurrentRewards {
+pub struct ListCurrentRewards {
     client: ClobClient,
     sponsored: Option<bool>,
-    next_cursor: Option<String>,
+    cursor: Option<String>,
 }
 
-impl GetCurrentRewards {
+impl ListCurrentRewards {
     /// If `true`, returns sponsored reward configurations instead of the standard ones
     /// (server default `false`).
     pub fn sponsored(mut self, sponsored: bool) -> Self {
@@ -280,10 +323,14 @@ impl GetCurrentRewards {
         self
     }
 
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](Page::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
+    /// Cursor of the page to fetch (the `next_cursor` query parameter), from a previous
+    /// page's [`next_cursor()`](Page::next_cursor()). Omit for the first page.
+    ///
+    /// [`END_CURSOR`](super::END_CURSOR) (or an empty cursor) means there are no more
+    /// pages: [`into_stream`](Self::into_stream) then yields nothing, while
+    /// [`send`](Self::send) still sends it as given.
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
         self
     }
 
@@ -304,32 +351,38 @@ impl GetCurrentRewards {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An invalid cursor is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// An invalid cursor is an [`Error::Api`](crate::Error::Api) with status `400`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<Page<CurrentReward>> {
-        let cursor = self.next_cursor.clone();
+        let cursor = self.cursor.clone();
         self.fetch(cursor).await
     }
 
     /// Streams every configuration from the configured cursor onwards, fetching pages
-    /// lazily until the last page (`next_cursor` `"LTE="`).
+    /// lazily until the last page (`next_cursor` `"LTE="`). The stream ends after yielding
+    /// the first error.
     pub fn into_stream(self) -> Paginated<CurrentReward> {
-        let start = self.next_cursor.clone();
+        let start = self.cursor.clone();
         page_stream(self, start, Self::fetch)
     }
 }
 
-/// Request builder for [`ClobClient::get_raw_rewards_for_market`].
+/// Path segments that `/rewards/markets/{condition_id}` shares with other endpoints
+/// (`/rewards/markets/current`, `/rewards/markets/multi`); as a condition id they would
+/// address those endpoints instead.
+const RESERVED_REWARDS_MARKET_SEGMENTS: [&str; 2] = ["current", "multi"];
+
+/// Request builder for [`ClobClient::list_raw_rewards_for_market`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetRawRewardsForMarket {
+pub struct ListRawRewardsForMarket {
     client: ClobClient,
     condition_id: ConditionId,
     sponsored: Option<bool>,
-    next_cursor: Option<String>,
+    cursor: Option<String>,
 }
 
-impl GetRawRewardsForMarket {
+impl ListRawRewardsForMarket {
     /// If `true`, folds sponsored daily rates into each configuration's `rate_per_day`
     /// (server default `false`).
     pub fn sponsored(mut self, sponsored: bool) -> Self {
@@ -337,21 +390,37 @@ impl GetRawRewardsForMarket {
         self
     }
 
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](Page::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
+    /// Cursor of the page to fetch (the `next_cursor` query parameter), from a previous
+    /// page's [`next_cursor()`](Page::next_cursor()). Omit for the first page.
+    ///
+    /// [`END_CURSOR`](super::END_CURSOR) (or an empty cursor) means there are no more
+    /// pages: [`into_stream`](Self::into_stream) then yields nothing, while
+    /// [`send`](Self::send) still sends it as given.
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
         self
     }
 
     async fn fetch(self, cursor: Option<String>) -> Result<Page<MarketReward>> {
+        let condition_id = self.condition_id.as_str();
+        require_id("condition_id", condition_id)?;
+        if RESERVED_REWARDS_MARKET_SEGMENTS.contains(&condition_id) {
+            return Err(ValidationError::new(
+                "condition_id",
+                format!(
+                    "{condition_id:?} is not a condition id: `/rewards/markets/{condition_id}` \
+                     is a different endpoint"
+                ),
+            )
+            .into());
+        }
         let mut query = Query::new();
         query
             .push_opt("sponsored", self.sponsored)
             .push_opt("next_cursor", cursor);
         self.client
             .transport
-            .get(&["rewards", "markets", self.condition_id.as_str()])
+            .get(&["rewards", "markets", condition_id])
             .query(query)
             .send()
             .await
@@ -361,25 +430,29 @@ impl GetRawRewardsForMarket {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An empty condition id or an invalid cursor is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// [`Error::Validation`](crate::Error::Validation) if the condition id is empty (which
+    /// the server documents as `400` "Invalid market") or is `current` or `multi` (the path
+    /// of another endpoint). An invalid market or cursor is an
+    /// [`Error::Api`](crate::Error::Api) with status `400`. See [`Error`](crate::Error) for
+    /// the other cases.
     pub async fn send(self) -> Result<Page<MarketReward>> {
-        let cursor = self.next_cursor.clone();
+        let cursor = self.cursor.clone();
         self.fetch(cursor).await
     }
 
     /// Streams every configured market entry from the configured cursor onwards, fetching
-    /// pages lazily until the last page (`next_cursor` `"LTE="`).
+    /// pages lazily until the last page (`next_cursor` `"LTE="`). The stream ends after
+    /// yielding the first error.
     pub fn into_stream(self) -> Paginated<MarketReward> {
-        let start = self.next_cursor.clone();
+        let start = self.cursor.clone();
         page_stream(self, start, Self::fetch)
     }
 }
 
-/// Request builder for [`ClobClient::get_markets_with_rewards`].
+/// Request builder for [`ClobClient::list_markets_with_rewards`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetMarketsWithRewards {
+pub struct ListMarketsWithRewards {
     client: ClobClient,
     q: Option<String>,
     tag_slugs: Vec<String>,
@@ -393,26 +466,28 @@ pub struct GetMarketsWithRewards {
     max_spread: Option<Decimal>,
     min_price: Option<Decimal>,
     max_price: Option<Decimal>,
-    next_cursor: Option<String>,
+    cursor: Option<String>,
     page_size: Option<u32>,
 }
 
-impl GetMarketsWithRewards {
+impl ListMarketsWithRewards {
     /// Text search on the market question and description.
     pub fn q(mut self, q: impl Into<String>) -> Self {
         self.q = Some(q.into());
         self
     }
 
-    /// Filter by tag slug. Call repeatedly to match any of several tags (OR).
-    pub fn tag_slug(mut self, tag_slug: impl Into<String>) -> Self {
-        self.tag_slugs.push(tag_slug.into());
+    /// Only markets with any of these tag slugs (OR), sent as one `tag_slug` query
+    /// parameter per value. Replaces previously set slugs.
+    pub fn tag_slugs(mut self, tag_slugs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tag_slugs = tag_slugs.into_iter().map(Into::into).collect();
         self
     }
 
-    /// Filter by event id. Call repeatedly for several events.
-    pub fn event_id(mut self, event_id: impl Into<EventId>) -> Self {
-        self.event_ids.push(event_id.into());
+    /// Only markets of these events, sent as one `event_id` query parameter per value.
+    /// Replaces previously set ids.
+    pub fn event_ids(mut self, event_ids: impl IntoIterator<Item = impl Into<EventId>>) -> Self {
+        self.event_ids = event_ids.into_iter().map(Into::into).collect();
         self
     }
 
@@ -470,15 +545,22 @@ impl GetMarketsWithRewards {
         self
     }
 
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](Page::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
+    /// Cursor of the page to fetch (the `next_cursor` query parameter), from a previous
+    /// page's [`next_cursor()`](Page::next_cursor()). Omit for the first page.
+    ///
+    /// [`END_CURSOR`](super::END_CURSOR) (or an empty cursor) means there are no more
+    /// pages: [`into_stream`](Self::into_stream) then yields nothing, while
+    /// [`send`](Self::send) still sends it as given.
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
         self
     }
 
-    /// Number of items per page (server default 100, at most
-    /// [`MAX_REWARDS_MARKETS_PAGE_SIZE`]).
+    /// Number of items per page (server default 100).
+    ///
+    /// The docs give a maximum of [`MAX_REWARDS_MARKETS_PAGE_SIZE`] and say the server caps
+    /// larger values; this client rejects them instead (see [`send`](Self::send)), so a
+    /// page never silently holds fewer items than asked for.
     pub fn page_size(mut self, page_size: u32) -> Self {
         self.page_size = Some(page_size);
         self
@@ -523,18 +605,19 @@ impl GetMarketsWithRewards {
     /// # Errors
     ///
     /// [`Error::Validation`](crate::Error::Validation) if
-    /// [`page_size`](Self::page_size) exceeds [`MAX_REWARDS_MARKETS_PAGE_SIZE`]; otherwise
-    /// see [`Error`](crate::Error). An invalid `order_by`, `position` or cursor is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// [`page_size`](Self::page_size) exceeds [`MAX_REWARDS_MARKETS_PAGE_SIZE`]. An invalid
+    /// `order_by`, `position` or cursor is an [`Error::Api`](crate::Error::Api) with status
+    /// `400`. See [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<Page<MultiMarketInfo>> {
-        let cursor = self.next_cursor.clone();
+        let cursor = self.cursor.clone();
         self.fetch(cursor).await
     }
 
     /// Streams every market from the configured cursor onwards, fetching pages lazily until
-    /// the last page (`next_cursor` `"LTE="`).
+    /// the last page (`next_cursor` `"LTE="`). The stream ends after yielding the first
+    /// error.
     pub fn into_stream(self) -> Paginated<MultiMarketInfo> {
-        let start = self.next_cursor.clone();
+        let start = self.cursor.clone();
         page_stream(self, start, Self::fetch)
     }
 }
@@ -542,6 +625,7 @@ impl GetMarketsWithRewards {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     fn d(s: &str) -> Decimal {
         s.parse().unwrap()
@@ -569,7 +653,7 @@ mod tests {
                 "total_daily_rate": 3.0
             }]
         }"#;
-        let page: Page<CurrentReward> = serde_json::from_str(json).unwrap();
+        let page: Page<CurrentReward> = round_trip(json);
         assert_eq!(page.limit, 500);
         assert!(page.is_last_page());
         let reward = &page.data[0];
@@ -631,7 +715,7 @@ mod tests {
                 ]
             }]
         }"#;
-        let page: Page<MarketReward> = serde_json::from_str(json).unwrap();
+        let page: Page<MarketReward> = round_trip(json);
         let market = &page.data[0];
         assert_eq!(market.question, "Will Trump win the 2024 Iowa Caucus?");
         assert_eq!(market.market_competitiveness, Some(d("0.42")));
@@ -677,8 +761,8 @@ mod tests {
                 ]
             }]
         }"#;
-        let page: Page<MultiMarketInfo> = serde_json::from_str(json).unwrap();
-        assert_eq!(page.next_page_cursor(), Some("NQ=="));
+        let page: Page<MultiMarketInfo> = round_trip(json);
+        assert_eq!(page.next_cursor(), Some("NQ=="));
         let market = &page.data[0];
         assert_eq!(market.event_id, Some(EventId::from("12345")));
         assert_eq!(market.market_id, "248849");

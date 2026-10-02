@@ -11,7 +11,9 @@ mod rewards;
 mod time;
 mod trades;
 
-use polyoxide::clob::ClobClient;
+use std::time::Duration;
+
+use polyoxide::{HttpClient, RetryPolicy, clob::ClobClient};
 use wiremock::{MockServer, ResponseTemplate};
 
 use crate::common;
@@ -19,6 +21,19 @@ use crate::common;
 /// A CLOB client pointed at `server`.
 fn clob(server: &MockServer) -> ClobClient {
     common::polymarket(server).clob().clone()
+}
+
+/// A CLOB client pointed at `server` that retries once, almost immediately.
+fn retrying_clob(server: &MockServer) -> ClobClient {
+    let http = HttpClient::builder()
+        .retry_policy(RetryPolicy::new(1).with_initial_backoff(Duration::from_millis(1)))
+        .build()
+        .unwrap();
+    ClobClient::builder()
+        .base_url(server.uri())
+        .http_client(http)
+        .build()
+        .unwrap()
 }
 
 /// A `200 OK` response with a JSON body.

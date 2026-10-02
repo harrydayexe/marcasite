@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use polyoxide::{
-    Decimal, Error, HttpClient, RetryPolicy, StatusCode,
-    clob::{BookRequest, ClobClient, MAX_LAST_TRADE_PRICES_TOKEN_IDS},
+    Decimal, Error, StatusCode,
+    clob::{BookRequest, MAX_LAST_TRADE_PRICES_TOKEN_IDS},
     types::{Side, TokenId},
 };
 use serde_json::json;
@@ -14,8 +14,16 @@ use wiremock::{
     matchers::{body_json, method, path, query_param, query_param_is_missing},
 };
 
-use super::{api_error, clob, json};
+use super::{api_error, clob, json, retrying_clob};
 use crate::common;
+
+/// The parameter named by a validation error.
+fn invalid_parameter(err: Error) -> String {
+    match err {
+        Error::Validation(v) => v.parameter().to_owned(),
+        other => panic!("expected Error::Validation, got {other:?}"),
+    }
+}
 
 fn d(s: &str) -> Decimal {
     s.parse().unwrap()
@@ -94,6 +102,32 @@ async fn bad_request_carries_error_message() {
     assert_eq!(api.message(), Some("Invalid side"));
 }
 
+/// `429` with the documented `ErrorResponse` fields `code` and `retry_after_seconds`
+/// (`components/schemas/ErrorResponse` in docs/specs/clob-openapi.yaml).
+#[tokio::test]
+async fn rate_limit_carries_code_and_retry_after() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/midpoint"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+            "error": "Too many requests",
+            "code": "RATE_LIMITED",
+            "retry_after_seconds": 3
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = clob(&server).get_midpoint("1").await.unwrap_err();
+    assert!(matches!(err, Error::RateLimited(_)), "{err:?}");
+    assert_eq!(err.status(), Some(StatusCode::TOO_MANY_REQUESTS));
+    assert_eq!(err.retry_after(), Some(Duration::from_secs(3)));
+    assert!(err.is_retryable());
+    let api = err.api_error().unwrap();
+    assert_eq!(api.message(), Some("Too many requests"));
+    assert_eq!(api.code(), Some("RATE_LIMITED"));
+}
+
 #[tokio::test]
 async fn malformed_body_is_a_decode_error() {
     let server = common::server().await;
@@ -138,21 +172,93 @@ async fn empty_required_lists_are_rejected_before_sending() {
 
     let client = clob(&server);
     let none: [&str; 0] = [];
+    let no_pairs = Vec::<(TokenId, Side)>::new();
     for err in [
+        // GET forms (required `token_ids` query parameter).
         client.get_order_books(none).await.unwrap_err(),
         client.get_midpoints(none).await.unwrap_err(),
         client.get_last_trade_prices(none).await.unwrap_err(),
+        client.get_prices(&no_pairs).await.unwrap_err(),
+        // POST forms (required request body).
+        client.get_order_books_by_body(none).await.unwrap_err(),
+        client.get_midpoints_by_body(none).await.unwrap_err(),
+        client.get_spreads(none).await.unwrap_err(),
+        client
+            .get_last_trade_prices_by_body(none)
+            .await
+            .unwrap_err(),
+        client.get_prices_by_body(&no_pairs).await.unwrap_err(),
     ] {
-        let Error::Validation(v) = &err else {
-            panic!("expected Error::Validation, got {err:?}")
-        };
-        assert_eq!(v.parameter(), "token_ids");
+        assert_eq!(invalid_parameter(err), "token_ids");
     }
-    let err = client
-        .get_prices(Vec::<(TokenId, Side)>::new())
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn malformed_token_ids_are_rejected_before_sending() {
+    let server = common::server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(json("{}"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    // An empty id would silently drop out of a comma-separated list, and an id with a
+    // comma would split into two.
+    for ids in [vec!["1", ""], vec!["1,2"]] {
+        let err = client.get_midpoints(ids.clone()).await.unwrap_err();
+        assert_eq!(invalid_parameter(err), "token_ids");
+        let err = client.get_order_books(ids.clone()).await.unwrap_err();
+        assert_eq!(invalid_parameter(err), "token_ids");
+        let err = client.get_last_trade_prices(ids.clone()).await.unwrap_err();
+        assert_eq!(invalid_parameter(err), "token_ids");
+    }
+    let err = client.get_prices([("1,2", Side::Buy)]).await.unwrap_err();
+    assert_eq!(invalid_parameter(err), "token_ids");
+    let err = client.get_midpoints_by_body([""]).await.unwrap_err();
+    assert_eq!(invalid_parameter(err), "token_ids");
+
+    // Required single ids, as query or path parameters.
+    for err in [
+        client.get_order_book("").await.unwrap_err(),
+        client.get_price("", Side::Buy).await.unwrap_err(),
+        client.get_midpoint("").await.unwrap_err(),
+        client.get_spread("").await.unwrap_err(),
+        client.get_last_trade_price("").await.unwrap_err(),
+        client.get_fee_rate_by_path("").await.unwrap_err(),
+        client.get_tick_size_by_path("").await.unwrap_err(),
+        client.get_neg_risk_by_path("").await.unwrap_err(),
+        client.get_fee_rate().token_id("").send().await.unwrap_err(),
+        client
+            .get_tick_size()
+            .token_id("")
+            .send()
+            .await
+            .unwrap_err(),
+        client.get_neg_risk().token_id("").send().await.unwrap_err(),
+    ] {
+        assert_eq!(invalid_parameter(err), "token_id");
+    }
+}
+
+#[tokio::test]
+async fn prices_require_a_side() {
+    let server = common::server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(json("{}"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    let requests = [
+        BookRequest::new("1").with_side(Side::Buy),
+        BookRequest::new("2"),
+    ];
+    let err = client.get_prices(&requests).await.unwrap_err();
+    assert_eq!(invalid_parameter(err), "sides");
+    let err = client.get_prices_by_body(&requests).await.unwrap_err();
+    assert_eq!(invalid_parameter(err), "side");
 }
 
 #[tokio::test]
@@ -196,16 +302,10 @@ async fn read_only_post_is_retried() {
         .mount(&server)
         .await;
 
-    let http = HttpClient::builder()
-        .retry_policy(RetryPolicy::new(1).with_initial_backoff(Duration::from_millis(1)))
-        .build()
+    let books = retrying_clob(&server)
+        .get_order_books_by_body(["1"])
+        .await
         .unwrap();
-    let client = ClobClient::builder()
-        .base_url(server.uri())
-        .http_client(http)
-        .build()
-        .unwrap();
-    let books = client.get_order_books_by_body(["1"]).await.unwrap();
     assert!(books.is_empty());
 }
 
@@ -243,13 +343,12 @@ async fn get_prices_by_query() {
         .mount(&server)
         .await;
 
-    let prices = clob(&server)
-        .get_prices([
-            ("0xabc123def456...", Side::Buy),
-            ("0xdef456abc123...", Side::Sell),
-        ])
-        .await
-        .unwrap();
+    // Borrowed `(TokenId, Side)` pairs work as well as owned ones.
+    let pairs = vec![
+        (TokenId::from("0xabc123def456..."), Side::Buy),
+        (TokenId::from("0xdef456abc123..."), Side::Sell),
+    ];
+    let prices = clob(&server).get_prices(&pairs).await.unwrap();
     assert_eq!(
         prices[&TokenId::from("0xabc123def456...")][&Side::Buy],
         d("0.45")
@@ -439,7 +538,32 @@ async fn get_last_trade_prices_by_query() {
         .await
         .unwrap();
     assert_eq!(prices[1].token_id, "0xdef456abc123...");
-    assert_eq!(prices[1].side, Side::Sell);
+    assert_eq!(prices[1].side, Some(Side::Sell));
+}
+
+/// The batch form documents only `BUY`/`SELL`; an empty side (the "no trades" value of
+/// `GET /last-trade-price`) maps to `None`, and an unknown value is kept.
+#[tokio::test]
+async fn last_trade_prices_side_edge_cases() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/last-trades-prices"))
+        .respond_with(json(
+            r#"[
+                {"token_id": "1", "price": "0.5", "side": ""},
+                {"token_id": "2", "price": "0.45", "side": "HOLD"}
+            ]"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let prices = clob(&server)
+        .get_last_trade_prices(["1", "2"])
+        .await
+        .unwrap();
+    assert_eq!(prices[0].side, None);
+    assert_eq!(prices[1].side, Some(Side::Unknown("HOLD".to_owned())));
 }
 
 #[tokio::test]
@@ -477,12 +601,12 @@ async fn last_trade_prices_limit_is_enforced() {
         .collect();
     let client = clob(&server);
     let err = client.get_last_trade_prices(&too_many).await.unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+    assert_eq!(invalid_parameter(err), "token_ids");
     let err = client
         .get_last_trade_prices_by_body(&too_many)
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+    assert_eq!(invalid_parameter(err), "token_ids");
 }
 
 #[tokio::test]
@@ -515,6 +639,8 @@ async fn fee_rate_by_query_and_path() {
         .expect(1)
         .mount(&server)
         .await;
+    // The docs do not say how the server answers a request without `token_id`; this only
+    // checks that the parameter is omitted and that an error response surfaces.
     Mock::given(method("GET"))
         .and(path("/fee-rate"))
         .and(query_param_is_missing("token_id"))

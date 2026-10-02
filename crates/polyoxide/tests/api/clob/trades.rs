@@ -76,19 +76,19 @@ async fn builder_trades_sends_filters() {
         .await;
 
     let page = clob(&server)
-        .get_builder_trades(BUILDER)
+        .list_builder_trades(BUILDER)
         .id("trade-123")
         .market(MARKET)
         .asset_id("15871154585880608648532107628464183779895785213830018178010423617714102767076")
         .before(Utc.timestamp_opt(1_700_000_000, 0).unwrap())
         .after(Utc.timestamp_opt(1_600_000_000, 0).unwrap())
-        .next_cursor("MA==")
+        .cursor("MA==")
         .send()
         .await
         .unwrap();
     assert_eq!(page.limit, 300);
-    assert_eq!(page.next_page_cursor(), Some("MzAw"));
-    let trade = &page.data[0];
+    assert_eq!(page.next_cursor(), Some("MzAw"));
+    let trade = &page.items()[0];
     assert_eq!(trade.id, TradeId::from("trade-123"));
     assert_eq!(trade.builder, BuilderCode::from(BUILDER));
     assert_eq!(trade.side, Side::Buy);
@@ -114,7 +114,7 @@ async fn builder_trades_stream_until_lte() {
         .await;
 
     let ids: Vec<_> = clob(&server)
-        .get_builder_trades(BUILDER)
+        .list_builder_trades(BUILDER)
         .into_stream()
         .map_ok(|t| t.id)
         .try_collect()
@@ -138,11 +138,11 @@ async fn invalid_inputs_are_rejected_before_sending() {
         other => panic!("expected Error::Validation, got {other:?}"),
     };
 
-    let err = client.get_builder_trades("0x01").send().await.unwrap_err();
+    let err = client.list_builder_trades("0x01").send().await.unwrap_err();
     assert_eq!(parameter(err), "builder_code");
 
     let err = client
-        .get_builder_trades(BUILDER)
+        .list_builder_trades(BUILDER)
         .market("not-a-condition-id")
         .send()
         .await
@@ -150,7 +150,7 @@ async fn invalid_inputs_are_rejected_before_sending() {
     assert_eq!(parameter(err), "market");
 
     let err = client
-        .get_builder_trades(BUILDER)
+        .list_builder_trades(BUILDER)
         .before(Utc.timestamp_opt(-1, 0).unwrap())
         .send()
         .await
@@ -159,7 +159,60 @@ async fn invalid_inputs_are_rejected_before_sending() {
 
     // The stream yields the validation error once and ends.
     let results: Vec<_> =
-        futures_util::StreamExt::collect(client.get_builder_trades("bad").into_stream()).await;
+        futures_util::StreamExt::collect(client.list_builder_trades("bad").into_stream()).await;
     assert_eq!(results.len(), 1);
     assert!(results[0].is_err());
+}
+
+#[tokio::test]
+async fn unknown_enum_values_are_kept() {
+    let server = common::server().await;
+    let mut body: serde_json::Value = serde_json::from_str(&page(&["t1"], "LTE=")).unwrap();
+    body["data"][0]["side"] = "HOLD".into();
+    Mock::given(method("GET"))
+        .and(path("/builder/trades"))
+        .respond_with(json(&body.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = clob(&server)
+        .list_builder_trades(BUILDER)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.items()[0].side, Side::Unknown("HOLD".to_owned()));
+    assert!(page.is_last_page());
+}
+
+#[tokio::test]
+async fn empty_filter_ids_are_rejected_before_sending() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json(&page(&[], "LTE=")))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    let err = client
+        .list_builder_trades(BUILDER)
+        .id("")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "id"),
+        "{err:?}"
+    );
+    let err = client
+        .list_builder_trades(BUILDER)
+        .asset_id("")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "asset_id"),
+        "{err:?}"
+    );
 }

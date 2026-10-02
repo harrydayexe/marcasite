@@ -4,11 +4,11 @@ use futures_util::{StreamExt as _, TryStreamExt as _};
 use polyoxide::{Error, clob::END_CURSOR, types::ConditionId};
 use serde_json::json;
 use wiremock::{
-    Mock,
+    Mock, ResponseTemplate,
     matchers::{any, body_json, method, path, query_param, query_param_is_missing},
 };
 
-use super::{api_error, clob, json};
+use super::{api_error, clob, json, retrying_clob};
 use crate::common;
 
 const CONDITION_ID: &str = "0xbd31dc8a20211944f6b70f31557f1001557b59905b7738480ca09bd4532f84af";
@@ -44,10 +44,15 @@ async fn simplified_markets_first_page() {
         .mount(&server)
         .await;
 
-    let page = clob(&server).get_simplified_markets().send().await.unwrap();
+    let page = clob(&server)
+        .list_simplified_markets()
+        .send()
+        .await
+        .unwrap();
     assert_eq!(page.count, Some(2));
-    assert_eq!(page.next_page_cursor(), Some("Mg=="));
-    let data = page.data.unwrap();
+    assert_eq!(page.next_cursor(), Some("Mg=="));
+    assert_eq!(page.items().len(), 2);
+    let data = page.into_items();
     assert_eq!(data[1].condition_id, Some(ConditionId::from("0x02")));
     assert_eq!(data[0].accepting_orders, Some(true));
 }
@@ -71,7 +76,7 @@ async fn simplified_markets_stream_stops_at_end_cursor() {
         .await;
 
     let ids: Vec<_> = clob(&server)
-        .get_simplified_markets()
+        .list_simplified_markets()
         .into_stream()
         .map_ok(|m| m.condition_id.unwrap())
         .try_collect()
@@ -92,13 +97,37 @@ async fn sampling_simplified_markets_with_cursor() {
         .await;
 
     let page = clob(&server)
-        .get_sampling_simplified_markets()
-        .next_cursor("MTAw")
+        .list_sampling_simplified_markets()
+        .cursor("MTAw")
         .send()
         .await
         .unwrap();
     assert!(page.is_last_page());
+    assert_eq!(page.next_cursor(), None);
+    // The raw wire value stays available.
     assert_eq!(page.next_cursor.as_deref(), Some(END_CURSOR));
+}
+
+#[tokio::test]
+async fn stream_resumed_at_end_cursor_sends_nothing() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json(&simplified_page(&["0x01"], END_CURSOR)))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    for cursor in [END_CURSOR, ""] {
+        let markets: Vec<_> = client
+            .list_sampling_simplified_markets()
+            .cursor(cursor)
+            .into_stream()
+            .try_collect()
+            .await
+            .unwrap();
+        assert!(markets.is_empty(), "{cursor:?}");
+    }
 }
 
 #[tokio::test]
@@ -127,7 +156,7 @@ async fn sampling_markets_stream() {
         .await;
 
     let markets: Vec<_> = clob(&server)
-        .get_sampling_markets()
+        .list_sampling_markets()
         .into_stream()
         .try_collect()
         .await
@@ -147,7 +176,7 @@ async fn stream_yields_error_and_ends() {
         .await;
 
     let results: Vec<_> = clob(&server)
-        .get_sampling_markets()
+        .list_sampling_markets()
         .into_stream()
         .collect()
         .await;
@@ -268,14 +297,74 @@ async fn get_markets_live_activity_rejects_empty_body() {
         .mount(&server)
         .await;
 
-    let err = clob(&server)
-        .get_markets_live_activity(Vec::<ConditionId>::new())
+    let client = clob(&server);
+    for err in [
+        client
+            .get_markets_live_activity(Vec::<ConditionId>::new())
+            .await
+            .unwrap_err(),
+        client
+            .get_markets_live_activity(["0x1234", ""])
+            .await
+            .unwrap_err(),
+    ] {
+        let Error::Validation(v) = &err else {
+            panic!("expected Error::Validation, got {err:?}")
+        };
+        assert_eq!(v.parameter(), "condition_ids");
+    }
+}
+
+#[tokio::test]
+async fn get_markets_live_activity_is_retried() {
+    let server = common::server().await;
+    Mock::given(method("POST"))
+        .and(path("/markets/live-activity"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/markets/live-activity"))
+        .respond_with(json(&json!([live_activity("0x1234")]).to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let markets = retrying_clob(&server)
+        .get_markets_live_activity(["0x1234"])
         .await
-        .unwrap_err();
-    let Error::Validation(v) = &err else {
-        panic!("expected Error::Validation, got {err:?}")
+        .unwrap();
+    assert_eq!(markets.len(), 1);
+}
+
+#[tokio::test]
+async fn empty_path_ids_are_rejected_before_sending() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json("{}"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    let parameter = |err: Error| match err {
+        Error::Validation(v) => v.parameter().to_owned(),
+        other => panic!("expected Error::Validation, got {other:?}"),
     };
-    assert_eq!(v.parameter(), "condition_ids");
+    assert_eq!(
+        parameter(client.get_clob_market_info("").await.unwrap_err()),
+        "condition_id"
+    );
+    assert_eq!(
+        parameter(client.get_market_live_activity("").await.unwrap_err()),
+        "condition_id"
+    );
+    assert_eq!(
+        parameter(client.get_market_by_token("").await.unwrap_err()),
+        "token_id"
+    );
 }
 
 #[tokio::test]

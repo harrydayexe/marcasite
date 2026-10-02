@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ClobClient,
-    types::{BuilderCode, OrderId, Page, TradeId, page_stream},
+    types::{
+        BuilderCode, OrderId, Page, TradeId, page_stream, require_id, timestamp_seconds_string,
+    },
 };
 
 /// A trade attributed to a builder code (`components/schemas/BuilderTrade`).
@@ -54,8 +56,9 @@ pub struct BuilderTrade {
     pub maker: Address,
     /// Transaction hash.
     pub transaction_hash: String,
-    /// Match time (a Unix timestamp in seconds, sent as a numeric string).
-    #[serde(with = "serde_util::timestamp_seconds")]
+    /// Match time (a Unix timestamp in seconds, sent as a numeric string, e.g.
+    /// `"1700000000"`; serializes back to a string).
+    #[serde(with = "timestamp_seconds_string")]
     pub match_time: DateTime<Utc>,
     /// Bucket index.
     pub bucket_index: i64,
@@ -79,8 +82,28 @@ impl ClobClient {
     /// Lists trades attributed to a builder code (`GET /builder/trades`, cursor pagination).
     ///
     /// See <https://docs.polymarket.com/api-reference/trade/get-builder-trades>.
-    pub fn get_builder_trades(&self, builder_code: impl Into<BuilderCode>) -> GetBuilderTrades {
-        GetBuilderTrades {
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use polyoxide::chrono::{Duration, Utc};
+    ///
+    /// let clob = polyoxide::clob::ClobClient::new()?;
+    /// let page = clob
+    ///     .list_builder_trades("0x0000000000000000000000000000000000000000000000000000000000000001")
+    ///     .after(Utc::now() - Duration::days(1))
+    ///     .send()
+    ///     .await?;
+    /// for trade in page.items() {
+    ///     println!("{} {} {} @ {}", trade.match_time, trade.side, trade.size, trade.price);
+    /// }
+    /// if let Some(cursor) = page.next_cursor() {
+    ///     println!("more trades after cursor {cursor}");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_builder_trades(&self, builder_code: impl Into<BuilderCode>) -> ListBuilderTrades {
+        ListBuilderTrades {
             client: self.clone(),
             builder_code: builder_code.into(),
             id: None,
@@ -88,15 +111,15 @@ impl ClobClient {
             asset_id: None,
             before: None,
             after: None,
-            next_cursor: None,
+            cursor: None,
         }
     }
 }
 
-/// Request builder for [`ClobClient::get_builder_trades`].
+/// Request builder for [`ClobClient::list_builder_trades`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetBuilderTrades {
+pub struct ListBuilderTrades {
     client: ClobClient,
     builder_code: BuilderCode,
     id: Option<TradeId>,
@@ -104,7 +127,7 @@ pub struct GetBuilderTrades {
     asset_id: Option<TokenId>,
     before: Option<DateTime<Utc>>,
     after: Option<DateTime<Utc>>,
-    next_cursor: Option<String>,
+    cursor: Option<String>,
 }
 
 /// Formats a filter timestamp as the documented `^\d+$` Unix timestamp.
@@ -114,7 +137,7 @@ fn unix_seconds(parameter: &'static str, time: DateTime<Utc>) -> Result<u64> {
     })
 }
 
-impl GetBuilderTrades {
+impl ListBuilderTrades {
     /// Only the trade with this id.
     pub fn id(mut self, id: impl Into<TradeId>) -> Self {
         self.id = Some(id.into());
@@ -145,10 +168,14 @@ impl GetBuilderTrades {
         self
     }
 
-    /// Cursor of the page to fetch, from a previous page's
-    /// [`next_page_cursor`](Page::next_page_cursor). Omit for the first page.
-    pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
-        self.next_cursor = Some(cursor.into());
+    /// Cursor of the page to fetch (the `next_cursor` query parameter), from a previous
+    /// page's [`next_cursor()`](Page::next_cursor()). Omit for the first page.
+    ///
+    /// [`END_CURSOR`](super::END_CURSOR) (or an empty cursor) means there are no more
+    /// pages: [`into_stream`](Self::into_stream) then yields nothing, while
+    /// [`send`](Self::send) still sends it as given.
+    pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
+        self.cursor = Some(cursor.into());
         self
     }
 
@@ -156,6 +183,12 @@ impl GetBuilderTrades {
         validate::bytes32("builder_code", self.builder_code.as_str())?;
         if let Some(market) = &self.market {
             validate::bytes32("market", market.as_str())?;
+        }
+        if let Some(id) = &self.id {
+            require_id("id", id.as_str())?;
+        }
+        if let Some(asset_id) = &self.asset_id {
+            require_id("asset_id", asset_id.as_str())?;
         }
         let before = self
             .before
@@ -187,17 +220,19 @@ impl GetBuilderTrades {
     /// # Errors
     ///
     /// [`Error::Validation`](crate::Error::Validation) if the builder code or market does not
-    /// match the documented pattern (`0x` followed by 64 hex characters) or a time filter is
-    /// before the Unix epoch; otherwise see [`Error`](crate::Error).
+    /// match the documented pattern (`0x` followed by 64 hex characters), the trade id or
+    /// asset id is set but empty, or a time filter is before the Unix epoch. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<Page<BuilderTrade>> {
-        let cursor = self.next_cursor.clone();
+        let cursor = self.cursor.clone();
         self.fetch(cursor).await
     }
 
     /// Streams every trade from the configured cursor onwards, fetching pages lazily until
-    /// the last page (`next_cursor` `"LTE="`).
+    /// the last page (`next_cursor` `"LTE="`). The stream ends after yielding the first
+    /// error (e.g. a validation error, before any request is sent).
     pub fn into_stream(self) -> Paginated<BuilderTrade> {
-        let start = self.next_cursor.clone();
+        let start = self.cursor.clone();
         page_stream(self, start, Self::fetch)
     }
 }
@@ -205,6 +240,7 @@ impl GetBuilderTrades {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     /// Example response of `GET /builder/trades` in docs/specs/clob-openapi.yaml
     /// (docs/api-reference/trade/get-builder-trades.md).
@@ -240,9 +276,9 @@ mod tests {
 
     #[test]
     fn deserializes_builder_trades_page() {
-        let page: Page<BuilderTrade> = serde_json::from_str(EXAMPLE).unwrap();
+        let page: Page<BuilderTrade> = round_trip(EXAMPLE);
         assert_eq!(page.limit, 300);
-        assert_eq!(page.next_page_cursor(), Some("MzAw"));
+        assert_eq!(page.next_cursor(), Some("MzAw"));
         let trade = &page.data[0];
         assert_eq!(trade.id, "trade-123");
         assert_eq!(trade.trade_type, "TAKER");
@@ -252,10 +288,16 @@ mod tests {
         assert_eq!(trade.match_time.timestamp(), 1_700_000_000);
         assert_eq!(trade.err_msg, None);
         assert_eq!(trade.created_at.map(|t| t.timestamp()), Some(1_704_067_200));
+    }
 
-        let again: Page<BuilderTrade> =
-            serde_json::from_str(&serde_json::to_string(&page).unwrap()).unwrap();
-        assert_eq!(again, page);
+    /// A side outside the documented `BUY`/`SELL` is kept, not rejected.
+    #[test]
+    fn unknown_side_is_kept() {
+        let mut value: serde_json::Value = serde_json::from_str(EXAMPLE).unwrap();
+        value["data"][0]["side"] = "HOLD".into();
+        let page: Page<BuilderTrade> = serde_json::from_value(value).unwrap();
+        assert_eq!(page.data[0].side, Side::Unknown("HOLD".to_owned()));
+        assert!(page.data[0].side.is_unknown());
     }
 
     #[test]

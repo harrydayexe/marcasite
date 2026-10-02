@@ -8,11 +8,11 @@ use polyoxide::{
 };
 use serde_json::json;
 use wiremock::{
-    Mock,
+    Mock, ResponseTemplate,
     matchers::{any, body_json, method, path, query_param, query_param_is_missing},
 };
 
-use super::{api_error, clob, json};
+use super::{api_error, clob, json, retrying_clob};
 use crate::common;
 
 #[tokio::test]
@@ -131,4 +131,58 @@ async fn batch_prices_history_limit_is_enforced() {
         panic!("expected Error::Validation, got {err:?}")
     };
     assert_eq!(v.parameter(), "markets");
+}
+
+#[tokio::test]
+async fn empty_markets_are_rejected_before_sending() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json("{}"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    for markets in [vec![], vec!["123", ""]] {
+        let err = client
+            .get_batch_prices_history(markets)
+            .send()
+            .await
+            .unwrap_err();
+        let Error::Validation(v) = &err else {
+            panic!("expected Error::Validation, got {err:?}")
+        };
+        assert_eq!(v.parameter(), "markets");
+    }
+    let err = client.get_prices_history("").send().await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "market"),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn batch_prices_history_is_retried() {
+    let server = common::server().await;
+    Mock::given(method("POST"))
+        .and(path("/batch-prices-history"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/batch-prices-history"))
+        .and(body_json(json!({"markets": ["123"]})))
+        .respond_with(json(r#"{"history":{"123":[]}}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let batch = retrying_clob(&server)
+        .get_batch_prices_history(["123"])
+        .send()
+        .await
+        .unwrap();
+    assert!(batch.history.unwrap()[&TokenId::from("123")].is_empty());
 }
