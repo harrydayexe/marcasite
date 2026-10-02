@@ -13,24 +13,32 @@ use wiremock::{
 
 use crate::common;
 
-/// `200` example of `GET /v1/rfq/combo-markets` in `docs/specs/combos-rfq-openapi.yaml`.
+/// Captured from `GET https://combos-rfq-api.polymarket.com/v1/rfq/combo-markets` on
+/// 2026-10-02 (trimmed to one market and three tags). The docs' example in
+/// `docs/specs/combos-rfq-openapi.yaml` has abbreviated ids and no `pending`; live has full
+/// ids and the undocumented `pending`.
 const EXAMPLE: &str = r#"{
     "markets": [
         {
-            "id": "1897034",
-            "condition_id": "0x4cd7...110ff",
-            "position_ids": ["1012585...362880", "1012585...362881"],
-            "slug": "fifwc-mex-rsa-2026-06-11-mex",
-            "title": "Will Mexico win on 2026-06-11?",
+            "id": "665374",
+            "condition_id": "0x5db999fad322cea2914535aae5517060c3f80ad6d8c0231cde2124a434d16846",
+            "position_ids": ["798559951534518479645224261511384773234863312866932338530531601041078616064", "798559951534518479645224261511384773234863312866932338530531601041078616065"],
+            "pending": false,
+            "slug": "will-the-us-invade-iran-before-2027",
+            "title": "Will the U.S. invade Iran before 2027?",
             "outcomes": ["Yes", "No"],
-            "outcome_prices": ["0.685", "0.315"],
-            "image": "https://...",
-            "volume": 330327.7128580074,
-            "tags": ["sports", "soccer", "games", "world-cup"]
+            "outcome_prices": ["0.145", "0.855"],
+            "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/will-the-us-invade-iran-in-2025-0Eh3J0ku_Fbj.jpg",
+            "volume": 70868404.87693602,
+            "tags": ["politics", "iran", "trump"]
         }
     ],
-    "next_cursor": "Mg"
+    "next_cursor": "MTQwNzI0"
 }"#;
+
+const CONDITION_ID: &str = "0x5db999fad322cea2914535aae5517060c3f80ad6d8c0231cde2124a434d16846";
+const YES_POSITION: &str =
+    "798559951534518479645224261511384773234863312866932338530531601041078616064";
 
 /// A minimal market with every required field, for paging tests.
 fn market(id: &str) -> String {
@@ -45,7 +53,7 @@ async fn list_sends_query_and_decodes() {
     Mock::given(method("GET"))
         .and(path("/v1/rfq/combo-markets"))
         .and(query_param("limit", "10"))
-        .and(query_param("exclude", "0x4cd7...110ff,0x0391ab0e..."))
+        .and(query_param("exclude", format!("{CONDITION_ID},0x0391ab0e")))
         .and(query_param_is_missing("cursor"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(EXAMPLE, "application/json"))
         .expect(1)
@@ -56,22 +64,23 @@ async fn list_sends_query_and_decodes() {
         .combos()
         .list_combo_markets()
         .limit(10)
-        .exclude(["0x4cd7...110ff", "0x0391ab0e..."])
+        .exclude([CONDITION_ID, "0x0391ab0e"])
         .send()
         .await
         .unwrap();
-    assert_eq!(page.next_cursor.as_deref(), Some("Mg"));
+    assert_eq!(page.next_cursor.as_deref(), Some("MTQwNzI0"));
     let market = &page.markets[0];
-    assert_eq!(market.id, ComboMarketId::from("1897034"));
-    assert_eq!(market.condition_id, ConditionId::from("0x4cd7...110ff"));
+    assert_eq!(market.id, ComboMarketId::from("665374"));
+    assert_eq!(market.condition_id, ConditionId::from(CONDITION_ID));
+    assert_eq!(market.pending, Some(false));
     assert_eq!(
         market.yes_position_id(),
-        Some(&PositionId::from("1012585...362880"))
+        Some(&PositionId::from(YES_POSITION))
     );
-    assert_eq!(market.no_price(), Some(Decimal::new(315, 3)));
+    assert_eq!(market.no_price(), Some(Decimal::new(855, 3)));
     assert_eq!(
         market.volume,
-        "330327.7128580074".parse::<Decimal>().unwrap()
+        "70868404.87693602".parse::<Decimal>().unwrap()
     );
 }
 
@@ -213,7 +222,7 @@ async fn limit_is_validated_before_sending() {
         .await;
 
     let combos = common::polymarket(&server).combos().clone();
-    for limit in [0, 101] {
+    for limit in [0, 1001] {
         let err = combos
             .list_combo_markets()
             .limit(limit)
@@ -227,7 +236,7 @@ async fn limit_is_validated_before_sending() {
     }
     let results: Vec<_> = combos
         .list_combo_markets()
-        .limit(500)
+        .limit(5000)
         .into_stream()
         .collect()
         .await;
@@ -302,9 +311,9 @@ async fn page_accessors_normalize_the_cursor() {
         .send()
         .await
         .unwrap();
-    assert_eq!(page.next_cursor(), Some("Mg"));
+    assert_eq!(page.next_cursor(), Some("MTQwNzI0"));
     assert_eq!(page.items().len(), 1);
-    assert_eq!(page.into_items()[0].id, ComboMarketId::from("1897034"));
+    assert_eq!(page.into_items()[0].id, ComboMarketId::from("665374"));
 }
 
 #[tokio::test]

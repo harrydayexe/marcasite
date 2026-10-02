@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use super::CombosClient;
 
-/// The largest page size `GET /v1/rfq/combo-markets` accepts.
-const MAX_LIMIT: u32 = 100;
+/// The largest page size the SDK sends for `GET /v1/rfq/combo-markets`.
+///
+/// The spec says `100`; the live API accepts at least `1000` (and, in practice, well
+/// beyond), so the SDK allows `1000`. See `SPEC_DEVIATIONS.md`.
+const MAX_LIMIT: u32 = 1000;
 
 polyoxide_core::string_id! {
     /// The id of a market in the combo catalog (`ComboMarket.id`), e.g. `"1897034"`.
@@ -42,6 +45,10 @@ pub struct ComboMarket {
     pub condition_id: ConditionId,
     /// Combo position ids; `[0]` is YES, `[1]` is NO.
     pub position_ids: Vec<PositionId>,
+    /// Whether the market is pending. Undocumented; observed live (2026-10-02) on every
+    /// market. Optional so that a response without it (as in the spec's example) still
+    /// decodes.
+    pub pending: Option<bool>,
     /// URL slug.
     pub slug: String,
     /// Market title, e.g. `"Will Mexico win on 2026-06-11?"`.
@@ -178,7 +185,12 @@ pub struct ListComboMarkets {
 }
 
 impl ListComboMarkets {
-    /// Number of markets per page, `1..=100` (server default `50`).
+    /// Number of markets per page, `1..=1000`.
+    ///
+    /// The spec documents a default of `50` and a maximum of `100`; the live API returns
+    /// `1000` markets per page when no limit is set and accepts limits above `100`
+    /// (`0` and non-numeric values get `400`). The SDK allows `1..=1000`. See
+    /// `SPEC_DEVIATIONS.md`.
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -233,7 +245,7 @@ impl ListComboMarkets {
     ///
     /// # Errors
     ///
-    /// - [`Error::Validation`](crate::Error::Validation) if the limit is outside `1..=100`
+    /// - [`Error::Validation`](crate::Error::Validation) if the limit is outside `1..=1000`
     ///   (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` for parameters the server
     ///   rejects.
@@ -309,6 +321,49 @@ mod tests {
         );
         assert_eq!(market.volume.to_string(), "330327.7128580074");
         assert_eq!(market.tags.len(), 4);
+        // The documented example has no `pending`.
+        assert_eq!(market.pending, None);
+    }
+
+    /// Captured from `GET https://combos-rfq-api.polymarket.com/v1/rfq/combo-markets`
+    /// on 2026-10-02 (trimmed to one market and its tags). Ids are full length and the
+    /// market has the undocumented `pending` field; `volume` is a float here (an integer
+    /// for some markets).
+    const LIVE_CAPTURE: &str = r#"{"markets":[{
+        "id":"665374",
+        "condition_id":"0x5db999fad322cea2914535aae5517060c3f80ad6d8c0231cde2124a434d16846",
+        "position_ids":["798559951534518479645224261511384773234863312866932338530531601041078616064","798559951534518479645224261511384773234863312866932338530531601041078616065"],
+        "pending":false,
+        "slug":"will-the-us-invade-iran-before-2027",
+        "title":"Will the U.S. invade Iran before 2027?",
+        "outcomes":["Yes","No"],
+        "outcome_prices":["0.145","0.855"],
+        "image":"https://polymarket-upload.s3.us-east-2.amazonaws.com/will-the-us-invade-iran-in-2025-0Eh3J0ku_Fbj.jpg",
+        "volume":70868404.87693602,
+        "tags":["politics","iran","trump"]
+    }],"next_cursor":"MTQwNzI0"}"#;
+
+    #[test]
+    fn deserializes_live_capture_with_pending() {
+        let page: ComboMarketsPage = serde_json::from_str(LIVE_CAPTURE).unwrap();
+        let market = &page.markets[0];
+        assert_eq!(market.pending, Some(false));
+        assert_eq!(market.condition_id.as_str().len(), 66);
+        assert_eq!(market.yes_position_id().unwrap().as_str().len(), 75);
+        assert_eq!(market.yes_price(), Some(Decimal::new(145, 3)));
+        assert_eq!(page.next_cursor(), Some("MTQwNzI0"));
+        // `pending` survives a round trip.
+        let value = serde_json::to_value(&page).unwrap();
+        assert_eq!(value["markets"][0]["pending"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn volume_may_be_an_integer() {
+        let json = r#"{"id":"1","condition_id":"0x1","position_ids":[],"pending":true,"slug":"s",
+            "title":"t","outcomes":[],"outcome_prices":[],"image":"","volume":42,"tags":[]}"#;
+        let market: ComboMarket = serde_json::from_str(json).unwrap();
+        assert_eq!(market.volume, Decimal::from(42));
+        assert_eq!(market.pending, Some(true));
     }
 
     #[test]
