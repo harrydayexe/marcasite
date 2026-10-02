@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use polyoxide_core::{Query, Result, serde_util, types::Address, validate};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{GammaClient, ImageOptimization};
@@ -32,6 +33,15 @@ pub struct PublicProfile {
     pub x_username: Option<String>,
     /// Whether the profile has a verified badge.
     pub verified_badge: Option<bool>,
+    /// Taker fee tier number, `0` upwards (undocumented; observed live).
+    pub taker_tier: Option<i64>,
+    /// Taker fee tier name, e.g. `Tier 0`, `Silver`, `Obsidian` (undocumented; observed live,
+    /// kept as sent).
+    pub taker_tier_name: Option<String>,
+    /// Weighted volume used for the taker tier (undocumented; observed live as a JSON
+    /// number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub weighted_volume: Option<Decimal>,
 }
 
 /// A user associated with a public profile (`components/schemas/PublicProfileUser`).
@@ -46,6 +56,8 @@ pub struct PublicProfileUser {
     /// Whether the user is a moderator (wire name `mod`).
     #[serde(rename = "mod")]
     pub is_mod: Option<bool>,
+    /// Whether the user is a community moderator (undocumented; observed live).
+    pub community_mod: Option<bool>,
 }
 
 /// A user profile (`components/schemas/Profile`), returned by [`GammaClient::get_profile`]
@@ -103,6 +115,15 @@ pub struct Profile {
     /// Certification request date.
     #[serde(default, with = "serde_util::datetime_option")]
     pub cert_req_date: Option<DateTime<Utc>>,
+    /// Taker fee tier number, `0` upwards (undocumented; observed live).
+    pub taker_tier: Option<i64>,
+    /// Taker fee tier name, e.g. `Tier 0`, `Silver`, `Obsidian` (undocumented; observed live,
+    /// kept as sent).
+    pub taker_tier_name: Option<String>,
+    /// Weighted volume used for the taker tier (undocumented; observed live as a JSON
+    /// number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub weighted_volume: Option<Decimal>,
 }
 
 impl GammaClient {

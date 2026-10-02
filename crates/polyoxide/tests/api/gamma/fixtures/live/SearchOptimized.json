@@ -1,0 +1,163 @@
+{
+  "_captured": {
+    "route": "GET /public-search?q=election&optimized=true&limit_per_type=10 (first 2 events, 3 markets each)",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "events": [
+      {
+        "active": true,
+        "archived": false,
+        "closed": false,
+        "endDate": "2027-01-01T04:59:00Z",
+        "ended": false,
+        "id": "580320",
+        "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/who-will-trump-endorse-in-the-2026-israeli-election-20260608183907960-QeXr8ObEt0Rg.jpg",
+        "markets": [
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.12,
+            "bestBid": 0.09,
+            "closed": false,
+            "groupItemTitle": "Likud",
+            "lastTradePrice": 0.12,
+            "outcomePrices": [
+              "0.105",
+              "0.895"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Trump endorse Likud in the 2026 Israeli Election?",
+            "slug": "will-trump-endorse-likud-in-the-2026-israeli-election-20260608183908858",
+            "spread": 0.03
+          },
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.002,
+            "bestBid": 0.001,
+            "closed": false,
+            "groupItemTitle": "Together",
+            "lastTradePrice": 0.002,
+            "outcomePrices": [
+              "0.0015",
+              "0.9985"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Trump endorse Together in the 2026 Israeli Election?",
+            "slug": "will-trump-endorse-together-in-the-2026-israeli-election-20260608183908859",
+            "spread": 0.001
+          },
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.001,
+            "closed": false,
+            "groupItemTitle": "Shas",
+            "lastTradePrice": 0.001,
+            "outcomePrices": [
+              "0.0005",
+              "0.9995"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Trump endorse Shas in the 2026 Israeli Election?",
+            "slug": "will-trump-endorse-shas-in-the-2026-israeli-election-20260608183908860",
+            "spread": 0.001
+          }
+        ],
+        "negRisk": true,
+        "slug": "which-party-will-trump-endorse-in-the-2026-israeli-election-20260610144125261",
+        "startDate": "2026-06-10T15:56:45.502194Z",
+        "title": "Which party will Trump Endorse in the 2026 Israeli Election? "
+      },
+      {
+        "active": true,
+        "archived": false,
+        "closed": false,
+        "endDate": "2026-11-04T04:59:00Z",
+        "ended": false,
+        "id": "877336",
+        "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/georgia-senate-election-winner-utyVMToWeRqc.png",
+        "markets": [
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.53,
+            "bestBid": 0.51,
+            "closed": false,
+            "groupItemTitle": "Dems sweep",
+            "lastTradePrice": 0.54,
+            "outcomePrices": [
+              "0.52",
+              "0.48"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Democrats sweep the Georgia Senate and Governor elections?",
+            "slug": "will-democrats-sweep-the-georgia-senate-and-governor-elections",
+            "spread": 0.02
+          },
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.089,
+            "bestBid": 0.021,
+            "closed": false,
+            "groupItemTitle": "Reps sweep",
+            "lastTradePrice": 0.033,
+            "outcomePrices": [
+              "0.055",
+              "0.945"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Republicans sweep the Georgia Senate and Governor elections?",
+            "slug": "will-republicans-sweep-the-georgia-senate-and-governor-elections",
+            "spread": 0.068
+          },
+          {
+            "active": true,
+            "archived": false,
+            "bestAsk": 0.049,
+            "bestBid": 0.012,
+            "closed": false,
+            "groupItemTitle": "Dems win Gov, Reps win Senate",
+            "lastTradePrice": 0.01,
+            "outcomePrices": [
+              "0.0305",
+              "0.9695"
+            ],
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "question": "Will Democrats win the Georgia Governor election and Republicans win the Georgia Senate election?",
+            "slug": "will-democrats-win-the-georgia-governor-election-and-republicans-win-the-georgia-senate-election",
+            "spread": 0.037
+          }
+        ],
+        "negRisk": true,
+        "slug": "georgia-senate-and-governor-combo",
+        "startDate": "2026-08-19T20:01:52Z",
+        "title": "Georgia Senate and Governor Combo"
+      }
+    ],
+    "hasMore": true,
+    "profiles": null,
+    "tags": null
+  }
+}

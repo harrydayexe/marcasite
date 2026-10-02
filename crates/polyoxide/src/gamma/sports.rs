@@ -35,6 +35,15 @@ pub struct Team {
     pub abbreviation: Option<String>,
     /// Alias.
     pub alias: Option<String>,
+    /// Team colour as a CSS hex string, e.g. `#E0A000` (undocumented; observed live; absent
+    /// on some teams).
+    pub color: Option<String>,
+    /// Id of the team at the sports-data provider (wire name `providerId`; undocumented,
+    /// observed live as an integer; absent on some teams).
+    pub provider_id: Option<i64>,
+    /// `home` or `away` (undocumented; observed live on the teams embedded in an event's
+    /// `teams`).
+    pub ordering: Option<String>,
     /// Creation time.
     #[serde(default, with = "serde_util::datetime_option")]
     pub created_at: Option<DateTime<Utc>>,
@@ -43,10 +52,21 @@ pub struct Team {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-/// Configuration of one sport (`components/schemas/SportsMetadata`).
+/// Configuration of one sport (`components/schemas/SportsMetadata`), also embedded in
+/// events as [`Event::sport`](super::Event::sport).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct SportsMetadata {
+    /// Sport id (undocumented; observed live as an integer).
+    pub id: Option<i64>,
+    /// Display name, e.g. `NFL` (undocumented; observed live).
+    pub name: Option<String>,
+    /// Creation time (undocumented; observed live).
+    #[serde(default, with = "serde_util::datetime_option")]
+    pub created_at: Option<DateTime<Utc>>,
+    /// Id of the sport's primary tag (undocumented; observed live as an integer).
+    pub primary_tag_id: Option<i64>,
     /// The sport identifier or abbreviation.
     pub sport: Option<String>,
     /// URL of the sport's logo or image.
@@ -163,7 +183,10 @@ impl ListTeams {
         limit: u32;
         /// Number of teams to skip (`offset`).
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `name`, `createdAt` or `id`); snake_case names
+        /// such as `start_date` are rejected with a `422` (`order fields are not valid`), although
+        /// the spec's keyset example uses them. See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -228,6 +251,9 @@ mod tests {
             "logo": null,
             "abbreviation": "LAL",
             "alias": null,
+            "color": null,
+            "providerId": null,
+            "ordering": null,
             "createdAt": "2024-01-01T00:00:00Z",
             "updatedAt": null
         });

@@ -1,0 +1,38 @@
+{
+  "_captured": {
+    "route": "GET /series-summary/11446",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "$schema": "https://gamma-api.polymarket.com/schemas/SeriesSummary.json",
+    "id": "11446",
+    "title": "UEFA Nations League",
+    "slug": "soccer-unl",
+    "eventDates": [
+      "2026-03-31",
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-26",
+      "2026-09-27",
+      "2026-09-28",
+      "2026-09-29",
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-03",
+      "2026-10-04",
+      "2026-10-05",
+      "2026-10-06"
+    ],
+    "eventWeeks": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "earliest_open_week": 3,
+    "earliest_open_date": "2026-10-02",
+    "volume": 1627744.943554,
+    "volume24hr": 19444513.253805004
+  }
+}

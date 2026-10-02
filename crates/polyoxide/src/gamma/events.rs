@@ -20,10 +20,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     Category, Chat, Collection, CommentCount, GammaClient, ImageOptimization, Market, Pagination,
-    Series, SeriesId, Tag, TagId, Template,
+    Series, SeriesId, SportsMetadata, Tag, TagId, Team, Template,
     util::{
-        Lookup, PageParams, canonical_integer, check_integer_id, check_integer_ids, rfc3339,
-        setters, validate_keyset_limit,
+        Lookup, MAX_OFFSET, PageParams, canonical_integer, check_integer_id, check_integer_ids,
+        rfc3339, setters, validate_keyset_limit, validate_offset,
     },
 };
 
@@ -244,6 +244,39 @@ pub struct Event {
     pub scheduled_deployment_timestamp: Option<DateTime<Utc>>,
     /// Game status. The spec types this as a plain string.
     pub game_status: Option<String>,
+    /// Country name (undocumented; observed live on election events).
+    pub country_name: Option<String>,
+    /// The `cumulativeMarkets` flag (undocumented; observed live).
+    pub cumulative_markets: Option<bool>,
+    /// Election type, e.g. `Presidential` (undocumented; observed live on election events).
+    pub election_type: Option<String>,
+    /// Provider-specific metadata, a free-form object (undocumented; observed live with keys
+    /// such as `context_requires_regen`, `opticOddsFixtureId` and `league`; the set of keys
+    /// varies).
+    pub event_metadata: Option<serde_json::Value>,
+    /// Game id (undocumented; observed live as an integer on sports events; the nested
+    /// markets' [`game_id`](super::Market::game_id) is documented as a string).
+    pub game_id: Option<i64>,
+    /// The `negRiskAugmented` flag (undocumented; observed live).
+    pub neg_risk_augmented: Option<bool>,
+    /// Id of the parent event (undocumented; observed live as an integer on sports
+    /// sub-events; the documented [`parent_event`](Self::parent_event) is a string).
+    pub parent_event_id: Option<i64>,
+    /// The sport the event belongs to (undocumented; observed live on sports events, with the
+    /// shape of an entry of [`GammaClient::get_sports_metadata`]).
+    pub sport: Option<SportsMetadata>,
+    /// Turn provider id (undocumented; observed live on a few events, as a string).
+    pub turn_provider_id: Option<String>,
+    /// Sports-data id, e.g. `nfl-pit-cle-2026-10-01` (undocumented; observed live on sports
+    /// events).
+    pub us_id: Option<String>,
+    /// Data version, e.g. `v1` (undocumented; observed live).
+    pub version: Option<String>,
+    /// AMM liquidity (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub liquidity_amm: Option<Decimal>,
+    /// The teams of a sports event (undocumented; observed live).
+    pub teams: Option<Vec<Team>>,
 }
 
 /// The creator of an event (`components/schemas/EventCreator`).
@@ -652,9 +685,16 @@ impl ListEvents {
         /// Maximum number of events per page (`limit`; the docs give a minimum of `0` and
         /// no maximum).
         limit: u32;
-        /// Number of events to skip (`offset`).
+        /// Number of events to skip (`offset`). Live rejects values above 2000 (a `422`
+        /// pointing at the keyset listing, not in the spec), so larger values fail
+        /// client-side with [`Error::Validation`](crate::Error::Validation); use
+        /// [`GammaClient::list_events_keyset`] to page deeper.
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volume`, `volume24hr`, `liquidity`, `startDate`,
+        /// `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are rejected with
+        /// a `422` (`order fields are not valid`), although the spec's keyset example uses them.
+        /// See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -712,6 +752,11 @@ impl ListEvents {
 
     async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Event>> {
         self.params.validate()?;
+        validate_offset(
+            offset,
+            MAX_OFFSET,
+            "use `list_events_keyset` to page deeper",
+        )?;
         self.client
             .transport
             .get(&["events"])
@@ -726,7 +771,9 @@ impl ListEvents {
     ///
     /// - [`Error::Validation`](crate::Error::Validation) if an [`ids`](Self::ids) or
     ///   [`exclude_tag_ids`](Self::exclude_tag_ids) entry or [`tag_id`](Self::tag_id) is
-    ///   not an integer, checked before sending;
+    ///   not an integer, or [`offset`](Self::offset) exceeds 2000 (live rejects larger
+    ///   offsets; page deeper with [`GammaClient::list_events_keyset`]), checked before
+    ///   sending;
     /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Event>> {
         self.fetch(self.params.offset.map(u64::from)).await
@@ -738,6 +785,12 @@ impl ListEvents {
     /// (the errors of [`send`](Self::send)). A page shorter than [`limit`](Self::limit)
     /// does not end it, because the docs give no maximum `limit` and the server may return
     /// fewer events, so the last request returns an empty page.
+    ///
+    /// Live rejects offsets above 2000, so a listing longer than that cannot be walked: the
+    /// stream yields every event up to the page that starts at the last accepted offset, then
+    /// one [`Error::Validation`](crate::Error::Validation) (parameter `offset`, without
+    /// sending a request) and ends. Use [`GammaClient::list_events_keyset`] to walk the whole
+    /// listing.
     pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
@@ -771,9 +824,16 @@ impl ListEventsPaginated {
         /// Maximum number of events per page (`limit`; the docs give a minimum of `0` and
         /// no maximum).
         limit: u32;
-        /// Number of events to skip (`offset`).
+        /// Number of events to skip (`offset`). Live rejects values above 2000 (a `422`
+        /// pointing at the keyset listing, not in the spec), so larger values fail
+        /// client-side with [`Error::Validation`](crate::Error::Validation); use
+        /// [`GammaClient::list_events_keyset`] to page deeper.
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volume`, `volume24hr`, `liquidity`, `startDate`,
+        /// `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are rejected with
+        /// a `422` (`order fields are not valid`), although the spec's keyset example uses them.
+        /// See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -786,6 +846,11 @@ impl ListEventsPaginated {
     }
 
     async fn fetch(&self, offset: Option<u64>) -> Result<EventsPage> {
+        validate_offset(
+            offset,
+            MAX_OFFSET,
+            "use `list_events_keyset` to page deeper",
+        )?;
         let p = &self.params;
         let mut q = Query::new();
         q.push_opt("limit", p.limit)
@@ -807,7 +872,10 @@ impl ListEventsPaginated {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation) if [`offset`](Self::offset) exceeds
+    ///   2000 (live rejects larger offsets; page deeper with
+    ///   [`GammaClient::list_events_keyset`]), checked before sending;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<EventsPage> {
         self.fetch(self.params.offset.map(u64::from)).await
     }
@@ -818,6 +886,10 @@ impl ListEventsPaginated {
     /// empty page, or right after yielding the first error. A page shorter than
     /// [`limit`](Self::limit) does not end it while `hasMore` is not `false`, because the
     /// server may return fewer events than requested.
+    ///
+    /// Live rejects offsets above 2000: past that the stream yields one
+    /// [`Error::Validation`](crate::Error::Validation) (parameter `offset`, without sending a
+    /// request) and ends. Use [`GammaClient::list_events_keyset`] to walk longer listings.
     pub fn into_stream(self) -> Paginated<Event> {
         let start = self.params.offset.map_or(0, u64::from);
         let exhausted = Arc::new(AtomicBool::new(false));
@@ -853,7 +925,11 @@ impl ListSportEventResults {
         limit: u32;
         /// Number of events to skip (`offset`).
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volume`, `volume24hr`, `liquidity`, `startDate`,
+        /// `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are rejected with
+        /// a `422` (`order fields are not valid`), although the spec's keyset example uses them.
+        /// See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -965,7 +1041,11 @@ impl ListEventCreators {
         limit: u32;
         /// Number of creators to skip (`offset`).
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volume`, `volume24hr`, `liquidity`, `startDate`,
+        /// `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are rejected with
+        /// a `422` (`order fields are not valid`), although the spec's keyset example uses them.
+        /// See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -1150,7 +1230,11 @@ impl ListEventsKeyset {
         /// 20). Values outside that range are rejected client-side with
         /// [`Error::Validation`](crate::Error::Validation).
         limit: u32;
-        /// Comma-separated list of JSON field names to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volume`, `volume24hr`, `liquidity`, `startDate`,
+        /// `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are rejected with
+        /// a `422` (`order fields are not valid`), although the spec's keyset example uses them.
+        /// See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort direction (`ascending`, server default `true`). Only used when
         /// [`order`](Self::order) is set.

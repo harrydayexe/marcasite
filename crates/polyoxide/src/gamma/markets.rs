@@ -8,7 +8,7 @@ use polyoxide_core::{
     Query, Result,
     pagination::{CursorPage, cursor_stream, offset_stream},
     serde_util,
-    types::{ConditionId, MarketId, QuestionId, TokenId},
+    types::{Address, ConditionId, MarketId, QuestionId, TokenId},
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     Category, Event, GammaClient, ImageOptimization, Tag, TagId, TeamId,
     util::{
-        Lookup, check_integer_id, check_integer_ids, integer_id, rfc3339, setters,
-        validate_keyset_limit,
+        Lookup, MAX_OFFSET, check_integer_id, check_integer_ids, integer_id, rfc3339, setters,
+        validate_keyset_limit, validate_offset,
     },
 };
 
@@ -81,12 +81,22 @@ pub struct Market {
     pub upper_bound: Option<String>,
     /// Description.
     pub description: Option<String>,
-    /// Outcomes. The spec types this as a plain string and documents no encoding, so it is
-    /// kept exactly as sent.
-    pub outcomes: Option<String>,
-    /// Outcome prices. The spec types this as a plain string and documents no encoding, so
-    /// it is kept exactly as sent.
-    pub outcome_prices: Option<String>,
+    /// Outcome labels, e.g. `["Yes", "No"]`.
+    ///
+    /// The spec types this as a plain string and documents no encoding. Live sends a
+    /// JSON-encoded string (`"[\"Yes\", \"No\"]"`) on every route except
+    /// `GET /public-search?optimized=true`, which sends a real JSON array. Both decode to
+    /// the list; it serializes back to the string form. See `SPEC_DEVIATIONS.md`.
+    #[serde(default, with = "serde_util::json_string_option")]
+    pub outcomes: Option<Vec<String>>,
+    /// Outcome prices, index-aligned with [`outcomes`](Self::outcomes).
+    ///
+    /// The spec types this as a plain string and documents no encoding. Live sends a
+    /// JSON-encoded string of decimal strings (`"[\"0.1\", \"0.9\"]"`), or a real JSON
+    /// array on `GET /public-search?optimized=true` (see [`outcomes`](Self::outcomes)).
+    /// Both decode to the list; it serializes back to the string form.
+    #[serde(default, with = "serde_util::json_string_option")]
+    pub outcome_prices: Option<Vec<Decimal>>,
     /// Volume. The spec types this as a string (`volume`); it is parsed as a decimal, and
     /// an empty string becomes `None`.
     #[serde(default, with = "serde_util::string_or_number_option")]
@@ -186,9 +196,14 @@ pub struct Market {
     pub game_start_time: Option<String>,
     /// Seconds delay.
     pub seconds_delay: Option<i64>,
-    /// CLOB token ids. The spec types this as a plain string and documents no encoding, so
-    /// it is kept exactly as sent.
-    pub clob_token_ids: Option<String>,
+    /// CLOB token ids, index-aligned with [`outcomes`](Self::outcomes).
+    ///
+    /// The spec types this as a plain string and documents no encoding. Live sends a
+    /// JSON-encoded string (`"[\"5385...\", \"5268...\"]"`); the optimized search does not
+    /// send the field. Both a JSON-encoded string and a real array decode to the list; it
+    /// serializes back to the string form.
+    #[serde(default, with = "serde_util::json_string_option")]
+    pub clob_token_ids: Option<Vec<TokenId>>,
     /// Disqus thread.
     pub disqus_thread: Option<String>,
     /// Short outcomes. The spec types this as a plain string.
@@ -330,8 +345,13 @@ pub struct Market {
     /// Line.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub line: Option<Decimal>,
-    /// UMA resolution statuses. The spec types this as a plain string.
-    pub uma_resolution_statuses: Option<String>,
+    /// UMA resolution statuses (e.g. `["proposed", "resolved"]`, `[]` if none).
+    ///
+    /// The spec types this as a plain string and documents no encoding. Live sends a
+    /// JSON-encoded string of strings; both that and a real array decode to the list, which
+    /// serializes back to the string form.
+    #[serde(default, with = "serde_util::json_string_option")]
+    pub uma_resolution_statuses: Option<Vec<String>>,
     /// Whether deployment is pending.
     pub pending_deployment: Option<bool>,
     /// Whether the market is being deployed.
@@ -352,6 +372,108 @@ pub struct Market {
     /// Fee schedule (wire name `feeSchedule`). The keyset listings' response description
     /// spells it `fee_schedule`; this field reads only the schema's `feeSchedule`.
     pub fee_schedule: Option<FeeSchedule>,
+    /// Whether the market is part of a negative-risk group (`negRisk`; undocumented, observed
+    /// live). Absent on some markets embedded in events.
+    pub neg_risk: Option<bool>,
+    /// Id of the negative-risk market group, a 32-byte hex string (wire name
+    /// `negRiskMarketID`; undocumented, observed live).
+    #[serde(rename = "negRiskMarketID")]
+    pub neg_risk_market_id: Option<String>,
+    /// Negative-risk request id, a 32-byte hex string (wire name `negRiskRequestID`;
+    /// undocumented, observed live).
+    #[serde(rename = "negRiskRequestID")]
+    pub neg_risk_request_id: Option<String>,
+    /// Whether the market is approved (undocumented; observed live).
+    pub approved: Option<bool>,
+    /// Combo status, e.g. `enabled`, `disabled` or `pending` (undocumented; observed live,
+    /// kept as sent).
+    pub combo_status: Option<String>,
+    /// The `cyom` flag (undocumented; observed live; the `cyom` request filter is documented).
+    pub cyom: Option<bool>,
+    /// Name of the fee schedule applied to the market, e.g. `politics_fees` (undocumented;
+    /// observed live; `null` on some markets).
+    pub fee_type: Option<String>,
+    /// Whether holding rewards are enabled (undocumented; observed live).
+    pub holding_rewards_enabled: Option<bool>,
+    /// Whether PagerDuty notifications are enabled (undocumented; observed live).
+    pub pager_duty_notification_enabled: Option<bool>,
+    /// Position ids (undocumented; observed live as a real JSON array of numeric strings).
+    pub position_ids: Option<Vec<String>>,
+    /// Address that submitted the market (wire name `submitted_by`; undocumented, observed
+    /// live; mixed-case checksum form).
+    #[serde(rename = "submitted_by")]
+    pub submitted_by: Option<Address>,
+    /// Data version, e.g. `v1` (undocumented; observed live).
+    pub version: Option<String>,
+    /// Provider-specific metadata, a free-form object (undocumented; observed live with
+    /// sports-data keys such as `opticOddsFixtureId`; the set of keys varies).
+    pub market_metadata: Option<serde_json::Value>,
+    /// Address of the (legacy AMM) market maker (undocumented; observed live).
+    pub market_maker_address: Option<Address>,
+    /// AMM liquidity (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub liquidity_amm: Option<Decimal>,
+    /// AMM volume (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_amm: Option<Decimal>,
+    /// 1-month AMM volume (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_1mo_amm: Option<Decimal>,
+    /// 1-week AMM volume (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_1wk_amm: Option<Decimal>,
+    /// 1-year AMM volume (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_1yr_amm: Option<Decimal>,
+    /// 24-hour AMM volume (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_24hr_amm: Option<Decimal>,
+    /// Whether the legacy AMM is live (undocumented; observed live on old markets).
+    pub fpmm_live: Option<bool>,
+    /// Mailchimp category tag, a numeric string or the text `null` (undocumented; observed
+    /// live on old markets).
+    pub category_mailchimp_tag: Option<String>,
+    /// Whether the market was announced on Discord (undocumented; observed live on old
+    /// markets).
+    pub sent_discord: Option<bool>,
+    /// Twitter card image location (undocumented; observed live on old markets).
+    pub twitter_card_location: Option<String>,
+    /// When the Twitter card was last refreshed: Unix milliseconds as a string
+    /// (undocumented; observed live on old markets, kept as sent).
+    pub twitter_card_last_refreshed: Option<String>,
+    /// When the Twitter card was last validated: Unix seconds with a fraction, as a string
+    /// (undocumented; observed live on old markets, kept as sent).
+    pub twitter_card_last_validated: Option<String>,
+    /// Liquidity-reward programs (undocumented; observed live; absent if the market has
+    /// none).
+    pub clob_rewards: Option<Vec<ClobReward>>,
+    /// Subcategory (undocumented; observed live on old markets).
+    pub subcategory: Option<String>,
+}
+
+/// A liquidity-reward program of a market (element of [`Market::clob_rewards`]).
+///
+/// Not in the Gamma spec; the shape is as observed live (see `SPEC_DEVIATIONS.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ClobReward {
+    /// Reward id.
+    pub id: Option<String>,
+    /// Condition id of the market.
+    pub condition_id: Option<ConditionId>,
+    /// Address of the reward asset (token contract), in either letter case.
+    pub asset_address: Option<Address>,
+    /// Total reward amount.
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub rewards_amount: Option<Decimal>,
+    /// Daily reward rate.
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub rewards_daily_rate: Option<Decimal>,
+    /// First day of the program, `YYYY-MM-DD` (kept as sent).
+    pub start_date: Option<String>,
+    /// Last day of the program, `YYYY-MM-DD` (kept as sent; `2500-12-31` means open-ended).
+    pub end_date: Option<String>,
 }
 
 /// A market's fee schedule (`components/schemas/FeeSchedule`).
@@ -676,9 +798,16 @@ impl ListMarkets {
         /// Maximum number of markets per page (`limit`; the docs give a minimum of `0` and
         /// no maximum).
         limit: u32;
-        /// Number of markets to skip (`offset`).
+        /// Number of markets to skip (`offset`). Live rejects values above 2000 (a `422`
+        /// pointing at the keyset listing, not in the spec), so larger values fail
+        /// client-side with [`Error::Validation`](crate::Error::Validation); use
+        /// [`GammaClient::list_markets_keyset`] to page deeper.
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volumeNum`, `liquidityNum`, `volume24hr`,
+        /// `startDate`, `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are
+        /// rejected with a `422` (`order fields are not valid`), although the spec's keyset example
+        /// uses them. See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
@@ -735,6 +864,11 @@ impl ListMarkets {
 
     async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Market>> {
         self.params.validate()?;
+        validate_offset(
+            offset,
+            MAX_OFFSET,
+            "use `list_markets_keyset` to page deeper",
+        )?;
         self.client
             .transport
             .get(&["markets"])
@@ -748,8 +882,9 @@ impl ListMarkets {
     /// # Errors
     ///
     /// - [`Error::Validation`](crate::Error::Validation) if an
-    ///   [`ids`](Self::ids) entry or [`tag_id`](Self::tag_id) is not an integer, checked
-    ///   before sending;
+    ///   [`ids`](Self::ids) entry or [`tag_id`](Self::tag_id) is not an integer, or
+    ///   [`offset`](Self::offset) exceeds 2000 (live rejects larger offsets; page deeper with
+    ///   [`GammaClient::list_markets_keyset`]), checked before sending;
     /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Market>> {
         self.fetch(self.params.offset.map(u64::from)).await
@@ -761,6 +896,12 @@ impl ListMarkets {
     /// (the errors of [`send`](Self::send)). A page shorter than [`limit`](Self::limit)
     /// does not end it, because the docs give no maximum `limit` and the server may return
     /// fewer markets, so the last request returns an empty page.
+    ///
+    /// Live rejects offsets above 2000, so a listing longer than that cannot be walked: the
+    /// stream yields every market up to the page that starts at the last accepted offset,
+    /// then one [`Error::Validation`](crate::Error::Validation) (parameter `offset`,
+    /// without sending a request) and ends. Use [`GammaClient::list_markets_keyset`] to walk
+    /// the whole listing.
     pub fn into_stream(self) -> Paginated<Market> {
         let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
@@ -905,8 +1046,11 @@ impl ListMarketsKeyset {
         /// 20). Values outside that range are rejected client-side with
         /// [`Error::Validation`](crate::Error::Validation).
         limit: u32;
-        /// Comma-separated list of JSON field names to order by (`order`). The spec's
-        /// example is `volume_num,liquidity_num`.
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `volumeNum`, `liquidityNum`, `volume24hr`,
+        /// `startDate`, `endDate`, `createdAt` or `id`); snake_case names such as `start_date` are
+        /// rejected with a `422` (`order fields are not valid`), although the spec's keyset example
+        /// uses them. See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort direction (`ascending`, server default `true`). Only used when
         /// [`order`](Self::order) is set.
@@ -1275,7 +1419,7 @@ mod tests {
             "endDate": "2024-11-05T12:00:00Z",
             "liquidity": "1500.25",
             "volume": "2000",
-            "outcomes": "x",
+            "outcomes": "[\"Yes\", \"No\"]",
             "questionID": "0xabc",
             "teamAID": "7",
             "volume24hr": 12.5,
@@ -1356,6 +1500,63 @@ mod tests {
         let value = serde_json::to_value(&market).unwrap();
         assert_eq!(value["liquidity"], serde_json::json!("1.5"));
         assert_eq!(value["liquidityNum"], serde_json::json!(1.5));
+    }
+
+    /// `outcomes`, `outcomePrices`, `clobTokenIds` and `umaResolutionStatuses` decode from a
+    /// JSON-encoded string (every route but the optimized search) or a real array (optimized
+    /// search), and serialize back to the string form. Live format: see
+    /// `SPEC_DEVIATIONS.md` and `tests/api/gamma/fixtures/live`.
+    #[test]
+    fn list_in_string_fields_accept_both_encodings() {
+        let encoded: Market = serde_json::from_str(
+            r#"{"outcomes":"[\"Yes\", \"No\"]","outcomePrices":"[\"0.1\", \"0.9\"]",
+                "clobTokenIds":"[\"11\", \"22\"]","umaResolutionStatuses":"[\"proposed\"]"}"#,
+        )
+        .unwrap();
+        let array: Market = serde_json::from_str(
+            r#"{"outcomes":["Yes","No"],"outcomePrices":["0.1","0.9"],
+                "clobTokenIds":["11","22"],"umaResolutionStatuses":["proposed"]}"#,
+        )
+        .unwrap();
+        assert_eq!(encoded, array);
+        assert_eq!(
+            encoded.outcomes,
+            Some(vec!["Yes".to_owned(), "No".to_owned()])
+        );
+        assert_eq!(
+            encoded.outcome_prices,
+            Some(vec![Decimal::new(1, 1), Decimal::new(9, 1)])
+        );
+        assert_eq!(
+            encoded.clob_token_ids,
+            Some(vec![TokenId::from("11"), TokenId::from("22")])
+        );
+        assert_eq!(
+            encoded.uma_resolution_statuses,
+            Some(vec!["proposed".to_owned()])
+        );
+
+        let value = serde_json::to_value(&encoded).unwrap();
+        assert_eq!(value["outcomes"], serde_json::json!("[\"Yes\",\"No\"]"));
+        assert_eq!(
+            value["outcomePrices"],
+            serde_json::json!("[\"0.1\",\"0.9\"]")
+        );
+        assert_eq!(value["clobTokenIds"], serde_json::json!("[\"11\",\"22\"]"));
+
+        // Absent, `null` and `""` are `None`; `[]` is an empty list.
+        let none: Market = serde_json::from_str(
+            r#"{"outcomes":null,"outcomePrices":"","umaResolutionStatuses":"[]"}"#,
+        )
+        .unwrap();
+        assert_eq!(none.outcomes, None);
+        assert_eq!(none.outcome_prices, None);
+        assert_eq!(none.clob_token_ids, None);
+        assert_eq!(none.uma_resolution_statuses, Some(Vec::new()));
+
+        // Text that is not a JSON list is a decode error, not a silent `None`.
+        assert!(serde_json::from_str::<Market>(r#"{"outcomes":"Yes,No"}"#).is_err());
+        assert!(serde_json::from_str::<Market>(r#"{"outcomePrices":"[\"n/a\"]"}"#).is_err());
     }
 
     #[test]

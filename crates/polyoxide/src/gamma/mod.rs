@@ -56,6 +56,13 @@
 //!   spec types as `string` (such as [`Market::liquidity`]) are decimals that serialize back
 //!   as JSON strings. Date-time fields (`format: date-time`) are parsed leniently: besides
 //!   RFC 3339, a value without a UTC offset, or a bare date, is read as UTC.
+//! - **Live over docs.** Where the live API differs from the spec, this module follows the
+//!   live API: the market lists `outcomes`, `outcomePrices`, `clobTokenIds` and
+//!   `umaResolutionStatuses` are typed lists (decoded from the JSON-encoded string the API
+//!   sends, or from the real array of the optimized search), `order` takes camelCase field
+//!   names, offsets are capped (2000 for markets and events, 200 for comments), and fields the
+//!   spec omits are modelled (marked "undocumented; observed live"). Every departure is listed
+//!   in `SPEC_DEVIATIONS.md` in the repository root.
 //! - **Pagination.** Offset listings return a plain `Vec` from `send()` and walk every page
 //!   with `into_stream()`. The keyset listings return a page type with `items()` and
 //!   `next_cursor()`; pass the cursor back with `cursor()`.
@@ -88,16 +95,16 @@ mod util;
 
 pub use client::{GammaClient, GammaClientBuilder};
 pub use comments::{
-    Comment, CommentCount, CommentId, CommentParentEntityType, CommentPosition, CommentProfile,
-    GetCommentsById, ListComments, ListCommentsByUser, Reaction,
+    Comment, CommentCount, CommentId, CommentMedia, CommentParentEntityType, CommentPosition,
+    CommentProfile, GetCommentsById, ListComments, ListCommentsByUser, Reaction,
 };
 pub use events::{
     Event, EventCreator, EventCreatorId, EventTweetCount, EventsKeysetPage, EventsPage, GetEvent,
     ListEventCreators, ListEvents, ListEventsKeyset, ListEventsPaginated, ListSportEventResults,
 };
 pub use markets::{
-    FeeSchedule, GetMarket, GetMarketsInformation, ListMarkets, ListMarketsKeyset, Market,
-    MarketDescription, MarketsKeysetPage,
+    ClobReward, FeeSchedule, GetMarket, GetMarketsInformation, ListMarkets, ListMarketsKeyset,
+    Market, MarketDescription, MarketsKeysetPage,
 };
 pub use profiles::{Profile, PublicProfile, PublicProfileUser};
 pub use search::{Search, SearchResults, SearchTag};

@@ -1,0 +1,17 @@
+{
+  "_captured": {
+    "route": "GET /profiles/user_address/0x7c37b52eb226bcb9411375ec48b0169663fb6aeb",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "$schema": "https://gamma-api.polymarket.com/schemas/PublicProfile.json",
+    "name": "Diabolical-Prize",
+    "pseudonym": "Well-Documented-Outrigger",
+    "proxyWallet": "0x7c37b52eb226bcb9411375ec48b0169663fb6aeb",
+    "createdAt": "2025-02-20T15:16:09.705867Z",
+    "takerTier": 6,
+    "takerTierName": "Obsidian",
+    "weightedVolume": 4927874.644158
+  }
+}

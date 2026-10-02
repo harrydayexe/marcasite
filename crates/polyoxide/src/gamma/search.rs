@@ -21,8 +21,13 @@ pub struct SearchResults {
     pub tags: Option<Vec<SearchTag>>,
     /// Matching profiles.
     pub profiles: Option<Vec<Profile>>,
-    /// Pagination metadata.
+    /// Pagination metadata. Sent by the regular search; the
+    /// [`optimized`](Search::optimized) search sends [`has_more`](Self::has_more) instead.
     pub pagination: Option<Pagination>,
+    /// Whether more results are available (wire name `hasMore`; undocumented, observed live
+    /// only with `optimized=true`, where it replaces [`pagination`](Self::pagination)).
+    #[serde(rename = "hasMore")]
+    pub has_more: Option<bool>,
 }
 
 /// A tag matched by [`GammaClient::search`] (`components/schemas/SearchTag`).
@@ -43,8 +48,9 @@ impl GammaClient {
     /// Searches markets, events and profiles (`GET /public-search`).
     ///
     /// `q` is the (required) search text. The endpoint is paginated with
-    /// [`page`](Search::page) and reports `pagination.hasMore`; there is no
-    /// `into_stream()` because the docs do not say whether pages are numbered from 0 or 1.
+    /// [`page`](Search::page) and reports `pagination.hasMore` (`hasMore` at the top level
+    /// with [`optimized`](Search::optimized)); there is no `into_stream()` because the docs do
+    /// not say whether pages are numbered from 0 or 1.
     ///
     /// See <https://docs.polymarket.com/api-reference/search/search-markets-events-and-profiles>.
     ///
@@ -128,6 +134,13 @@ impl Search {
         /// sending with [`Error::Validation`](crate::Error::Validation).
         exclude_tag_ids => exclude_tag_id: many TagId;
         /// The `optimized` flag (documented only as a boolean).
+        ///
+        /// With `true` live returns a slimmer result: the events and their markets carry only
+        /// a few fields (so most [`Event`] and [`Market`](super::Market) fields are `None`),
+        /// the markets' `outcomes` and `outcomePrices` are real JSON arrays instead of
+        /// JSON-encoded strings (both decode to the same lists), and the response has
+        /// [`has_more`](SearchResults::has_more) instead of
+        /// [`pagination`](SearchResults::pagination). See `SPEC_DEVIATIONS.md`.
         optimized: bool;
     }
 

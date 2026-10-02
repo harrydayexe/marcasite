@@ -136,6 +136,12 @@ pub struct SeriesSummary {
     /// this as a plain string with no format.
     #[serde(rename = "earliest_open_date")]
     pub earliest_open_date: Option<String>,
+    /// Total volume of the series (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume: Option<Decimal>,
+    /// 24-hour volume of the series (undocumented; observed live as a JSON number).
+    #[serde(default, with = "serde_util::decimal_number_option")]
+    pub volume_24hr: Option<Decimal>,
 }
 
 impl GammaClient {
@@ -281,7 +287,17 @@ impl ListSeries {
         limit: u32;
         /// Number of series to skip (`offset`).
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase
+        /// JSON field names of the response type (e.g. `volume`, `startDate`, `createdAt` or
+        /// `id`); snake_case names such as `start_date` are rejected with a `422` (`order fields
+        /// are not valid`), although the spec's keyset example uses them. See
+        /// `SPEC_DEVIATIONS.md`.
+        ///
+        /// Live answers `volume24hr` or `liquidity` combined with `ascending(false)` and a
+        /// large enough [`limit`](Self::limit) with a `500` (observed from `limit` 20 for
+        /// `volume24hr` and 50 for `liquidity`; the threshold shifts with the data). That is a
+        /// server bug; use a smaller `limit` or another order field (`volume` works). See
+        /// `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;

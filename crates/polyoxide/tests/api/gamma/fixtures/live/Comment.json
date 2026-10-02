@@ -1,0 +1,48 @@
+{
+  "_captured": {
+    "route": "GET /comments?parent_entity_type=Event&parent_entity_id=45915&limit=100 (one element with media)",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "id": "3279002",
+    "parentEntityType": "Event",
+    "parentEntityID": 45915,
+    "userAddress": "0x96c4bd7b98cae88075e02ae4dd19ef5cad752d50",
+    "createdAt": "2026-10-02T09:11:57.666476Z",
+    "profile": {
+      "name": "Jowen1",
+      "pseudonym": "Thin-Stranger",
+      "displayUsernamePublic": true,
+      "bio": "Analyst CS2\n🇧🇷",
+      "proxyWallet": "0x5b9a4f843c217c20d2f7b4f14567d7bb248a73fa",
+      "baseAddress": "0x96c4bd7b98cae88075e02ae4dd19ef5cad752d50",
+      "profileImage": "https://polymarket-upload.s3.us-east-2.amazonaws.com/profile-image-3495045-2bcc9763-ec22-42c1-816f-9c54d7f32221.jpg"
+    },
+    "reactions": [
+      {
+        "id": "3136895",
+        "commentID": 3279002,
+        "reactionType": "HEART",
+        "userAddress": "0x508e03d472812016f04da0a001d648af76d98c5b",
+        "profile": {
+          "proxyWallet": "0xbace5a5a9e309d69164dc81788d353fed8d43429"
+        }
+      }
+    ],
+    "reportCount": 0,
+    "reactionCount": 1,
+    "media": [
+      {
+        "id": "15790",
+        "commentID": 3279002,
+        "provider": "giphy",
+        "providerMediaId": "W7SbKE2k0e0yI7GeCS",
+        "url": "https://media2.giphy.com/media/v1.Y2lkPTJhZWJkMTZmdW01YzUybWdmY2tiN3F5cGtvYzN0bzF0bWdzeHBnYmY0cTkzaTk4eSZlcD12MV9naWZzX2dpZklkJmN0PWc/W7SbKE2k0e0yI7GeCS/200.webp",
+        "mediaType": "gif",
+        "altText": "Flavio Bolsonaro GIF",
+        "createdAt": "2026-10-02T09:11:57.666476Z"
+      }
+    ]
+  }
+}

@@ -51,7 +51,7 @@ Base URL `https://gamma-api.polymarket.com`, spec [`docs/specs/gamma-openapi.yam
 | [x] | `GET` | `/series/{id}/comments/count` | spec only (`getSeriesCommentsCount`) | `GammaClient::get_series_comment_count` |
 | [x] | `GET` | `/series-summary/{id}` | spec only (`getSeriesSummaryById`) | `GammaClient::get_series_summary` |
 | [x] | `GET` | `/series-summary/slug/{slug}` | spec only (`getSeriesSummaryBySlug`) | `GammaClient::get_series_summary_by_slug` |
-| [x] | `GET` | `/comments` | [local](docs/api-reference/comments/list-comments.md) / [online](https://docs.polymarket.com/api-reference/comments/list-comments) | `GammaClient::list_comments` |
+| [x] | `GET` | `/comments` | [local](docs/api-reference/comments/list-comments.md) / [online](https://docs.polymarket.com/api-reference/comments/list-comments) | `GammaClient::list_comments(parent_entity_type, parent_entity_id)` (both required live; see `SPEC_DEVIATIONS.md`) |
 | [x] | `GET` | `/comments/{id}` | [local](docs/api-reference/comments/get-comments-by-comment-id.md) / [online](https://docs.polymarket.com/api-reference/comments/get-comments-by-comment-id) | `GammaClient::get_comments_by_id` |
 | [x] | `GET` | `/comments/user_address/{user_address}` | [local](docs/api-reference/comments/get-comments-by-user-address.md) / [online](https://docs.polymarket.com/api-reference/comments/get-comments-by-user-address) | `GammaClient::list_comments_by_user` |
 | [x] | `GET` | `/public-profile` | [local](docs/api-reference/profiles/get-public-profile-by-wallet-address.md) / [online](https://docs.polymarket.com/api-reference/profiles/get-public-profile-by-wallet-address) | `GammaClient::get_public_profile` |
@@ -59,6 +59,8 @@ Base URL `https://gamma-api.polymarket.com`, spec [`docs/specs/gamma-openapi.yam
 | [x] | `GET` | `/sports` | [local](docs/api-reference/sports/get-sports-metadata-information.md) / [online](https://docs.polymarket.com/api-reference/sports/get-sports-metadata-information) | `GammaClient::get_sports_metadata` |
 | [x] | `GET` | `/sports/market-types` | [local](docs/api-reference/sports/get-valid-sports-market-types.md) / [online](https://docs.polymarket.com/api-reference/sports/get-valid-sports-market-types) | `GammaClient::get_sports_market_types` |
 | [x] | `GET` | `/public-search` | [local](docs/api-reference/search/search-markets-events-and-profiles.md) / [online](https://docs.polymarket.com/api-reference/search/search-markets-events-and-profiles) | `GammaClient::search` |
+
+Live-only Gamma route, not in the docs or specs and not implemented: `GET /comments/keyset` (found 2026-10-02; the `/comments` offset cap of 200 points at it). See the Gamma section of `SPEC_DEVIATIONS.md`.
 
 ## CLOB API (public market data)
 
