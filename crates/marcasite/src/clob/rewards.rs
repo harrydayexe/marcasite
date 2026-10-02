@@ -635,8 +635,8 @@ mod tests {
         s.parse().unwrap()
     }
 
-    /// Example response of `GET /rewards/markets/current` in docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/rewards/get-current-active-rewards-configurations.md).
+    /// Example response of `GET /rewards/markets/current` in docs/polymarket/specs/clob-openapi.yaml
+    /// (docs/polymarket/api-reference/rewards/get-current-active-rewards-configurations.md).
     #[test]
     fn deserializes_current_rewards_page() {
         let json = r#"{
@@ -692,8 +692,8 @@ mod tests {
     }
 
     /// Example response of `GET /rewards/markets/{condition_id}` in
-    /// docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/rewards/get-raw-rewards-for-a-specific-market.md).
+    /// docs/polymarket/specs/clob-openapi.yaml
+    /// (docs/polymarket/api-reference/rewards/get-raw-rewards-for-a-specific-market.md).
     #[test]
     fn deserializes_market_rewards_page() {
         let json = r#"{
@@ -731,8 +731,8 @@ mod tests {
         assert_eq!(configs[1].remaining_reward_amount, None);
     }
 
-    /// Example response of `GET /rewards/markets/multi` in docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/rewards/get-multiple-markets-with-rewards.md).
+    /// Example response of `GET /rewards/markets/multi` in docs/polymarket/specs/clob-openapi.yaml
+    /// (docs/polymarket/api-reference/rewards/get-multiple-markets-with-rewards.md).
     #[test]
     fn deserializes_multi_market_info_page() {
         let json = r#"{

@@ -177,7 +177,7 @@ impl GammaClient {
 
     /// Gets the number of comments on a series.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getSeriesCommentsCount` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getSeriesCommentsCount` (no
     /// published doc page).
     ///
     /// # Errors
@@ -197,7 +197,7 @@ impl GammaClient {
 
     /// Gets a series summary by series id.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getSeriesSummaryById` (no published
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getSeriesSummaryById` (no published
     /// doc page).
     ///
     /// # Errors
@@ -217,7 +217,7 @@ impl GammaClient {
 
     /// Gets a series summary by series slug.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getSeriesSummaryBySlug` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getSeriesSummaryBySlug` (no
     /// published doc page).
     ///
     /// # Errors
@@ -397,7 +397,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Series` and `SeriesSummary` in
-    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body).
+    /// `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish no example body).
     #[test]
     fn deserializes_series_wire_names_and_types() {
         let json = r#"{

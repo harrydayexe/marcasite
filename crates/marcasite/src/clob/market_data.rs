@@ -746,7 +746,7 @@ mod tests {
     }
 
     /// `GET /last-trade-price`: example `{price: '0.45', side: BUY}` and the documented
-    /// "no trades" default (`"0.5"`, empty side) in docs/specs/clob-openapi.yaml.
+    /// "no trades" default (`"0.5"`, empty side) in docs/polymarket/specs/clob-openapi.yaml.
     #[test]
     fn deserializes_last_trade_price() {
         let last: LastTradePrice = round_trip(r#"{"price":"0.45","side":"BUY"}"#);
@@ -761,7 +761,7 @@ mod tests {
         assert!(serde_json::from_str::<LastTradePrice>(r#"{"price":"0.5"}"#).is_err());
     }
 
-    /// Example response of `GET /last-trades-prices` in docs/specs/clob-openapi.yaml.
+    /// Example response of `GET /last-trades-prices` in docs/polymarket/specs/clob-openapi.yaml.
     #[test]
     fn deserializes_last_trade_prices() {
         let json = r#"[
@@ -790,7 +790,7 @@ mod tests {
     }
 
     /// Example responses of `POST /prices` and `POST /midpoints` in
-    /// docs/specs/clob-openapi.yaml (numbers), and live (numeric strings, captured
+    /// docs/polymarket/specs/clob-openapi.yaml (numbers), and live (numeric strings, captured
     /// 2026-10-02).
     #[test]
     fn deserializes_price_maps() {

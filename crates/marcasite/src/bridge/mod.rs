@@ -41,7 +41,7 @@ pub use status::{ListTransactions, Transaction, TransactionStatus, TransactionSt
 
 /// The optional header attributing deposit/withdrawal requests to an integration. Its value
 /// must match `^0x[a-fA-F0-9]{64}$` (`components/parameters/BuilderCodeHeader` in
-/// `docs/specs/bridge-openapi.yaml`).
+/// `docs/polymarket/specs/bridge-openapi.yaml`).
 const BUILDER_CODE_HEADER: &str = "X-Builder-Code";
 
 /// The value of a required request-body field, or an

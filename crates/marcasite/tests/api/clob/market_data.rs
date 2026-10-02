@@ -109,7 +109,7 @@ async fn bad_request_carries_error_message() {
 }
 
 /// `429` with the documented `ErrorResponse` fields `code` and `retry_after_seconds`
-/// (`components/schemas/ErrorResponse` in docs/specs/clob-openapi.yaml).
+/// (`components/schemas/ErrorResponse` in docs/polymarket/specs/clob-openapi.yaml).
 #[tokio::test]
 async fn rate_limit_carries_code_and_retry_after() {
     let server = common::server().await;
@@ -300,7 +300,7 @@ async fn get_price() {
     assert_eq!(price.price, d("0.45"));
 }
 
-/// Response of `POST /prices`: numbers in docs/specs/clob-openapi.yaml, numeric strings live
+/// Response of `POST /prices`: numbers in docs/polymarket/specs/clob-openapi.yaml, numeric strings live
 /// (`PRICES_LIVE`, captured 2026-10-02); both decode.
 const PRICES: &str = r#"{"0xabc123def456...":{"BUY":0.45},"0xdef456abc123...":{"SELL":0.52}}"#;
 const PRICES_LIVE: &str =
@@ -374,7 +374,7 @@ async fn get_midpoint() {
     assert_eq!(mid.mid, d("0.46"));
 }
 
-/// Example response of `POST /midpoints` in docs/specs/clob-openapi.yaml (same shape live).
+/// Example response of `POST /midpoints` in docs/polymarket/specs/clob-openapi.yaml (same shape live).
 const MIDPOINTS: &str = r#"{"0xabc123def456...":"0.45","0xdef456abc123...":"0.52"}"#;
 
 #[tokio::test]
@@ -417,7 +417,7 @@ async fn get_spread() {
 #[tokio::test]
 async fn get_spreads() {
     let server = common::server().await;
-    // Example response of `POST /spreads` in docs/specs/clob-openapi.yaml.
+    // Example response of `POST /spreads` in docs/polymarket/specs/clob-openapi.yaml.
     Mock::given(method("POST"))
         .and(path("/spreads"))
         .and(body_json(json!([
@@ -465,7 +465,7 @@ async fn get_last_trade_price() {
     assert_eq!(none.side, None);
 }
 
-/// Example response of `POST /last-trades-prices` in docs/specs/clob-openapi.yaml.
+/// Example response of `POST /last-trades-prices` in docs/polymarket/specs/clob-openapi.yaml.
 const LAST_TRADES_PRICES: &str = r#"[
     {"token_id": "0xabc123def456...", "price": "0.45", "side": "BUY"},
     {"token_id": "0xdef456abc123...", "price": "0.52", "side": "SELL"}

@@ -1,5 +1,10 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Nightly used only to emit rustdoc JSON for docs/sdk/ (the format is unstable). Bump it together
+# with the `rustdoc-types` version in xtask/Cargo.toml; the rest of the workspace stays on the
+# toolchain in rust-toolchain.toml.
+docs_nightly := "nightly-2026-10-02"
+
 # List available recipes
 [private]
 default:
@@ -34,6 +39,22 @@ test-live *args:
 [group("docs")]
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+
+# Regenerate docs/sdk/ (markdown API docs for LLMs) from rustdoc JSON
+[group("docs")]
+docs-md: _sdk-docs-json
+    cargo xtask docs
+
+# Fail if docs/sdk/ is out of date (needs the pinned nightly, so not part of `check`)
+[group("docs")]
+docs-md-check: _sdk-docs-json
+    cargo xtask docs --check
+
+# Emit rustdoc JSON for both crates with the pinned nightly into target/sdk-docs/
+_sdk-docs-json:
+    rustup toolchain install {{ docs_nightly }} --profile minimal --no-self-update
+    cargo +{{ docs_nightly }} rustdoc -p marcasite-core --all-features --target-dir target/sdk-docs -- -Z unstable-options --output-format json
+    cargo +{{ docs_nightly }} rustdoc -p marcasite --all-features --target-dir target/sdk-docs -- -Z unstable-options --output-format json
 
 # Check dependency advisories, licences, bans and sources
 [group("lint")]

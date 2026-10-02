@@ -574,7 +574,7 @@ mod tests {
     }
 
     /// Field names and types from `components/schemas/PaginatedSimplifiedMarkets` /
-    /// `SimplifiedMarket` in docs/specs/clob-openapi.yaml (the spec has no example); token
+    /// `SimplifiedMarket` in docs/polymarket/specs/clob-openapi.yaml (the spec has no example); token
     /// ids from the `/rewards/markets/{condition_id}` example.
     #[test]
     fn deserializes_simplified_markets_page() {
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(market.accepting_orders, Some(true));
     }
 
-    /// Field names and types from `components/schemas/Market` in docs/specs/clob-openapi.yaml
+    /// Field names and types from `components/schemas/Market` in docs/polymarket/specs/clob-openapi.yaml
     /// (the spec has no example).
     #[test]
     fn deserializes_market() {
@@ -667,7 +667,7 @@ mod tests {
     }
 
     /// Field names, types and examples from `components/schemas/ClobMarketDetails` in
-    /// docs/specs/clob-openapi.yaml (docs/api-reference/markets/get-clob-market-info.md).
+    /// docs/polymarket/specs/clob-openapi.yaml (docs/polymarket/api-reference/markets/get-clob-market-info.md).
     #[test]
     fn deserializes_clob_market_details() {
         let json = r#"{
@@ -764,7 +764,7 @@ mod tests {
     }
 
     /// Examples from `components/schemas/MarketByTokenResponse` in
-    /// docs/specs/clob-openapi.yaml.
+    /// docs/polymarket/specs/clob-openapi.yaml.
     #[test]
     fn deserializes_market_by_token() {
         let json = r#"{
@@ -781,7 +781,7 @@ mod tests {
     }
 
     /// Field names and types from `components/schemas/LiveActivityMarket` in
-    /// docs/specs/clob-openapi.yaml (the spec has no example).
+    /// docs/polymarket/specs/clob-openapi.yaml (the spec has no example).
     #[test]
     fn deserializes_live_activity_market() {
         let json = r#"{

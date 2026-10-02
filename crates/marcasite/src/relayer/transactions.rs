@@ -147,8 +147,8 @@ impl RelayerClient {
 mod tests {
     use super::*;
 
-    /// The `200` example of `GET /transaction` in `docs/specs/relayer-openapi.yaml`
-    /// (also on `docs/api-reference/relayer/get-a-transaction-by-id.md`).
+    /// The `200` example of `GET /transaction` in `docs/polymarket/specs/relayer-openapi.yaml`
+    /// (also on `docs/polymarket/api-reference/relayer/get-a-transaction-by-id.md`).
     const EXAMPLE: &str = r#"[
         {
             "transactionID": "0190b317-a1d3-7bec-9b91-eeb6dcd3a620",

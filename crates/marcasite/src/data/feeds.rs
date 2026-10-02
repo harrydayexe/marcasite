@@ -778,7 +778,7 @@ mod tests {
     use marcasite_core::Error;
 
     /// Field names and types from `components/schemas/Trade` in
-    /// `docs/specs/data-v2-openapi.json`.
+    /// `docs/polymarket/specs/data-v2-openapi.json`.
     #[test]
     fn deserializes_trade() {
         let json = r#"{

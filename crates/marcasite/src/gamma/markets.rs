@@ -618,7 +618,7 @@ impl GammaClient {
 
     /// Gets a market's description.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getMarketDescription` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getMarketDescription` (no
     /// published doc page).
     ///
     /// # Errors
@@ -683,7 +683,7 @@ impl GammaClient {
     /// [`get_abridged_markets`](Self::get_abridged_markets) takes the same filters on
     /// `POST /markets/abridged`.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getMarketsInformation` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getMarketsInformation` (no
     /// published doc page).
     pub fn get_markets_information(&self) -> GetMarketsInformation {
         GetMarketsInformation {
@@ -700,7 +700,7 @@ impl GammaClient {
     /// [`get_markets_information`](Self::get_markets_information) (`POST
     /// /markets/information`).
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getAbridgedMarkets` (no published
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getAbridgedMarkets` (no published
     /// doc page).
     pub fn get_abridged_markets(&self) -> GetMarketsInformation {
         GetMarketsInformation {
@@ -1407,7 +1407,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Market` in
-    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,
+    /// `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,
     /// `volume` and `teamAID` are strings, `volume24hr`, `volume1wk` and the prices are
     /// numbers.
     #[test]

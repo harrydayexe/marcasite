@@ -396,7 +396,7 @@ impl GetRelatedTags {
 mod tests {
     use super::*;
 
-    /// Field names and types from `components/schemas/Tag` in `docs/specs/gamma-openapi.yaml`.
+    /// Field names and types from `components/schemas/Tag` in `docs/polymarket/specs/gamma-openapi.yaml`.
     #[test]
     fn deserializes_tag() {
         let json = r#"{
@@ -431,7 +431,7 @@ mod tests {
     }
 
     /// Field names and types from `components/schemas/RelatedTag` in
-    /// `docs/specs/gamma-openapi.yaml`.
+    /// `docs/polymarket/specs/gamma-openapi.yaml`.
     #[test]
     fn related_tag_ids_are_integers_on_the_wire() {
         let json = serde_json::json!({"id": "7", "tagID": 100381, "relatedTagID": 2, "rank": 1});

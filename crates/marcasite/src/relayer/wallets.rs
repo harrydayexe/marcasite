@@ -110,7 +110,7 @@ impl CheckDeployed {
 mod tests {
     use super::*;
 
-    /// `200` example of `GET /deployed` in `docs/specs/relayer-openapi.yaml`.
+    /// `200` example of `GET /deployed` in `docs/polymarket/specs/relayer-openapi.yaml`.
     #[test]
     fn deserializes_example() {
         let status: DeploymentStatus = serde_json::from_str(r#"{"deployed":true}"#).unwrap();

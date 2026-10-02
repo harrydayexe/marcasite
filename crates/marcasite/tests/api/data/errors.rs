@@ -246,7 +246,7 @@ async fn unknown_error_code_is_preserved() {
     );
 }
 
-/// The `400` body documented in `docs/api-reference/data-api/overview.md` ("Errors and Rate
+/// The `400` body documented in `docs/polymarket/api-reference/data-api/overview.md` ("Errors and Rate
 /// Limits") has only `error`: the message is kept and there is no typed code.
 #[tokio::test]
 async fn overview_error_body_without_code() {

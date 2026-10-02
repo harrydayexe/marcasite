@@ -1,6 +1,6 @@
 //! Sports results channel: `wss://sports-api.polymarket.com/ws`.
 //!
-//! Spec: `docs/specs/asyncapi-sports.json`; page: `docs/api-reference/wss/sports.md`.
+//! Spec: `docs/polymarket/specs/asyncapi-sports.json`; page: `docs/polymarket/api-reference/wss/sports.md`.
 //!
 //! The live channel does not match the spec: see [`SportResult`] and `SPEC_DEVIATIONS.md`.
 
@@ -278,7 +278,7 @@ mod string_or_integer_option {
 
 /// A real-time sports match update, as the live channel sends it.
 ///
-/// **This is the live shape, not the spec's.** `docs/specs/asyncapi-sports.json` describes
+/// **This is the live shape, not the spec's.** `docs/polymarket/specs/asyncapi-sports.json` describes
 /// a `SportResult` keyed by `slug` with snake_case fields (`last_update`,
 /// `finished_timestamp`); the live channel (observed 2026-10-02 across tennis, cricket,
 /// esports and MLBB, 155 frames) sends camelCase fields, no `slug` and no `last_update`.
@@ -381,7 +381,7 @@ mod tests {
     }
 
     // Fixtures: frames captured from `wss://sports-api.polymarket.com/ws` on 2026-10-02
-    // (the spec's `slug` shape in `docs/specs/asyncapi-sports.json` is not sent live).
+    // (the spec's `slug` shape in `docs/polymarket/specs/asyncapi-sports.json` is not sent live).
 
     const TENNIS: &str = r#"{"gameId":6365478,"leagueAbbreviation":"wta challenger","homeTeam":"Alexandra Shubladze","awayTeam":"Sijia Wei","status":"inprogress","score":"6-7(3-7), 6-3, 2-1","period":"S3","live":true,"ended":false}"#;
     const ESPORTS: &str = r#"{"gameId":1697663,"leagueAbbreviation":"lol","homeTeam":"Solary","awayTeam":"T1 Academy","status":"running","score":"000-000|0-1|Bo5","period":"2/5","live":true,"ended":false}"#;

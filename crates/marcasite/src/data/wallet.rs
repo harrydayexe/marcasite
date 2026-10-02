@@ -1205,9 +1205,9 @@ mod tests {
     };
     use marcasite_core::Error;
 
-    /// The example response in `docs/api-reference/data-api/overview.md` ("Make a First
+    /// The example response in `docs/polymarket/api-reference/data-api/overview.md` ("Make a First
     /// Request") trims the row; the remaining required fields of
-    /// `components/schemas/Position` (`docs/specs/data-v2-openapi.json`) are filled with
+    /// `components/schemas/Position` (`docs/polymarket/specs/data-v2-openapi.json`) are filled with
     /// values of the documented types.
     const POSITION_PAGE: &str = r#"{
       "data": [
@@ -1305,7 +1305,7 @@ mod tests {
     }
 
     /// A combo position row from `components/schemas/ComboPosition`, `ComboLeg`,
-    /// `ComboLegMarket` and `ComboLegEvent` in `docs/specs/data-v2-openapi.json`, with a
+    /// `ComboLegMarket` and `ComboLegEvent` in `docs/polymarket/specs/data-v2-openapi.json`, with a
     /// populated `first_entry_at` / `first_entry_at_micros` pair.
     const COMBO_POSITION: &str = r#"{
       "combo_condition_id": "0x03aa000000000000000000000000000000000000000000000000000000000001",

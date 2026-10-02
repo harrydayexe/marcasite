@@ -246,7 +246,7 @@ mod tests {
 
     use super::*;
 
-    /// Request example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
+    /// Request example of `POST /quote` in `docs/polymarket/specs/bridge-openapi.yaml`.
     fn documented_request() -> QuoteRequest {
         QuoteRequest::new()
             .from_amount_base_unit("10000000")
@@ -302,7 +302,7 @@ mod tests {
         assert!(reordered.body().is_ok());
     }
 
-    /// `200` example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
+    /// `200` example of `POST /quote` in `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn deserializes_documented_response() {
         let json = r#"{

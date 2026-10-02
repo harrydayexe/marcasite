@@ -1,8 +1,8 @@
 //! Response fixtures.
 //!
-//! The Data API v2 spec (`docs/specs/data-v2-openapi.json`) has no response examples; the
+//! The Data API v2 spec (`docs/polymarket/specs/data-v2-openapi.json`) has no response examples; the
 //! only documented example is the trimmed positions page in
-//! `docs/api-reference/data-api/overview.md`. Rows here reuse its values and fill every
+//! `docs/polymarket/api-reference/data-api/overview.md`. Rows here reuse its values and fill every
 //! other required field of the corresponding `components/schemas/*` schema with a value of
 //! the documented type.
 

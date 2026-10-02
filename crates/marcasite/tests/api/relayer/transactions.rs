@@ -14,7 +14,7 @@ use crate::common;
 
 const ID: &str = "0190b317-a1d3-7bec-9b91-eeb6dcd3a620";
 
-/// The `200` example of `GET /transaction` in `docs/specs/relayer-openapi.yaml`.
+/// The `200` example of `GET /transaction` in `docs/polymarket/specs/relayer-openapi.yaml`.
 const EXAMPLE: &str = r#"[{
     "transactionID": "0190b317-a1d3-7bec-9b91-eeb6dcd3a620",
     "transactionHash": "0x38cbfbeae8fffa4e2b187ee5978d3ee9cafc53af0363ed90a35b7ea9016535d8",
@@ -88,7 +88,7 @@ async fn unknown_state_does_not_break_decoding() {
 #[tokio::test]
 async fn not_found_and_bad_request_are_typed() {
     let server = common::server().await;
-    // Documented error bodies (`docs/specs/relayer-openapi.yaml`, `GET /transaction`).
+    // Documented error bodies (`docs/polymarket/specs/relayer-openapi.yaml`, `GET /transaction`).
     Mock::given(method("GET"))
         .and(path("/transaction"))
         .and(query_param("id", "missing"))

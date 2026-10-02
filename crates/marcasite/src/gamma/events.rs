@@ -415,7 +415,7 @@ impl GammaClient {
     /// Lists events with pagination metadata (`hasMore`, `totalResults`; offset
     /// pagination).
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `listEventsPagination` (no published
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `listEventsPagination` (no published
     /// doc page).
     pub fn list_events_paginated(&self) -> ListEventsPaginated {
         ListEventsPaginated {
@@ -426,7 +426,7 @@ impl GammaClient {
 
     /// Lists sport events with their results (offset pagination).
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `listSportEventsResults` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `listSportEventsResults` (no
     /// published doc page).
     pub fn list_sport_event_results(&self) -> ListSportEventResults {
         ListSportEventResults {
@@ -489,7 +489,7 @@ impl GammaClient {
 
     /// Gets an event's tweet count.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getEventTweetCount` (no published
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getEventTweetCount` (no published
     /// doc page).
     ///
     /// # Errors
@@ -509,7 +509,7 @@ impl GammaClient {
 
     /// Gets the number of comments on an event.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getEventCommentsCount` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getEventCommentsCount` (no
     /// published doc page).
     ///
     /// # Errors
@@ -529,7 +529,7 @@ impl GammaClient {
 
     /// Lists event creators (offset pagination).
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `listEventCreators` (no published
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `listEventCreators` (no published
     /// doc page).
     pub fn list_event_creators(&self) -> ListEventCreators {
         ListEventCreators {
@@ -540,7 +540,7 @@ impl GammaClient {
 
     /// Gets an event creator by id.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getEventCreator` (no published doc
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getEventCreator` (no published doc
     /// page).
     ///
     /// # Errors
@@ -1402,7 +1402,7 @@ mod tests {
     }
 
     /// Field names and types from `components/schemas/Event` in
-    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,
+    /// `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,
     /// `volume` and `volume24hr` are numbers, `createdBy` and `published_at` strings.
     #[test]
     fn deserializes_event_wire_names_and_types() {

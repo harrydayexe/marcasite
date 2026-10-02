@@ -122,8 +122,8 @@ mod tests {
         );
     }
 
-    /// Example response of `GET /rebates/current` in docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/rebates/get-current-rebated-fees-for-a-maker.md).
+    /// Example response of `GET /rebates/current` in docs/polymarket/specs/clob-openapi.yaml
+    /// (docs/polymarket/api-reference/rebates/get-current-rebated-fees-for-a-maker.md).
     #[test]
     fn deserializes_rebated_fees() {
         let json = r#"[{

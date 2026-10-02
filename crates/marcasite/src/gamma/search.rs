@@ -184,7 +184,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Search` and `SearchTag` in
-    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body).
+    /// `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish no example body).
     #[test]
     fn deserializes_search_results() {
         let json = r#"{

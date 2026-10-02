@@ -13,17 +13,19 @@ Polymarket Predictions APIs.
 
 ## Source of truth for the API
 
-**The live API is the source of truth.** The docs in `docs/` (and
+**The live API is the source of truth.** The docs in `docs/polymarket/` (and
 `https://docs.polymarket.com/api-reference/predictions/overview.md`) are the starting point for every
 statement about the Polymarket API (endpoints, methods, parameters, request bodies, response types,
 enums, auth headers, rate limits, error shapes), but where the live API behaves differently, the SDK
 follows the live API.
 
-- Read `docs/AGENTS.md` first; it explains how to navigate the docs cheaply.
-- `docs/INDEX.md` lists every page. Endpoint pages live in `docs/api-reference/<group>/`.
-- Use `docs/specs/` (OpenAPI/AsyncAPI) for schemas, enums, required/optional fields and types.
+- Read `docs/polymarket/AGENTS.md` first; it explains how to navigate the docs cheaply.
+- `docs/polymarket/INDEX.md` lists every page. Endpoint pages live in `docs/polymarket/api-reference/<group>/`.
+- Use `docs/polymarket/specs/` (OpenAPI/AsyncAPI) for schemas, enums, required/optional fields and types.
   These files are large; `grep -n` for the `operationId` or schema name instead of reading them whole.
-- `docs/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
+- `docs/polymarket/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
+  `docs/sdk/` is not Polymarket's documentation: it is this SDK's API, generated from rustdoc
+  (see [Generated SDK docs](#generated-sdk-docs)).
 - **Verify against the live API** (`just test-live`, or `curl` for a quick look) before relying on a
   documented shape. Live tests live in `crates/marcasite/tests/live/`; they are `#[ignore]`d and
   read-only, and report keys the models drop and enum values that fall into `Unknown(..)`.
@@ -38,7 +40,7 @@ follows the live API.
   `/// See <https://docs.polymarket.com/api-reference/markets/get-market-by-id>`), and note any
   deviation from it.
 
-### Services (from `docs/api-reference/predictions/overview.md` and the specs)
+### Services (from `docs/polymarket/api-reference/predictions/overview.md` and the specs)
 
 | Service | Base URL | Spec |
 |---|---|---|
@@ -70,12 +72,12 @@ Base URLs must be configurable (e.g. for tests against a mock server), with thes
   operation's `security` in `specs/clob-openapi.yaml` for which headers each endpoint needs.
 - **Relayer auth** uses Builder API keys (`POLY_BUILDER_*`) or Relayer API keys
   (`RELAYER_API_KEY`, `RELAYER_API_KEY_ADDRESS`); see `specs/relayer-openapi.yaml`.
-- **Rate limits** (`docs/api-reference/rate-limits.md`, `trading-rate-limits.md`): Cloudflare
+- **Rate limits** (`docs/polymarket/api-reference/rate-limits.md`, `trading-rate-limits.md`): Cloudflare
   IP-based limits that throttle rather than reject, plus per-signer token buckets for CLOB order
   and cancel requests. Batch limits are endpoint-specific (e.g. max 15 orders per
   `post-multiple-orders`, 1000 per `cancel-multiple-orders`, 500 token IDs for last-trade-prices);
   enforce documented limits client-side with a typed error where practical.
-- **Geoblock**: see `docs/api-reference/geoblock.md`. Do not add any mechanism to bypass it.
+- **Geoblock**: see `docs/polymarket/api-reference/geoblock.md`. Do not add any mechanism to bypass it.
 
 ## Architecture
 
@@ -148,7 +150,7 @@ Principles once decided:
 ## Testing
 
 - Unit tests for serialization/deserialization using fixtures captured from the live API (note the
-  route and capture date) or taken from documented examples in `docs/` (cite the source page).
+  route and capture date) or taken from documented examples in `docs/polymarket/` (cite the source page).
   Never invent response bodies that contradict the live API.
 - Integration tests against a mock HTTP/WS server (e.g. `wiremock`); no live network in default
   `cargo test`. Live tests, if any, are `#[ignore]` and read-only.
@@ -182,16 +184,35 @@ Principles once decided:
 | `just test-live [args]` | Live, read-only tests against the production APIs (needs network) |
 | `just doc` | Build docs with `-D warnings` |
 | `just deny` | `cargo deny check` (advisories, licences, bans, sources) |
+| `just docs-md` | Regenerate `docs/sdk/` (markdown API docs for LLMs) |
+| `just docs-md-check` | Fail if `docs/sdk/` is stale (CI runs this; not part of `just check`) |
 
 Run `just --list --list-submodules` for everything. `just deny` needs `cargo install cargo-deny`.
 
 Layout: Cargo workspace. `crates/marcasite-core` holds shared transport/config/errors;
-`crates/marcasite` is the user-facing facade. Logging is via `tracing` (never install a
-subscriber in library code). Toolchain is pinned in `rust-toolchain.toml`.
+`crates/marcasite` is the user-facing facade; `xtask/` holds unpublished dev tooling
+(`cargo xtask help`). Logging is via `tracing` (never install a subscriber in library code).
+Toolchain is pinned in `rust-toolchain.toml`.
+
+## Generated SDK docs
+
+`docs/sdk/` is the public API of `marcasite` (every module, type, method and signature, with
+rustdoc) as markdown, for LLMs and coding agents. It is generated, never hand-edited:
+
+- **After any change to the public API or to rustdoc, run `just docs-md` and commit
+  `docs/sdk/`.** CI (`sdk-docs` job) fails when it is stale.
+- `just docs-md` emits rustdoc JSON for both crates into `target/sdk-docs/` with the nightly
+  pinned as `docs_nightly` in the justfile (rustdoc's JSON output is unstable), then runs
+  `cargo xtask docs` on the normal toolchain to render it. Only that recipe uses the nightly.
+- `docs_nightly` and the exact `rustdoc-types` version in `xtask/Cargo.toml` must match (same
+  JSON `FORMAT_VERSION`); bump them together. The xtask reports a mismatch.
+- The generator (`xtask/src/docs/`) follows re-exports into private modules and into
+  `marcasite-core`, documents each item once (root, then `types`, then the service modules)
+  and links the other re-exports to it, and rewrites intra-doc links to the generated files.
 
 ## Workflow for agents
 
-1. Find the endpoint in `docs/INDEX.md`, read its page, confirm types in `docs/specs/`, then check
+1. Find the endpoint in `docs/polymarket/INDEX.md`, read its page, confirm types in `docs/polymarket/specs/`, then check
    the live response (`curl` / `just test-live`).
 2. Ask the user about anything ambiguous or any architectural/dependency choice.
 3. Implement types, request, and error handling; add rustdoc with the doc link.

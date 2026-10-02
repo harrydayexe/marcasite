@@ -106,7 +106,7 @@ mod tests {
 
     /// The spec has no response example for `GET /supported-assets`; this body is assembled
     /// from the per-field `example` values of `SupportedAsset` and `Token` in
-    /// `docs/specs/bridge-openapi.yaml`.
+    /// `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn deserializes_schema_examples() {
         let json = r#"{"supportedAssets":[{

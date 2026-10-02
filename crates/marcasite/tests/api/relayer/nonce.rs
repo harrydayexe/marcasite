@@ -8,7 +8,7 @@ use wiremock::{
 
 use crate::common;
 
-/// Example signer address from `docs/specs/relayer-openapi.yaml`.
+/// Example signer address from `docs/polymarket/specs/relayer-openapi.yaml`.
 const SIGNER: &str = "0x77837466dd64fb52ECD00C737F060d0ff5CCB575";
 
 #[tokio::test]

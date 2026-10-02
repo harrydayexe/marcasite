@@ -1,6 +1,6 @@
 # Open questions
 
-Points the docs (`docs/`) and the live API leave unanswered. Each has been modelled conservatively
+Points the docs (`docs/polymarket/`) and the live API leave unanswered. Each has been modelled conservatively
 (noted below) and needs a decision from the maintainer, or clarification from Polymarket, before
 v1. Remove an entry once it is resolved. Where the live API answers a question, the SDK follows it and
 the answer is recorded in `SPEC_DEVIATIONS.md` instead.

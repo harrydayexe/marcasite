@@ -131,7 +131,7 @@ fn nonce_query(address: Address, nonce_type: &NonceType) -> Result<Query> {
 mod tests {
     use super::*;
 
-    /// `200` example of `GET /nonce` in `docs/specs/relayer-openapi.yaml`.
+    /// `200` example of `GET /nonce` in `docs/polymarket/specs/relayer-openapi.yaml`.
     #[test]
     fn deserializes_nonce_example() {
         let nonce: Nonce = serde_json::from_str(r#"{"nonce":"31"}"#).unwrap();
@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(empty.nonce, None);
     }
 
-    /// `200` example of `GET /relay-payload` in `docs/specs/relayer-openapi.yaml`.
+    /// `200` example of `GET /relay-payload` in `docs/polymarket/specs/relayer-openapi.yaml`.
     #[test]
     fn deserializes_relay_payload_example() {
         let payload: RelayPayload = serde_json::from_str(

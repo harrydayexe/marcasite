@@ -1,9 +1,9 @@
 //! PolyBolt live data: `wss://ws-live-v2.polymarket.com/ws`, public `price.polymarket`
 //! channel only.
 //!
-//! Spec: `docs/specs/polybolt-asyncapi.json`; pages: `docs/api-reference/wss/polybolt.md`,
-//! `docs/api-reference/live-data/overview.md`,
-//! `docs/api-reference/websockets/live-data-channel.md`.
+//! Spec: `docs/polymarket/specs/polybolt-asyncapi.json`; pages: `docs/polymarket/api-reference/wss/polybolt.md`,
+//! `docs/polymarket/api-reference/live-data/overview.md`,
+//! `docs/polymarket/api-reference/websockets/live-data-channel.md`.
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -1380,7 +1380,7 @@ mod tests {
     }
 
     // Requests: `components/messages/{subscribe,unsubscribe,ping}` examples in
-    // `docs/specs/polybolt-asyncapi.json` (the price.polymarket item of the batch example).
+    // `docs/polymarket/specs/polybolt-asyncapi.json` (the price.polymarket item of the batch example).
 
     #[test]
     fn serializes_batch_subscribe() {
@@ -1435,7 +1435,7 @@ mod tests {
     }
 
     // Server messages: `components/messages/*` examples in
-    // `docs/specs/polybolt-asyncapi.json`.
+    // `docs/polymarket/specs/polybolt-asyncapi.json`.
 
     #[test]
     fn deserializes_acks() {

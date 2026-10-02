@@ -15,7 +15,7 @@ use crate::common;
 
 /// Captured from `GET https://combos-rfq-api.polymarket.com/v1/rfq/combo-markets` on
 /// 2026-10-02 (trimmed to one market and three tags). The docs' example in
-/// `docs/specs/combos-rfq-openapi.yaml` has abbreviated ids and no `pending`; live has full
+/// `docs/polymarket/specs/combos-rfq-openapi.yaml` has abbreviated ids and no `pending`; live has full
 /// ids and the undocumented `pending`.
 const EXAMPLE: &str = r#"{
     "markets": [
@@ -187,7 +187,7 @@ async fn stream_can_resume_from_cursor() {
 #[tokio::test]
 async fn bad_request_is_typed() {
     let server = common::server().await;
-    // The shared `BadRequest` response of `docs/specs/combos-rfq-openapi.yaml`.
+    // The shared `BadRequest` response of `docs/polymarket/specs/combos-rfq-openapi.yaml`.
     Mock::given(method("GET"))
         .and(path("/v1/rfq/combo-markets"))
         .respond_with(

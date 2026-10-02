@@ -31,7 +31,7 @@ impl ClobClient {
 mod tests {
     use super::*;
 
-    /// Example `1234567890` from `GET /time` in docs/specs/clob-openapi.yaml.
+    /// Example `1234567890` from `GET /time` in docs/polymarket/specs/clob-openapi.yaml.
     #[test]
     fn deserializes_server_time() {
         let time: ServerTime = serde_json::from_str("1234567890").unwrap();

@@ -1,6 +1,6 @@
 //! CLOB API integration tests.
 //!
-//! Response bodies are taken from the examples in `docs/specs/clob-openapi.yaml` (cited per
+//! Response bodies are taken from the examples in `docs/polymarket/specs/clob-openapi.yaml` (cited per
 //! test) or built from the documented schemas where the spec has no example.
 
 mod market_data;

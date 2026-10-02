@@ -1,5 +1,5 @@
 //! Models shared by several Gamma topics (`components/schemas` in
-//! `docs/specs/gamma-openapi.yaml`).
+//! `docs/polymarket/specs/gamma-openapi.yaml`).
 //!
 //! The Gamma spec marks no field as required, so every field is optional.
 
@@ -205,7 +205,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/ImageOptimization` in
-    /// `docs/specs/gamma-openapi.yaml`.
+    /// `docs/polymarket/specs/gamma-openapi.yaml`.
     #[test]
     fn image_optimization_roundtrips_wire_names() {
         let json = serde_json::json!({

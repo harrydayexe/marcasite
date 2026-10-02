@@ -314,7 +314,7 @@ impl CreateWithdrawalAddresses {
 mod tests {
     use super::*;
 
-    /// Request example of `POST /deposit` in `docs/specs/bridge-openapi.yaml`.
+    /// Request example of `POST /deposit` in `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn serializes_deposit_request() {
         let address = Address::from("0x56687bf447db6ffa42ffe2204a05edaa20f55839");
@@ -325,7 +325,7 @@ mod tests {
         );
     }
 
-    /// Request example of `POST /withdraw` in `docs/specs/bridge-openapi.yaml`.
+    /// Request example of `POST /withdraw` in `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn serializes_withdrawal_request() {
         let request = WithdrawalRequest::new()
@@ -362,7 +362,7 @@ mod tests {
         );
     }
 
-    /// `201` example of `POST /withdraw` in `docs/specs/bridge-openapi.yaml`.
+    /// `201` example of `POST /withdraw` in `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn deserializes_documented_response() {
         let json = r#"{
