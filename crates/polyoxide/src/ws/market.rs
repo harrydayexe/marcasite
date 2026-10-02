@@ -622,7 +622,7 @@ impl MarketChannelBuilder {
 /// `tick_size_change`, `best_bid_ask`, `new_market` and `market_resolved` it gives no unit,
 /// so their `timestamp` is kept as the string sent; each of these events has a
 /// `timestamp_millis()` helper that reads it as Unix milliseconds, as in the documented
-/// examples.
+/// examples. Live (2026-10-02) every timestamp on the channel is Unix milliseconds.
 ///
 /// # Empty prices
 ///
@@ -739,15 +739,37 @@ pub struct BookEvent {
     pub asset_id: TokenId,
     /// Condition id of the market.
     pub market: ConditionId,
-    /// Aggregated buy orders by price level.
+    /// Aggregated buy orders by price level. An empty side is an empty array.
+    ///
+    /// Live (2026-10-02) the levels are **not** sorted best-first: bids arrive ascending
+    /// (worst, i.e. lowest, first) and asks descending (worst, i.e. highest, first). Sort
+    /// them yourself if the order matters.
     pub bids: Vec<OrderSummary>,
-    /// Aggregated sell orders by price level.
+    /// Aggregated sell orders by price level. See [`bids`](Self::bids) for the empty case
+    /// and the ordering.
     pub asks: Vec<OrderSummary>,
     /// Snapshot time (sent as a string of Unix milliseconds).
     #[serde(with = "millis_string")]
     pub timestamp: DateTime<Utc>,
     /// Hash of the order book content.
     pub hash: String,
+    /// The market's minimum tick size (e.g. `0.01`). Undocumented; observed live
+    /// (2026-10-02) on the initial snapshots sent on subscribe. `None` when absent or empty.
+    #[serde(
+        default,
+        with = "empty_decimal",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tick_size: Option<Decimal>,
+    /// Price of the last trade. Undocumented; observed live (2026-10-02) on the initial
+    /// snapshots sent on subscribe, as an empty string for an empty book, which decodes to
+    /// `None` (as does an absent field).
+    #[serde(
+        default,
+        with = "empty_decimal",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_trade_price: Option<Decimal>,
 }
 
 /// `price_change`: one or more order book price level updates (`PriceChangeEvent`).
@@ -947,6 +969,35 @@ pub struct NewMarketEvent {
     pub order_price_min_tick_size: Option<Decimal>,
     /// Display title of the market within its group.
     pub group_item_title: Option<String>,
+    /// Taker base fee (e.g. `1000`, as sent in a string). Undocumented; observed live
+    /// (2026-10-02). The unit is not documented.
+    #[serde(default, with = "serde_util::string_or_number_option")]
+    pub taker_base_fee: Option<Decimal>,
+    /// Whether fees are enabled for the market. Undocumented; observed live (2026-10-02).
+    pub fees_enabled: Option<bool>,
+    /// The market's fee schedule. Undocumented; observed live (2026-10-02).
+    pub fee_schedule: Option<FeeSchedule>,
+}
+
+/// A market's fee schedule, as sent in [`NewMarketEvent::fee_schedule`].
+///
+/// Undocumented; observed live (2026-10-02) as
+/// `{"exponent":"1","rate":"0.07","taker_only":true,"rebate_rate":"0.2"}`. Only the field
+/// types were observed (decimal strings and one boolean), so every field is optional.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct FeeSchedule {
+    /// Fee curve exponent (a decimal string on the wire).
+    #[serde(default, with = "serde_util::string_or_number_option")]
+    pub exponent: Option<Decimal>,
+    /// Fee rate (a decimal string on the wire).
+    #[serde(default, with = "serde_util::string_or_number_option")]
+    pub rate: Option<Decimal>,
+    /// Whether the fee applies to takers only.
+    pub taker_only: Option<bool>,
+    /// Rebate rate (a decimal string on the wire).
+    #[serde(default, with = "serde_util::string_or_number_option")]
+    pub rebate_rate: Option<Decimal>,
 }
 
 impl NewMarketEvent {
@@ -1307,6 +1358,114 @@ mod tests {
         );
         assert_eq!(market.event_message, None);
         assert_eq!(market.description, None);
+    }
+
+    // Live captures (2026-10-02) from `wss://ws-subscriptions-clob.polymarket.com/ws/market`,
+    // trimmed (book levels, descriptions).
+
+    /// The initial snapshots arrive as one JSON array with a `book` per token, carrying the
+    /// undocumented `tick_size` and `last_trade_price` (`""` on an empty book). Bids are
+    /// ascending and asks descending (worst first).
+    const LIVE_INITIAL_FRAME: &str = r#"[
+        {"market":"0x8a9f8be5bef9bc8d36c7895707a4f2561d49de9f5467b6675ba206196e8bd2e2",
+         "asset_id":"98756637703320879198441871470345384821367334051929992047845197222571333888980",
+         "timestamp":"1790908667676","hash":"9e4f2ff8ba2be56177e8bdc8623dfaba4d18f5c8",
+         "bids":[{"price":"0.01","size":"112689"},{"price":"0.02","size":"133687"},{"price":"0.03","size":"41666.32"}],
+         "asks":[{"price":"0.99","size":"37677.02"},{"price":"0.98","size":"25298"},{"price":"0.97","size":"8960.67"}],
+         "tick_size":"0.01","event_type":"book","last_trade_price":"0.140"},
+        {"market":"0x8a9f8be5bef9bc8d36c7895707a4f2561d49de9f5467b6675ba206196e8bd2e2",
+         "asset_id":"1111",
+         "timestamp":"1790908667676","hash":"0000000000000000000000000000000000000000",
+         "bids":[],"asks":[],
+         "tick_size":"0.01","event_type":"book","last_trade_price":""}
+    ]"#;
+
+    #[test]
+    fn deserializes_live_initial_book_frame() {
+        let mut out = VecDeque::new();
+        decode_frame::<MarketEvent>(Service::MarketChannel, LIVE_INITIAL_FRAME, &mut out);
+        assert_eq!(out.len(), 2);
+        let Some(Ok(MarketEvent::Book(book))) = out.pop_front() else {
+            panic!("expected a book event");
+        };
+        assert_eq!(book.tick_size, Some(Decimal::new(1, 2)));
+        assert_eq!(book.last_trade_price, Some(Decimal::new(140, 3)));
+        assert_eq!(book.bids[0].price, Decimal::new(1, 2));
+        assert_eq!(book.asks[0].price, Decimal::new(99, 2));
+        assert_eq!(book.timestamp.timestamp_millis(), 1_790_908_667_676);
+
+        let Some(Ok(MarketEvent::Book(empty))) = out.pop_front() else {
+            panic!("expected a book event");
+        };
+        assert!(empty.bids.is_empty() && empty.asks.is_empty());
+        assert_eq!(empty.tick_size, Some(Decimal::new(1, 2)));
+        // `""` on an empty book.
+        assert_eq!(empty.last_trade_price, None);
+    }
+
+    #[test]
+    fn book_without_the_undocumented_fields_still_decodes() {
+        let MarketEvent::Book(book) = event(
+            r#"{"event_type":"book","asset_id":"1","market":"0x1","bids":[],"asks":[],
+                "timestamp":"1757908892351","hash":"h"}"#,
+        ) else {
+            panic!("expected a book event");
+        };
+        assert_eq!(book.tick_size, None);
+        assert_eq!(book.last_trade_price, None);
+    }
+
+    #[test]
+    fn unknown_token_frame_is_an_empty_array() {
+        // Live: a closed or unknown token gets a bare `[]`, which decodes to no events.
+        let mut out = VecDeque::new();
+        decode_frame::<MarketEvent>(Service::MarketChannel, "[]", &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn deserializes_live_new_market_with_fees() {
+        let MarketEvent::NewMarket(market) = event(
+            r#"{"id":"5196322","question":"Bitcoin Up or Down - October 2, 10:30PM-10:35PM ET",
+                "market":"0x9691dbea9f392aea399936926ff9d3013de1550381454b9579124df96168f54a",
+                "slug":"btc-updown-5m-1790994600","description":"This market will resolve to \"Up\" if the ",
+                "assets_ids":["29481957761527484935929705986029508274880234386196526574483297319946400380223","110300735535035853449236273459359802664768005831731803586170232203839099968893"],
+                "outcomes":["Up","Down"],
+                "event_message":{"id":"1117051","ticker":"btc-updown-5m-1790994600","slug":"btc-updown-5m-1790994600","title":"Bitcoin Up or Down - October 2, 10:30PM-10:35PM ET","description":"This market will resolve to \"Up\" if the "},
+                "timestamp":"1790908720778","event_type":"new_market","tags":[],
+                "condition_id":"0x9691dbea9f392aea399936926ff9d3013de1550381454b9579124df96168f54a",
+                "active":false,
+                "clob_token_ids":["29481957761527484935929705986029508274880234386196526574483297319946400380223","110300735535035853449236273459359802664768005831731803586170232203839099968893"],
+                "sports_market_type":"","line":"","game_start_time":"","order_price_min_tick_size":"0.01",
+                "group_item_title":"","taker_base_fee":"1000","fees_enabled":true,
+                "fee_schedule":{"exponent":"1","rate":"0.07","taker_only":true,"rebate_rate":"0.2"}}"#,
+        ) else {
+            panic!("expected a new_market event");
+        };
+        assert_eq!(market.taker_base_fee, Some(Decimal::from(1000)));
+        assert_eq!(market.fees_enabled, Some(true));
+        let schedule = market.fee_schedule.as_ref().unwrap();
+        assert_eq!(schedule.exponent, Some(Decimal::ONE));
+        assert_eq!(schedule.rate, Some(Decimal::new(7, 2)));
+        assert_eq!(schedule.taker_only, Some(true));
+        assert_eq!(schedule.rebate_rate, Some(Decimal::new(2, 1)));
+        assert_eq!(
+            market.timestamp_millis().map(|t| t.timestamp_millis()),
+            Some(1_790_908_720_778)
+        );
+    }
+
+    #[test]
+    fn new_market_without_fee_fields_decodes() {
+        let MarketEvent::NewMarket(market) = event(
+            r#"{"event_type":"new_market","id":"1","question":"q","market":"0x1","slug":"s",
+                "assets_ids":[],"outcomes":[],"timestamp":"1"}"#,
+        ) else {
+            panic!("expected a new_market event");
+        };
+        assert_eq!(market.taker_base_fee, None);
+        assert_eq!(market.fees_enabled, None);
+        assert_eq!(market.fee_schedule, None);
     }
 
     #[test]

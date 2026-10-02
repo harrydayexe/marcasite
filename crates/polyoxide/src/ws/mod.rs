@@ -44,8 +44,10 @@
 //!
 //! - **Market channel**: the client sends `PING` every 10 seconds and the server answers
 //!   `PONG` (configurable with [`MarketChannelBuilder::heartbeat_interval`]).
-//! - **Sports channel**: the server sends `ping` every 5 seconds and the client answers
-//!   `pong` (it must within 10 seconds).
+//! - **Sports channel**: the spec says the server sends a text `ping` every 5 seconds and the
+//!   client must answer `pong` within 10 seconds. Live, the server sends protocol-level ping
+//!   frames every 15 seconds instead (never a text `ping`); both are answered
+//!   automatically.
 //! - **PolyBolt**: the server sends protocol-level ping frames every 25 seconds, answered
 //!   automatically (two missed pongs close the connection with `4002`). The optional
 //!   application-level ping is [`PolyBoltChannel::ping`].
@@ -56,12 +58,13 @@
 //! dropped), which would leave a stream pending forever. Every channel therefore has an
 //! **idle timeout**: if no frame of any kind (data, heartbeat or heartbeat reply) arrives
 //! for that long, the stream yields a final error of kind [`Timeout`] and ends. The
-//! defaults are three times the documented heartbeat cadence:
+//! defaults are three times the heartbeat cadence (as documented, or as observed live where it
+//! differs):
 //!
-//! | Channel | Documented heartbeat | Default idle timeout |
+//! | Channel | Heartbeat | Default idle timeout |
 //! |---|---|---|
 //! | Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`] (30 s; three heartbeat intervals if a longer interval is configured) |
-//! | Sports | server `ping` every 5 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`] (15 s) |
+//! | Sports | documented: server text `ping` every 5 s; live: protocol ping every 15 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`] (45 s) |
 //! | PolyBolt | server protocol ping every 25 s | [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`] (75 s) |
 //!
 //! Change it with the builders' `idle_timeout`, or disable it with `no_idle_timeout`.
@@ -123,7 +126,7 @@
 //! let mut channel = SportsChannel::connect().await?;
 //! while let Some(item) = channel.next().await {
 //!     match item {
-//!         Ok(SportsEvent::Update(result)) => println!("{}: {:?}", result.slug, result.score),
+//!         Ok(SportsEvent::Update(result)) => println!("{}: {}", result.league_abbreviation, result.score),
 //!         Ok(_) => {}
 //!         // Not fatal: skip the malformed message.
 //!         Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {
@@ -228,7 +231,7 @@ mod sports;
 pub use polyoxide_core::ws::{DEFAULT_BUFFER, DEFAULT_CONNECT_TIMEOUT};
 
 pub use market::{
-    BestBidAskEvent, BookEvent, EventMessage, LastTradePriceEvent, MarketChannel,
+    BestBidAskEvent, BookEvent, EventMessage, FeeSchedule, LastTradePriceEvent, MarketChannel,
     MarketChannelBuilder, MarketChannelHandle, MarketEvent, MarketResolvedEvent,
     MarketSubscription, MarketSubscriptionUpdate, NewMarketEvent, OrderSummary, PriceChange,
     PriceChangeEvent, SubscriptionLevel, TickSizeChangeEvent,
