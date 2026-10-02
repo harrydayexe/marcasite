@@ -488,22 +488,19 @@ pub(crate) fn condition_id(
     validate::bytes32(parameter, value)
 }
 
-/// A combo condition id: `0x` followed by one to 64 hex digits.
+/// A combo condition id: `0x` followed by exactly 62 hex digits.
 ///
 /// The overview documents combo condition ids as `0x03`-prefixed, but live they are `0x`
 /// plus **62** hex digits (31 bytes, e.g.
 /// `0x037cb523f88f4c6ef6a31c33f8a2e72be70000000000000000000000000000`), and the server
-/// answers `400` to a 64-digit id (`invalid combo condition id`). The check is deliberately
-/// looser than live (any 1 to 64 digits) so that a change in the id length on Polymarket's
-/// side does not turn into a client-side rejection; the server has the last word. See
+/// answers `400 invalid combo condition id` to any other length. The check mirrors live. See
 /// `SPEC_DEVIATIONS.md`.
 pub(crate) fn combo_condition_id(
     parameter: &'static str,
     value: &str,
 ) -> std::result::Result<(), ValidationError> {
     let valid = value.strip_prefix("0x").is_some_and(|hex| {
-        (1..=COMBO_CONDITION_MAX_HEX_DIGITS).contains(&hex.len())
-            && hex.bytes().all(|b| b.is_ascii_hexdigit())
+        hex.len() == COMBO_CONDITION_HEX_DIGITS && hex.bytes().all(|b| b.is_ascii_hexdigit())
     });
     if valid {
         Ok(())
@@ -511,16 +508,15 @@ pub(crate) fn combo_condition_id(
         Err(ValidationError::new(
             parameter,
             format!(
-                "must be a combo condition id: `0x` followed by 1 to \
-                 {COMBO_CONDITION_MAX_HEX_DIGITS} hex digits (live ids have 62), got {value:?}"
+                "must be a combo condition id: `0x` followed by \
+                 {COMBO_CONDITION_HEX_DIGITS} hex digits, got {value:?}"
             ),
         ))
     }
 }
 
-/// The most hex digits a combo condition id may have before it cannot be a combo id at
-/// all (a bytes32).
-const COMBO_CONDITION_MAX_HEX_DIGITS: usize = 64;
+/// The number of hex digits in a combo condition id (31 bytes), as the live API requires.
+const COMBO_CONDITION_HEX_DIGITS: usize = 62;
 
 /// An integer id: one or more ASCII digits.
 pub(crate) fn integer_id(

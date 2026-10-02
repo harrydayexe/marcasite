@@ -387,7 +387,7 @@ All CLOB pinning tests are in `crates/polyoxide/tests/live/clob.rs`. Spec paths 
   equal to 0`. Cursors are opaque base64 (`"aWQ6MjQ5Mzk2"` is `id:249396` on the market
   listings, an offset such as `"NTAw"` on the others).
 - **SDK does:** `END_CURSOR` / `next_cursor()` treat `"LTE="` (and an empty cursor) as the
-  end on every listing (resolves open question 15); streams never send it.
+  end on every listing; streams never send it.
 - **Pinning test:** `pin_end_cursor_is_lte`.
 
 ### Market listing pages: 1000 items, `rewards.rates: null`
@@ -414,7 +414,7 @@ All CLOB pinning tests are in `crates/polyoxide/tests/live/clob.rs`. Spec paths 
 - **Pinning test:** `list_markets_with_rewards` (decodes a live page; the typed field fails
   the decode if the format changes).
 
-### Gamma id equivalences (open question 17)
+### Gamma id equivalences
 
 - **Kind:** Undocumented
 - **Docs say:** `LiveActivityMarket.id` is the "Internal market ID"; `Market.question_id` has
@@ -443,8 +443,7 @@ given; the offline decode tests of captured rows are in
   63-digit one, a bare `0x03` or an id without the prefix is `400 invalid combo condition id`
   (`parameter=condition`).
 - **SDK does**: the combo filters (`ListComboPositions::conditions`, `ListComboActivity::conditions`)
-  validate `0x` plus 1 to 64 hex digits (deliberately looser than live, so a change of the id length
-  does not become a client-side rejection; the server has the last word). Regular condition filters
+  validate `0x` plus exactly 62 hex digits, as live does. Regular condition filters
   keep the bytes32 check. Ids are decoded as `ConditionId` without validation.
 - **Pinning test**: `combo_condition_filter_accepts_live_ids`.
 

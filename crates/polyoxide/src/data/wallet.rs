@@ -1046,7 +1046,7 @@ impl ListComboPositions {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
-    /// is above 1000, a condition id is not `0x` followed by 1 to 64 hex digits, more than
+    /// is above 1000, a condition id is not `0x` followed by 62 hex digits, more than
     /// 20 distinct condition ids are given, `REDEEMABLE` is combined with other statuses, or
     /// the sync watermarks are negative or inverted; otherwise see
     /// [`Error`](crate::Error).

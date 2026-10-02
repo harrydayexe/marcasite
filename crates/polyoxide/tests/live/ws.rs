@@ -318,7 +318,7 @@ async fn market_channel_sdk() {
     for book in &books {
         assert!(s.token_ids.iter().any(|t| t == book.asset_id.as_str()));
         assert_eq!(book.market.as_str(), s.condition_id);
-        // Open question 26: the `timestamp` is Unix milliseconds.
+        // The `timestamp` is Unix milliseconds.
         assert!(within_a_day(book.timestamp), "{:?}", book.timestamp);
     }
     // SPEC_DEVIATIONS.md, WebSocket market: the initial snapshots carry `tick_size` (and
@@ -369,7 +369,7 @@ async fn market_channel_custom_features_sdk() {
         MarketEvent::BestBidAsk(best) => Some(best),
         _ => None,
     }) {
-        // Open question 26: `best_bid_ask.timestamp` is Unix milliseconds too.
+        // `best_bid_ask.timestamp` is Unix milliseconds too.
         assert!(within_a_day(best.timestamp_millis().unwrap()), "{best:?}");
     }
 }
@@ -466,7 +466,7 @@ async fn market_channel_update_subscription() {
 }
 
 /// An unknown or closed token: the server answers with an empty JSON array and the
-/// connection stays healthy (open question 27: can the channel send arrays?).
+/// connection stays healthy (the channel does send JSON arrays).
 #[tokio::test]
 #[ignore = "live network"]
 async fn market_channel_unknown_token_stays_healthy() {

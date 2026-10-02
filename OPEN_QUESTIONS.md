@@ -1,21 +1,25 @@
 # Open questions
 
-Points where `docs/` is ambiguous, contradictory or silent. Each has been modelled conservatively
+Points the docs (`docs/`) and the live API leave unanswered. Each has been modelled conservatively
 (noted below) and needs a decision from the maintainer, or clarification from Polymarket, before
-v1. Remove an entry once it is resolved.
+v1. Remove an entry once it is resolved. Where the live API answers a question, the SDK follows it and
+the answer is recorded in `SPEC_DEVIATIONS.md` instead.
 
 ## Project-wide
 
 1. **Decimal precision from JSON numbers.** Amounts sent as JSON numbers are read via `f64`; values
    with more than ~15 significant digits may be rounded. Enabling `serde_json/arbitrary_precision`
    would make them exact but changes `serde_json` for every crate in the user's build. *Current:*
-   documented bound.
+   documented bound. *Live (2026-10-02):* Data API and Bridge numbers are themselves server-side
+   `f64` (e.g. `2021415.2981019993`, `0.024320753943372245`), so only `f64` noise is lost.
 2. **Sentinel values** (`outcome_index: 999`, `last_event_at: 0`, `end_date: 1970-01-01`,
-   `BiggestWinner.event_id: 0`, `""`): map to `None` or keep raw? *Current:* raw, documented.
+   `BiggestWinner.event_id: 0`, `""`): map to `None` or keep raw? *Current:* raw, documented
+   (`Position.first_entry_at: 0` and Data activity `""` ids map to `None`).
 3. **Schemas with no `required` list** (all of Gamma; most Relayer/Bridge responses): every field is
-   `Option`. Should obviously-present fields become required?
-4. **Multiple HTTP forms of one endpoint** (CLOB GET-query / POST-body / path variants): keep separate
-   `*_by_body` / `*_by_path` methods? *Current:* kept, cross-referenced.
+   `Option`. Should fields that are always present live become required?
+4. **Multiple HTTP forms of one endpoint**: CLOB plural `GET` forms were dropped (they answer `400`
+   live) and the `POST` forms took the plain names; single-token `*_by_path` forms are kept beside
+   the query forms. Keep both single-token forms?
 5. **MSRV** and the signing/auth design are still undecided (see `AGENTS.md`).
 6. Request futures from plain `async fn` endpoint methods borrow the client (not `'static`); builders
    and streams are `'static`. Unify?
@@ -23,48 +27,48 @@ v1. Remove an entry once it is resolved.
 ## Gamma
 
 7. Are string-typed amounts (`Market.liquidity`, `volume`, `fee`, `umaBond`, `umaReward`,
-   `CommentPosition.positionSize`) always numeric? *Current:* `Decimal`, `""` → `None`.
-8. `outcomes`, `outcomePrices`, `clobTokenIds`, … are typed `string` with no documented encoding. Add
-   typed accessors that parse them as JSON lists? *Current:* raw `String`.
-9. Keyset endpoints mention BestLines / `external_partners` / Teams / `clob_rewards` and spell
-   `fee_schedule` in snake_case, none of which is in the schemas. *Current:* not modelled.
-10. `order` field names: snake_case (`volume_num`) or camelCase (`volumeNum`)?
-11. Semantics of undocumented filters (`closed`, `active`, `omit_empty`, `tag_match`,
-    `events_status`, `recurrence`, …), maximum `limit`, meaning of `limit=0`, search page numbering.
-12. Spec type inconsistencies to raise with Polymarket (`templateVariables`, `competitive`,
-    `createdBy`, `team*ID`, `closedTime` differ between schemas); `Comment.parentEntityType` values.
-13. Should date-times without an offset be rejected rather than read as UTC?
+   `CommentPosition.positionSize`) always numeric? *Current:* `Decimal`, `""` → `None`. No
+   non-numeric value was seen live, but no exhaustive scan was made.
+8. Keyset endpoints mention BestLines / `external_partners`, none of which has been seen live or is
+   in the schemas. *Current:* not modelled (`clobRewards`, `teams` and `feeSchedule` are).
+9. Undocumented filter semantics still unknown: `closed`, `active`, `omit_empty`, `tag_match`,
+   `events_status`, `recurrence`, maximum `limit`, meaning of `limit=0`, search page numbering.
+   (Known from live: `order` is camelCase, `decimalized` filters by tick size, offset caps.)
+10. Spec type inconsistencies (`templateVariables`, `competitive`, `createdBy`, `team*ID`,
+    `closedTime` differ between schemas). `/events?order=competitive` answers `500` live.
+11. Should date-times without an offset be rejected rather than read as UTC?
+12. `/comments/keyset` exists live (same parent parameters, `comments` array) but is in neither the
+    docs nor the specs. Implement it?
 
 ## CLOB
 
-14. Units: REST `/book` `timestamp` (raw `String`), `MultiMarketInfo.end_date` format,
-    `prices-history` `startTs`/`endTs` on the GET form, `BuilderTrade` size/fee units.
-15. `"LTE="` as end sentinel for simplified/sampling market listings (assumed).
-16. `interval` values: is `1m` a month? `max` vs `all`? Is `interval` exclusive with start/end?
-17. Are `LiveActivityMarket.id` / `Market.question_id` the shared Gamma `MarketId` / `QuestionId`?
+13. Meaning of the undocumented `ClobMarketDetails` keys `cbos` (bool) and `sd` (equals the
+    listing's `seconds_delay`, values 1 and 3; what is delayed?). *Current:* modelled, documented
+    as unknown.
+14. `LiveActivityMarket.id` is the Gamma market id and `Market.question_id` is Gamma's `questionID`
+    (confirmed live). Switch them to the shared `MarketId` / `QuestionId` types? That changes
+    `LiveActivityMarket.id` serialization from a number to a string.
 
 ## Data API v2
 
-18. `ComboPosition.first_entry_at` on NULL-tail rows (modelled `Option`, `""` → `None`).
-19. Unranked leaderboard rank: `0` (endpoint text) or `null` (schema)? *Current:* raw.
-20. `prices-history`: does a cursor page need the window restated; is the 15-day cap a 400 or clamp?
-21. Validate `user` as an EVM address on every route (only two document the format)?
-22. `source_fidelity` vocabulary; activity `type` values for deposits/withdrawals; `/v2/trades`
-    `condition` + `event_id` together; `title` 200-char limit in chars or bytes; builders board
-    `builder` vs `builder_name`.
+15. Should combo condition ids get their own `ComboConditionId` newtype (breaking)? Note that
+    `leg_condition_id` differs between `/positions/combos` (62-digit) and `/activity/combos`
+    (bytes32) for the same leg.
 
-## Relayer / Bridge
+## Relayer / Bridge / Combos
 
-23. Bridge `estInputUsd` / `estOutputUsd` descriptions look swapped; `appFeePercent` scale (1 = 1%?).
-24. Where the `missing_builder_code` warning appears; are `POST /deposit` / `/withdraw` idempotent?
-25. Can `createdTimeMs` be fractional?
+16. Where the `missing_builder_code` warning appears; are `POST /deposit` / `/withdraw` idempotent?
+    (Not observable read-only.)
+17. Combos `limit`: live accepts up to at least `10000` (`20000` is a `400`); the SDK caps at
+    `1000`. Raise it?
 
 ## WebSockets
 
-26. Units of market-channel `timestamp` on `tick_size_change`, `best_bid_ask`, `new_market`,
-    `market_resolved` (examples look like ms; kept raw). Meaning of subscription `level` 1–3.
-27. How is an empty book side sent (`""` assumed → `None`)? Can the market channel send JSON arrays?
-28. PolyBolt `price.polymarket`: public (spec) or credentials required (overview page)? Is "64 KB"
-    64,000 or 65,536 bytes (64,000 used)?
-29. Server heartbeat tolerance and reconnection policy (idle-timeout defaults are 3× the documented
-    heartbeat).
+18. Meaning of market-channel subscription `level` 1–3 (no observable effect live).
+19. Sports channel: `elapsed`, `turn`, `turnProviderId` and `sportradarGameId` were seen on early
+    frames but their value types were never captured (modelled as optional strings). Recapture
+    during US/EU game hours. `status` casing varies (`inprogress`, `InProgress`, `running`): keep a
+    raw string with `status_is`, or a case-insensitive enum?
+20. Market-channel `new_market` `fee_schedule`: every field is `Option` because few frames were
+    seen. Tighten?
+21. PolyBolt: is "64 KB" 64,000 or 65,536 bytes (64,000 used)? Reconnection policy for all channels.

@@ -527,7 +527,7 @@ async fn pin_market_listing_shape() {
     );
 }
 
-/// Pins the answers to open questions 17: `LiveActivityMarket.id` is the Gamma market id and
+/// Pins a former open question: `LiveActivityMarket.id` is the Gamma market id and
 /// `Market.question_id` is the Gamma `questionID` (compared on one sampling market).
 #[tokio::test]
 #[ignore = "live network"]
@@ -849,7 +849,7 @@ async fn get_prices_history() {
     );
 }
 
-/// Every [`PriceHistoryInterval`] variant (open question 16), with a fidelity the server
+/// Every [`PriceHistoryInterval`] variant, with a fidelity the server
 /// accepts for it. Collects failures so one bad interval does not hide the others.
 #[tokio::test]
 #[ignore = "live network"]

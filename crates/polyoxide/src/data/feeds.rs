@@ -721,8 +721,8 @@ impl ListComboActivity {
     ///
     /// A combo condition id is `0x` plus **62** hex digits live (not the 64 of a regular
     /// condition id): copy it from a [`ComboActivity::combo_condition_id`] or a
-    /// combo position. The server answers `400` to any other length; the client only
-    /// checks for `0x` plus 1 to 64 hex digits.
+    /// combo position. Any other length is a `400` live, so the client
+    /// rejects it before sending.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -749,7 +749,7 @@ impl ListComboActivity {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
-    /// is above 1000, a condition id is not `0x` followed by 1 to 64 hex digits, or more
+    /// is above 1000, a condition id is not `0x` followed by 62 hex digits, or more
     /// than 20 distinct condition ids are given; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<ComboActivity>> {
         let query = self.query(self.cursor.as_deref())?;
@@ -1078,8 +1078,8 @@ mod tests {
         );
     }
 
-    /// Combo condition ids are `0x` plus 62 hex digits live: accepted by the combo
-    /// filter, while the client only rejects what cannot be one.
+    /// Combo condition ids are `0x` plus exactly 62 hex digits live; the combo filter
+    /// accepts only that (a regular 64-digit condition id is a `400` live).
     #[test]
     fn combo_activity_condition_ids() {
         let client = DataClient::new().unwrap();
@@ -1089,6 +1089,10 @@ mod tests {
             "0xzz",
             "0x03 aa",
             "",
+            "0x03",
+            CONDITION,
+            &format!("0x{:061x}", 1),
+            &format!("0x{:063x}", 1),
             &format!("0x{:065x}", 1),
         ] {
             assert_eq!(
@@ -1102,7 +1106,10 @@ mod tests {
                 "{bad:?}"
             );
         }
-        for ok in [COMBO_CONDITION, "0x03", CONDITION] {
+        for ok in [
+            COMBO_CONDITION,
+            &COMBO_CONDITION.to_uppercase().replacen("0X", "0x", 1),
+        ] {
             let q = client
                 .list_combo_activity(WALLET)
                 .conditions([ok])

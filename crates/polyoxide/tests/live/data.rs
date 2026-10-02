@@ -1967,7 +1967,7 @@ async fn get_leaderboard_standing() {
         .unwrap();
 }
 
-/// Open question 19: what an unranked wallet looks like.
+/// What an unranked wallet looks like (rank `null`, never `0`).
 #[tokio::test]
 #[ignore = "live network"]
 async fn get_leaderboard_standing_unranked() {

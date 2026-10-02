@@ -151,7 +151,7 @@ async fn list_transactions_for_bridge_address() {
         .unwrap();
     assert!(!page.items().is_empty() && page.items().len() <= 3);
     let path = format!("/status/{DOCUMENTED_BRIDGE_ADDRESS}");
-    // Open question 25: `createdTimeMs` is always an integer (the model decodes it as
+    // `createdTimeMs` is always an integer (the model decodes it as
     // integer milliseconds, so a fractional value would fail the checks below).
     let all = get(BRIDGE, &path, &[("limit", "100")]).await;
     for transaction in all.json["transactions"].as_array().unwrap() {

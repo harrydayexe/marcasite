@@ -439,15 +439,20 @@ async fn list_combo_positions_validates_before_sending() {
         .await
         .unwrap_err();
     assert!(matches!(&err, Error::Validation(v) if v.parameter() == "status"));
-    // Combo condition ids are `0x` plus 62 hex digits live: only what cannot be one is
-    // rejected client-side.
-    let err = data
-        .list_combo_positions(WALLET)
-        .conditions(["0xzz"])
-        .send()
-        .await
-        .unwrap_err();
-    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "condition"));
+    // Combo condition ids are `0x` plus exactly 62 hex digits live; anything else,
+    // including a regular 64-digit condition id, is rejected client-side.
+    for bad in ["0xzz", "0x03", &format!("0x{}", "a".repeat(64))] {
+        let err = data
+            .list_combo_positions(WALLET)
+            .conditions([bad])
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::Validation(v) if v.parameter() == "condition"),
+            "{bad}"
+        );
+    }
 }
 
 #[tokio::test]
