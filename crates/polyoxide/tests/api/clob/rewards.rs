@@ -1,14 +1,14 @@
 //! Rewards configurations: current, per market, multi-market.
 
-use futures_util::TryStreamExt as _;
+use futures_util::{StreamExt as _, TryStreamExt as _};
 use polyoxide::{
-    Decimal, Error,
-    clob::{MAX_REWARDS_MARKETS_PAGE_SIZE, RewardsMarketsOrderBy, SortDirection},
+    Decimal, Error, StatusCode,
+    clob::{END_CURSOR, MAX_REWARDS_MARKETS_PAGE_SIZE, RewardsMarketsOrderBy, SortDirection},
     types::ConditionId,
 };
 use serde_json::json;
 use wiremock::{
-    Mock,
+    Mock, ResponseTemplate,
     matchers::{any, method, path, query_param, query_param_is_missing},
 };
 
@@ -59,7 +59,7 @@ async fn current_rewards_page() {
         .await;
 
     let page = clob(&server)
-        .get_current_rewards()
+        .list_current_rewards()
         .sponsored(true)
         .send()
         .await
@@ -88,7 +88,7 @@ async fn current_rewards_stream_walks_cursors_until_lte() {
         .await;
 
     let ids: Vec<_> = clob(&server)
-        .get_current_rewards()
+        .list_current_rewards()
         .into_stream()
         .map_ok(|r| r.condition_id)
         .try_collect()
@@ -109,8 +109,8 @@ async fn invalid_cursor_is_an_api_error() {
         .await;
 
     let err = clob(&server)
-        .get_current_rewards()
-        .next_cursor("nope")
+        .list_current_rewards()
+        .cursor("nope")
         .send()
         .await
         .unwrap_err();
@@ -157,14 +157,14 @@ async fn raw_rewards_for_market() {
         .await;
 
     let page = clob(&server)
-        .get_raw_rewards_for_market(CONDITION_ID)
+        .list_raw_rewards_for_market(CONDITION_ID)
         .sponsored(false)
-        .next_cursor("MTAw")
+        .cursor("MTAw")
         .send()
         .await
         .unwrap();
     assert!(page.is_last_page());
-    let market = &page.data[0];
+    let market = &page.items()[0];
     assert_eq!(market.tokens.len(), 2);
     assert_eq!(
         market.rewards_config.as_ref().unwrap()[0].total_days,
@@ -189,7 +189,7 @@ async fn raw_rewards_for_market_stream() {
         .await;
 
     let markets: Vec<_> = clob(&server)
-        .get_raw_rewards_for_market(CONDITION_ID)
+        .list_raw_rewards_for_market(CONDITION_ID)
         .into_stream()
         .try_collect()
         .await
@@ -258,12 +258,10 @@ async fn markets_with_rewards_sends_every_filter() {
 
     let d = |s: &str| -> Decimal { s.parse().unwrap() };
     let page = clob(&server)
-        .get_markets_with_rewards()
+        .list_markets_with_rewards()
         .q("trump")
-        .tag_slug("sports")
-        .tag_slug("politics")
-        .event_id("100")
-        .event_id("200")
+        .tag_slugs(["sports", "politics"])
+        .event_ids(["100", "200"])
         .event_title("election")
         .order_by(RewardsMarketsOrderBy::Volume24hr)
         .position(SortDirection::Desc)
@@ -273,13 +271,13 @@ async fn markets_with_rewards_sends_every_filter() {
         .max_spread(d("0.2"))
         .min_price(d("0.1"))
         .max_price(d("0.9"))
-        .next_cursor("MA==")
+        .cursor("MA==")
         .page_size(MAX_REWARDS_MARKETS_PAGE_SIZE)
         .send()
         .await
         .unwrap();
-    assert_eq!(page.next_page_cursor(), Some("NQ=="));
-    let market = &page.data[0];
+    assert_eq!(page.next_cursor(), Some("NQ=="));
+    let market = &page.items()[0];
     assert_eq!(market.market_id, "248849");
     assert_eq!(market.spread, Some(d("0.12")));
 }
@@ -294,7 +292,7 @@ async fn markets_with_rewards_page_size_limit() {
         .await;
 
     let err = clob(&server)
-        .get_markets_with_rewards()
+        .list_markets_with_rewards()
         .page_size(MAX_REWARDS_MARKETS_PAGE_SIZE + 1)
         .send()
         .await
@@ -303,4 +301,169 @@ async fn markets_with_rewards_page_size_limit() {
         panic!("expected Error::Validation, got {err:?}")
     };
     assert_eq!(v.parameter(), "page_size");
+}
+
+/// A `PaginatedMultiMarketInfo` page with one market per id, based on the
+/// `GET /rewards/markets/multi` example in docs/specs/clob-openapi.yaml.
+fn multi_page(market_ids: &[&str], next_cursor: &str) -> String {
+    let mut page: serde_json::Value = serde_json::from_str(MULTI).unwrap();
+    let template = page["data"][0].clone();
+    let data: Vec<_> = market_ids
+        .iter()
+        .map(|id| {
+            let mut market = template.clone();
+            market["market_id"] = (*id).into();
+            market
+        })
+        .collect();
+    page["count"] = data.len().into();
+    page["data"] = data.into();
+    page["next_cursor"] = next_cursor.into();
+    page.to_string()
+}
+
+#[tokio::test]
+async fn markets_with_rewards_stream_walks_cursors_until_lte() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/rewards/markets/multi"))
+        .and(query_param("tag_slug", "politics"))
+        .and(query_param("page_size", "2"))
+        .and(query_param_is_missing("next_cursor"))
+        .respond_with(json(&multi_page(&["1", "2"], "Mg==")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rewards/markets/multi"))
+        .and(query_param("tag_slug", "politics"))
+        .and(query_param("page_size", "2"))
+        .and(query_param("next_cursor", "Mg=="))
+        .respond_with(json(&multi_page(&["3"], END_CURSOR)))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ids: Vec<String> = clob(&server)
+        .list_markets_with_rewards()
+        .tag_slugs(["politics"])
+        .page_size(2)
+        .into_stream()
+        .map_ok(|m| m.market_id.into_inner())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(ids, ["1", "2", "3"]);
+}
+
+#[tokio::test]
+async fn markets_with_rewards_stream_stops_at_first_error() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/rewards/markets/multi"))
+        .and(query_param_is_missing("next_cursor"))
+        .respond_with(json(&multi_page(&["1"], "Mg==")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rewards/markets/multi"))
+        .and(query_param("next_cursor", "Mg=="))
+        .respond_with(api_error(400, "Invalid next_cursor"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let results: Vec<_> = clob(&server)
+        .list_markets_with_rewards()
+        .into_stream()
+        .collect()
+        .await;
+    assert_eq!(results.len(), 2);
+    assert!(results[0].is_ok());
+    let err = results[1].as_ref().unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn reward_streams_resumed_at_end_cursor_send_nothing() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json(MULTI))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    let markets: Vec<_> = client
+        .list_markets_with_rewards()
+        .cursor(END_CURSOR)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(markets.is_empty());
+    let rewards: Vec<_> = client
+        .list_current_rewards()
+        .cursor(END_CURSOR)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert!(rewards.is_empty());
+}
+
+#[tokio::test]
+async fn raw_rewards_rejects_ids_that_are_not_condition_ids() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json(MULTI))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    // An empty id is documented as `400 Invalid market`; `current` and `multi` would reach
+    // the other `/rewards/markets/...` endpoints.
+    for id in ["", "current", "multi"] {
+        let err = client
+            .list_raw_rewards_for_market(id)
+            .send()
+            .await
+            .unwrap_err();
+        let Error::Validation(v) = &err else {
+            panic!("expected Error::Validation for {id:?}, got {err:?}")
+        };
+        assert_eq!(v.parameter(), "condition_id");
+    }
+}
+
+/// `429` with the documented `retry_after_seconds` field and a `Retry-After` header: the
+/// header wins.
+#[tokio::test]
+async fn rate_limited_listing() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/rewards/markets/current"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "7")
+                .set_body_json(json!({
+                    "error": "rate limited",
+                    "code": "TOO_MANY_REQUESTS",
+                    "retry_after_seconds": 3
+                })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = clob(&server)
+        .list_current_rewards()
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::RateLimited(_)), "{err:?}");
+    assert_eq!(err.retry_after(), Some(std::time::Duration::from_secs(7)));
+    assert_eq!(err.api_error().unwrap().code(), Some("TOO_MANY_REQUESTS"));
 }

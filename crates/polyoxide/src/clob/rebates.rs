@@ -8,7 +8,7 @@ use polyoxide_core::{
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::ClobClient;
+use super::{ClobClient, types::require_id};
 
 /// Fees rebated to a maker on one market and date (`components/schemas/RebatedFees`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,7 +22,7 @@ pub struct RebatedFees {
     pub asset_address: Address,
     /// The maker's address.
     pub maker_address: Address,
-    /// Rebated fee amount in USDC.
+    /// Rebated fee amount in USDC (a numeric string on the wire).
     pub rebated_fees_usdc: Decimal,
 }
 
@@ -34,17 +34,20 @@ impl ClobClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error). An invalid date or maker address is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// [`Error::Validation`](crate::Error::Validation) if `maker_address` is empty. An
+    /// invalid date or maker address is an [`Error::Api`](crate::Error::Api) with status
+    /// `400`. See [`Error`](crate::Error) for the other cases.
     pub async fn get_current_rebated_fees(
         &self,
         date: NaiveDate,
         maker_address: impl Into<Address>,
     ) -> Result<Vec<RebatedFees>> {
+        let maker_address = maker_address.into();
+        require_id("maker_address", maker_address.as_str())?;
         let mut query = Query::new();
         query
             .push("date", date.format("%Y-%m-%d"))
-            .push("maker_address", maker_address.into());
+            .push("maker_address", maker_address);
         self.transport
             .get(&["rebates", "current"])
             .query(query)
@@ -56,6 +59,7 @@ impl ClobClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clob::types::test_util::round_trip;
 
     /// Example response of `GET /rebates/current` in docs/specs/clob-openapi.yaml
     /// (docs/api-reference/rebates/get-current-rebated-fees-for-a-maker.md).
@@ -68,7 +72,7 @@ mod tests {
             "maker_address": "0xFeA4cB3dD4ca7CefD3368653B7D6FF9BcDFca604",
             "rebated_fees_usdc": "0.237519"
         }]"#;
-        let fees: Vec<RebatedFees> = serde_json::from_str(json).unwrap();
+        let fees: Vec<RebatedFees> = round_trip(json);
         assert_eq!(fees[0].date, NaiveDate::from_ymd_opt(2026, 2, 27).unwrap());
         assert_eq!(
             fees[0].maker_address,
@@ -78,9 +82,5 @@ mod tests {
             fees[0].rebated_fees_usdc,
             "0.237519".parse::<Decimal>().unwrap()
         );
-
-        let again: Vec<RebatedFees> =
-            serde_json::from_str(&serde_json::to_string(&fees).unwrap()).unwrap();
-        assert_eq!(again, fees);
     }
 }

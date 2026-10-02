@@ -4,7 +4,9 @@ use polyoxide_core::{HttpClient, Result, Service, Transport, Url, transport::par
 
 /// Client for the CLOB API (`https://clob.polymarket.com`).
 ///
-/// Covers public market data: order books, prices, spreads, markets, price history, rewards and rebates. Cheap to clone: clones share one connection pool.
+/// Covers the public endpoints: order books, prices, spreads, markets, price history,
+/// rewards, rebates, builder trades and the server time (see the [module docs](crate::clob)
+/// for the full list). Cheap to clone: clones share one connection pool.
 ///
 /// ```no_run
 /// # async fn run() -> polyoxide::Result<()> {

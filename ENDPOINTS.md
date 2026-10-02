@@ -87,20 +87,20 @@ Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](do
 | [x] | `GET` | `/book` | [local](docs/api-reference/market-data/get-order-book.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-book) | `ClobClient::get_order_book` |
 | [x] | `GET` | `/books` | spec only (`getBooksGet`) | `ClobClient::get_order_books` |
 | [x] | `POST` | `/books` | [local](docs/api-reference/market-data/get-order-books-request-body.md) / [online](https://docs.polymarket.com/api-reference/market-data/get-order-books-request-body) | `ClobClient::get_order_books_by_body` |
-| [x] | `GET` | `/simplified-markets` | [local](docs/api-reference/markets/get-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-simplified-markets) | `ClobClient::get_simplified_markets` |
-| [x] | `GET` | `/sampling-markets` | [local](docs/api-reference/markets/get-sampling-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-markets) | `ClobClient::get_sampling_markets` |
-| [x] | `GET` | `/sampling-simplified-markets` | [local](docs/api-reference/markets/get-sampling-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-simplified-markets) | `ClobClient::get_sampling_simplified_markets` |
+| [x] | `GET` | `/simplified-markets` | [local](docs/api-reference/markets/get-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-simplified-markets) | `ClobClient::list_simplified_markets` |
+| [x] | `GET` | `/sampling-markets` | [local](docs/api-reference/markets/get-sampling-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-markets) | `ClobClient::list_sampling_markets` |
+| [x] | `GET` | `/sampling-simplified-markets` | [local](docs/api-reference/markets/get-sampling-simplified-markets.md) / [online](https://docs.polymarket.com/api-reference/markets/get-sampling-simplified-markets) | `ClobClient::list_sampling_simplified_markets` |
 | [x] | `GET` | `/clob-markets/{condition_id}` | [local](docs/api-reference/markets/get-clob-market-info.md) / [online](https://docs.polymarket.com/api-reference/markets/get-clob-market-info) | `ClobClient::get_clob_market_info` |
 | [x] | `GET` | `/markets-by-token/{token_id}` | [local](docs/api-reference/markets/get-market-by-token.md) / [online](https://docs.polymarket.com/api-reference/markets/get-market-by-token) | `ClobClient::get_market_by_token` |
 | [x] | `POST` | `/markets/live-activity` | spec only (`getMarketsLiveActivity`) | `ClobClient::get_markets_live_activity` |
 | [x] | `GET` | `/markets/live-activity/{condition_id}` | spec only (`getMarketLiveActivity`) | `ClobClient::get_market_live_activity` |
 | [x] | `GET` | `/prices-history` | [local](docs/api-reference/markets/get-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-prices-history) | `ClobClient::get_prices_history` |
 | [x] | `POST` | `/batch-prices-history` | [local](docs/api-reference/markets/get-batch-prices-history.md) / [online](https://docs.polymarket.com/api-reference/markets/get-batch-prices-history) | `ClobClient::get_batch_prices_history` |
-| [x] | `GET` | `/rewards/markets/current` | [local](docs/api-reference/rewards/get-current-active-rewards-configurations.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-current-active-rewards-configurations) | `ClobClient::get_current_rewards` |
-| [x] | `GET` | `/rewards/markets/{condition_id}` | [local](docs/api-reference/rewards/get-raw-rewards-for-a-specific-market.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-raw-rewards-for-a-specific-market) | `ClobClient::get_raw_rewards_for_market` |
-| [x] | `GET` | `/rewards/markets/multi` | [local](docs/api-reference/rewards/get-multiple-markets-with-rewards.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-multiple-markets-with-rewards) | `ClobClient::get_markets_with_rewards` |
+| [x] | `GET` | `/rewards/markets/current` | [local](docs/api-reference/rewards/get-current-active-rewards-configurations.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-current-active-rewards-configurations) | `ClobClient::list_current_rewards` |
+| [x] | `GET` | `/rewards/markets/{condition_id}` | [local](docs/api-reference/rewards/get-raw-rewards-for-a-specific-market.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-raw-rewards-for-a-specific-market) | `ClobClient::list_raw_rewards_for_market` |
+| [x] | `GET` | `/rewards/markets/multi` | [local](docs/api-reference/rewards/get-multiple-markets-with-rewards.md) / [online](https://docs.polymarket.com/api-reference/rewards/get-multiple-markets-with-rewards) | `ClobClient::list_markets_with_rewards` |
 | [x] | `GET` | `/rebates/current` | [local](docs/api-reference/rebates/get-current-rebated-fees-for-a-maker.md) / [online](https://docs.polymarket.com/api-reference/rebates/get-current-rebated-fees-for-a-maker) | `ClobClient::get_current_rebated_fees` |
-| [x] | `GET` | `/builder/trades` | [local](docs/api-reference/trade/get-builder-trades.md) / [online](https://docs.polymarket.com/api-reference/trade/get-builder-trades) | `ClobClient::get_builder_trades` |
+| [x] | `GET` | `/builder/trades` | [local](docs/api-reference/trade/get-builder-trades.md) / [online](https://docs.polymarket.com/api-reference/trade/get-builder-trades) | `ClobClient::list_builder_trades` |
 
 ## Data API v2
 
