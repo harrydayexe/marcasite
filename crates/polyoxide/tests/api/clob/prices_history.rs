@@ -133,6 +133,72 @@ async fn batch_prices_history_limit_is_enforced() {
     assert_eq!(v.parameter(), "markets");
 }
 
+/// The server answers `400` for `1m` below a fidelity of 10 and `1w` below 5 (also when the
+/// fidelity is omitted), so these are rejected before sending.
+#[tokio::test]
+async fn interval_fidelity_minimums_are_enforced() {
+    let server = common::server().await;
+    Mock::given(any())
+        .respond_with(json("{}"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    let is_fidelity =
+        |err: &Error| matches!(err, Error::Validation(v) if v.parameter() == "fidelity");
+    for (interval, fidelity) in [
+        (PriceHistoryInterval::OneMonth, None),
+        (PriceHistoryInterval::OneMonth, Some(9)),
+        (PriceHistoryInterval::OneWeek, None),
+        (PriceHistoryInterval::OneWeek, Some(4)),
+    ] {
+        let mut single = client.get_prices_history("123").interval(interval.clone());
+        let mut batch = client.get_batch_prices_history(["123"]).interval(interval);
+        if let Some(fidelity) = fidelity {
+            single = single.fidelity(fidelity);
+            batch = batch.fidelity(fidelity);
+        }
+        assert!(is_fidelity(&single.send().await.unwrap_err()));
+        assert!(is_fidelity(&batch.send().await.unwrap_err()));
+    }
+}
+
+#[tokio::test]
+async fn interval_fidelity_minimums_are_accepted() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/prices-history"))
+        .and(query_param("interval", "1m"))
+        .and(query_param("fidelity", "10"))
+        .respond_with(json(r#"{"history":[]}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/prices-history"))
+        .and(query_param("interval", "1w"))
+        .and(query_param("fidelity", "5"))
+        .respond_with(json(r#"{"history":[]}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = clob(&server);
+    for (interval, fidelity) in [
+        (PriceHistoryInterval::OneMonth, 10),
+        (PriceHistoryInterval::OneWeek, 5),
+    ] {
+        client
+            .get_prices_history("123")
+            .interval(interval)
+            .fidelity(fidelity)
+            .send()
+            .await
+            .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn empty_markets_are_rejected_before_sending() {
     let server = common::server().await;

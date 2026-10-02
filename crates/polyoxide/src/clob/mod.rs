@@ -75,11 +75,11 @@
 //! Requests are checked before they are sent, and a violation is an
 //! [`Error::Validation`](crate::Error::Validation) naming the parameter: required ids must
 //! not be empty, required lists (including the request bodies of the batch `POST` forms)
-//! must not be empty, ids in comma-separated lists must not contain a comma, and the
-//! documented limits ([`MAX_LAST_TRADE_PRICES_TOKEN_IDS`],
+//! must not be empty, and the documented limits ([`MAX_LAST_TRADE_PRICES_TOKEN_IDS`],
 //! [`MAX_BATCH_PRICES_HISTORY_MARKETS`], [`MAX_REWARDS_MARKETS_PAGE_SIZE`]) and patterns
-//! (builder codes and markets of [`ClobClient::list_builder_trades`]) are enforced.
-//!
+//! (builder codes and markets of [`ClobClient::list_builder_trades`]) are enforced. The
+//! price-history `fidelity` minimums that the live server enforces for the `1m` and `1w`
+//! intervals ([`MIN_FIDELITY_ONE_MONTH`], [`MIN_FIDELITY_ONE_WEEK`]) are checked as well.
 
 mod client;
 mod market_data;
@@ -104,7 +104,7 @@ pub use markets::{
 };
 pub use prices_history::{
     BatchPricesHistory, GetBatchPricesHistory, GetPricesHistory, MAX_BATCH_PRICES_HISTORY_MARKETS,
-    PriceHistoryInterval, PricePoint, PricesHistory,
+    MIN_FIDELITY_ONE_MONTH, MIN_FIDELITY_ONE_WEEK, PriceHistoryInterval, PricePoint, PricesHistory,
 };
 pub use rebates::RebatedFees;
 pub use rewards::{

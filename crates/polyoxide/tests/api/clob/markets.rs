@@ -57,6 +57,55 @@ async fn simplified_markets_first_page() {
     assert_eq!(data[0].accepting_orders, Some(true));
 }
 
+/// Items of `GET /simplified-markets` as sent live (captured 2026-10-02, trimmed): a closed
+/// market has `rewards.rates: null`, an active one has rates; the page `limit` is 1000 and the
+/// cursor is an opaque base64 string.
+#[tokio::test]
+async fn simplified_markets_live_page() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/simplified-markets"))
+        .respond_with(json(
+            r#"{
+                "data": [
+                    {"condition_id": "0xb62f71aef4c9972ddb75ec977b48156e1cc72e30f0e36b0f12c14de7fd94c777",
+                     "rewards": {"rates": null, "min_size": 0, "max_spread": 0},
+                     "tokens": [
+                        {"token_id": "4764842916462157287738418815193165769775706842468360015637456523413749678364", "outcome": "Yes", "price": 0, "winner": false},
+                        {"token_id": "60746995446126444881122884468632478444639071490773182750920065820822712887585", "outcome": "No", "price": 1, "winner": false}],
+                     "active": true, "closed": true, "archived": false, "accepting_orders": false},
+                    {"condition_id": "0x26ee82bee2493a302d21283cb578f7e2fff2dd15743854f53034d12420863b55",
+                     "rewards": {"rates": [{"asset_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", "rewards_daily_rate": 5}], "min_size": 200, "max_spread": 1.5},
+                     "tokens": [
+                        {"token_id": "11015470973684177829729219287262166995141465048508201953575582100565462316088", "outcome": "Democratic", "price": 0, "winner": false},
+                        {"token_id": "65444287174436666395099524416802980027579283433860283898747701594488689243696", "outcome": "Republican", "price": 1, "winner": true}],
+                     "active": true, "closed": true, "archived": false, "accepting_orders": false}
+                ],
+                "next_cursor": "aWQ6MjQ5Mzk2",
+                "limit": 1000,
+                "count": 2
+            }"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let page = clob(&server)
+        .list_simplified_markets()
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.limit, Some(1000));
+    assert_eq!(page.next_cursor(), Some("aWQ6MjQ5Mzk2"));
+    let items = page.items();
+    assert_eq!(items[0].rewards.as_ref().unwrap().rates, None);
+    assert_eq!(
+        items[1].rewards.as_ref().unwrap().rates.as_ref().unwrap()[0].rewards_daily_rate,
+        Some(5.into())
+    );
+    assert_eq!(items[1].tokens.as_ref().unwrap()[1].winner, Some(true));
+}
+
 #[tokio::test]
 async fn simplified_markets_stream_stops_at_end_cursor() {
     let server = common::server().await;
@@ -188,12 +237,13 @@ async fn stream_yields_error_and_ends() {
 #[tokio::test]
 async fn get_clob_market_info() {
     let server = common::server().await;
-    // Fields and examples from `components/schemas/ClobMarketDetails`.
+    // Documented fields from `components/schemas/ClobMarketDetails`, plus the undocumented
+    // keys sent live (`c`, `sd`, `ao`, `aot`, `nr`, `cbos`, `v`; captured 2026-10-02).
     Mock::given(method("GET"))
         .and(path(format!("/clob-markets/{CONDITION_ID}")))
-        .respond_with(json(
-            r#"{"gst":null,"r":{},"t":[{"t":"71321045679252212594626385532706912750332728571942532289631379312455583992563","o":"Yes"}],"mos":5,"mts":0.01,"mbf":0,"tbf":0,"rfqe":false,"itode":true,"ibce":true,"fd":{"r":0.02,"e":2,"to":true},"oas":3}"#,
-        ))
+        .respond_with(json(&format!(
+            r#"{{"gst":null,"r":{{}},"t":[{{"t":"71321045679252212594626385532706912750332728571942532289631379312455583992563","o":"Yes"}}],"c":"{CONDITION_ID}","mos":5,"mts":0.01,"mbf":0,"tbf":0,"rfqe":false,"itode":true,"ao":true,"nr":true,"cbos":true,"aot":"2025-09-18T20:07:36Z","sd":3,"ibce":true,"fd":{{"r":0.02,"e":2,"to":true}},"v":"v1","oas":3}}"#,
+        )))
         .expect(1)
         .mount(&server)
         .await;
@@ -205,6 +255,16 @@ async fn get_clob_market_info() {
     assert_eq!(info.min_tick_size, Some("0.01".parse().unwrap()));
     assert_eq!(info.taker_order_delay_enabled, Some(true));
     assert_eq!(info.min_order_age_seconds, Some(3));
+    assert_eq!(info.condition_id, Some(ConditionId::from(CONDITION_ID)));
+    assert_eq!(info.seconds_delay, Some(3));
+    assert_eq!(info.accepting_orders, Some(true));
+    assert_eq!(
+        info.accepting_order_timestamp.map(|t| t.timestamp()),
+        Some(1_758_226_056)
+    );
+    assert_eq!(info.neg_risk, Some(true));
+    assert_eq!(info.cbos, Some(true));
+    assert_eq!(info.version.as_deref(), Some("v1"));
     assert_eq!(info.tokens.unwrap()[0].outcome.as_deref(), Some("Yes"));
 }
 

@@ -544,8 +544,8 @@ async fn get_clob_market_info() {
 }
 
 /// Pins SPEC_DEVIATIONS.md "ClobMarketDetails undocumented keys": `c`, `cbos` and `v` are on
-/// every market, `ao`/`aot` on opened ones, `nr` on neg-risk ones, `sd` on sports ones; and
-/// the SDK models them.
+/// every market, `ao`/`aot` on opened ones, `nr` on neg-risk ones, `sd` (equal to the listing's
+/// `seconds_delay`, omitted when 0) on delayed ones; and the SDK models them.
 #[tokio::test]
 #[ignore = "live network"]
 async fn pin_clob_market_details_undocumented_keys() {
@@ -563,8 +563,11 @@ async fn pin_clob_market_details_undocumented_keys() {
     assert_eq!(info.version.as_deref(), Some("v1"));
     assert!(info.cbos.is_some());
 
+    // `sd` is omitted for the sample market when its delay is 0.
+    assert_eq!(object.contains_key("sd"), info.seconds_delay.is_some());
+
     // Markets that carry the conditional keys, found from the sampling listing: an accepting
-    // market (`ao`, `aot`), a neg-risk one (`nr`) and one with a game start time (`sd`).
+    // market (`ao`, `aot`) and a neg-risk one (`nr`).
     let listing = get(CLOB, "/sampling-markets", &[]).await;
     let markets = listing.json["data"].as_array().unwrap();
     let find = |predicate: &dyn Fn(&Value) -> bool| {
@@ -582,17 +585,32 @@ async fn pin_clob_market_details_undocumented_keys() {
         let info = clob().get_clob_market_info(id.as_str()).await.unwrap();
         assert_eq!(info.neg_risk, Some(true), "{id}");
     }
-    match find(&|m| !m["game_start_time"].is_null()) {
-        Some(id) => {
-            let info = clob().get_clob_market_info(id.as_str()).await.unwrap();
-            assert!(info.game_start_time.is_some(), "{id}");
-            assert!(
-                info.seconds_delay.is_some(),
-                "no `sd` on sports market {id}"
-            );
+
+    // A market with a taker delay (`seconds_delay` 1 or 3, sports markets), a few pages in.
+    let mut cursor: Option<String> = None;
+    for _ in 0..4 {
+        let mut query = Vec::new();
+        if let Some(cursor) = &cursor {
+            query.push(("next_cursor", cursor.as_str()));
         }
-        None => eprintln!("INFO no sports market in the sampling page; `sd` not checked"),
+        let page = get(CLOB, "/sampling-markets", &query).await;
+        if let Some(market) = page.json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["seconds_delay"].as_u64().is_some_and(|d| d > 0))
+        {
+            let id = market["condition_id"].as_str().unwrap();
+            let info = clob().get_clob_market_info(id).await.unwrap();
+            assert_eq!(info.seconds_delay, market["seconds_delay"].as_u64(), "{id}");
+            return;
+        }
+        cursor = page.json["next_cursor"].as_str().map(str::to_owned);
+        if cursor.as_deref() == Some("LTE=") {
+            break;
+        }
     }
+    eprintln!("INFO no market with a seconds_delay in the first sampling pages; `sd` not checked");
 }
 
 /// Decodes the clob-market info of several different markets (closed, neg-risk, with and
@@ -896,6 +914,45 @@ async fn pin_prices_history_interval_rules() {
         "{} vs {}",
         max.len(),
         all.len()
+    );
+}
+
+/// Pins SPEC_DEVIATIONS.md "prices-history window": `startTs`/`endTs` are Unix seconds and
+/// bound the series, except that the server appends one point at the current time even when
+/// `endTs` is in the past.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_prices_history_appends_a_now_point() {
+    let (a, _) = tokens().await;
+    let end = Utc::now() - Duration::days(3);
+    let start = end - Duration::days(2);
+    let history = clob()
+        .get_prices_history(a.as_str())
+        .start_ts(start)
+        .end_ts(end)
+        .fidelity(10)
+        .send()
+        .await
+        .unwrap();
+    let points = history.history.unwrap_or_default();
+    if points.len() < 2 {
+        eprintln!("INFO the sample market has no history in the window; not checked");
+        return;
+    }
+    let (last, rest) = points.split_last().unwrap();
+    let outside = |t: DateTime<Utc>| t > end + Duration::hours(1);
+    assert!(
+        outside(last.timestamp.unwrap()),
+        "no trailing point after endTs: the quirk is gone"
+    );
+    assert!(
+        rest.iter().all(|p| !outside(p.timestamp.unwrap())),
+        "more than one point after endTs"
+    );
+    assert!(
+        rest.iter()
+            .all(|p| p.timestamp.unwrap() >= start - Duration::hours(1)),
+        "points before startTs"
     );
 }
 

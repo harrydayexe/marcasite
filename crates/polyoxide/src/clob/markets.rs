@@ -252,9 +252,9 @@ pub struct ClobMarketDetails {
     #[serde(rename = "c")]
     pub condition_id: Option<ConditionId>,
     /// Delay in seconds applied to marketable orders (wire name `sd`). Undocumented; observed
-    /// live as `3` on sports markets and absent elsewhere. The name follows the
-    /// [`Market::seconds_delay`] field of the market listings; the meaning of `sd` itself is
-    /// inferred, not documented.
+    /// live as `1` or `3` on sports markets and omitted when the delay is 0. It always equals
+    /// the [`Market::seconds_delay`] of the market listings (live check, 2026-10-02); what
+    /// the delay applies to is not documented.
     #[serde(rename = "sd")]
     pub seconds_delay: Option<u64>,
     /// Whether the market accepts orders (wire name `ao`). Undocumented; observed live.
@@ -711,6 +711,56 @@ mod tests {
             Some(1_714_564_800)
         );
         assert_eq!(with_gst.fee_details.unwrap().rate, None);
+    }
+
+    /// Live response of `GET /clob-markets/0x81a5..1a3a` (captured 2026-10-02): the undocumented
+    /// keys `c`, `ao`, `aot`, `nr`, `cbos` and `v` are present, `rfqe` is absent, and the
+    /// rewards object `r` has abbreviated keys.
+    #[test]
+    fn deserializes_live_clob_market_details() {
+        let json = r#"{
+            "r": {"mi": 50, "ma": 4.5, "moas": 4},
+            "t": [
+                {"t": "52634616068523389389514492087655237014427439869589807217055529923225131895030", "o": "Yes"},
+                {"t": "106302272146511626715366732538958019243031587527887799373406690681902311718700", "o": "No"}
+            ],
+            "c": "0x81a537b379a35e4e17c286d3b37394e94bd74c1779bbe9a13670eb991b201a3a",
+            "mos": 5,
+            "mts": 0.001,
+            "mbf": 1000,
+            "tbf": 1000,
+            "ao": true,
+            "nr": true,
+            "cbos": true,
+            "aot": "2025-09-18T20:07:36Z",
+            "ibce": true,
+            "fd": {"r": 0.04, "e": 1, "to": true},
+            "v": "v1"
+        }"#;
+        let details: ClobMarketDetails = round_trip(json);
+        assert_eq!(
+            details.condition_id.as_ref().map(ConditionId::as_str),
+            Some("0x81a537b379a35e4e17c286d3b37394e94bd74c1779bbe9a13670eb991b201a3a")
+        );
+        assert_eq!(details.accepting_orders, Some(true));
+        assert_eq!(
+            details.accepting_order_timestamp.map(|t| t.timestamp()),
+            Some(1_758_226_056)
+        );
+        assert_eq!(details.neg_risk, Some(true));
+        assert_eq!(details.cbos, Some(true));
+        assert_eq!(details.version.as_deref(), Some("v1"));
+        assert_eq!(details.seconds_delay, None);
+        assert_eq!(details.min_tick_size, Some(d("0.001")));
+        assert_eq!(details.maker_base_fee, Some(1000));
+        assert_eq!(details.rfq_enabled, None);
+        assert!(details.rewards.unwrap().contains_key("moas"));
+
+        // `sd` appears on markets with a taker delay, `gst` on sports markets.
+        let sports: ClobMarketDetails =
+            serde_json::from_str(r#"{"gst":"2026-03-13T14:30:00Z","sd":3}"#).unwrap();
+        assert_eq!(sports.seconds_delay, Some(3));
+        assert!(sports.game_start_time.is_some());
     }
 
     /// Examples from `components/schemas/MarketByTokenResponse` in

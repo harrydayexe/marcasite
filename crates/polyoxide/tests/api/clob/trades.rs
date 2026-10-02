@@ -19,33 +19,36 @@ use crate::common;
 const BUILDER: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
 const MARKET: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
 
-/// A `BuilderTradesResponse` page based on the `GET /builder/trades` example in
-/// docs/specs/clob-openapi.yaml.
+/// A `BuilderTradesResponse` page in the live format (item shape captured from
+/// `GET /builder/trades` 2026-10-02: decimal units, empty `builder`, `builderCode`,
+/// `builderFee`).
 fn page(ids: &[&str], next_cursor: &str) -> String {
     let data: Vec<_> = ids
         .iter()
         .map(|id| {
             json!({
                 "id": id,
-                "tradeType": "TAKER",
-                "takerOrderHash": "0xabcdef1234567890abcdef1234567890abcdef12",
-                "builder": BUILDER,
+                "tradeType": "MAKER",
+                "takerOrderHash": "0x3e354a3f471f454d6532caa1a8ac447d771af720bf14b330d541881517b7e31e",
+                "builder": "",
                 "market": MARKET,
                 "assetId": "15871154585880608648532107628464183779895785213830018178010423617714102767076",
                 "side": "BUY",
-                "size": "100000000",
-                "sizeUsdc": "50000000",
+                "size": "5",
+                "sizeUsdc": "2.5",
                 "price": "0.5",
                 "status": "TRADE_STATUS_CONFIRMED",
-                "outcome": "YES",
+                "outcome": "Up",
                 "outcomeIndex": 0,
                 "owner": "f4f247b7-4ac7-ff29-a152-04fda0a8755a",
                 "maker": "0x1234567890123456789012345678901234567890",
                 "transactionHash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 "matchTime": "1700000000",
                 "bucketIndex": 0,
-                "fee": "300000",
-                "feeUsdc": "150000",
+                "fee": "0",
+                "feeUsdc": "0",
+                "builderFee": "0",
+                "builderCode": BUILDER,
                 "err_msg": null,
                 "createdAt": "2024-01-01T00:00:00Z",
                 "updatedAt": "2024-01-01T00:00:00Z"
@@ -90,7 +93,11 @@ async fn builder_trades_sends_filters() {
     assert_eq!(page.next_cursor(), Some("MzAw"));
     let trade = &page.items()[0];
     assert_eq!(trade.id, TradeId::from("trade-123"));
-    assert_eq!(trade.builder, BuilderCode::from(BUILDER));
+    // Live, `builder` is empty and the code is in `builderCode`.
+    assert_eq!(trade.builder, BuilderCode::from(""));
+    assert_eq!(trade.builder_code, Some(BuilderCode::from(BUILDER)));
+    assert_eq!(trade.builder_fee, Some(polyoxide::Decimal::ZERO));
+    assert_eq!(trade.size_usdc, "2.5".parse().unwrap());
     assert_eq!(trade.side, Side::Buy);
     assert_eq!(trade.match_time.timestamp(), 1_700_000_000);
 }
