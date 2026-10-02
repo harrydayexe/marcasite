@@ -5,7 +5,10 @@ use chrono::{DateTime, Utc};
 use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use serde::{Deserialize, Serialize};
 
-use super::{GammaClient, TagId, util::setters};
+use super::{
+    GammaClient, SeriesId, TagId,
+    util::{check_integer_id, setters},
+};
 
 polyoxide_core::string_id! {
     /// A Gamma team id (an integer on the wire).
@@ -55,8 +58,9 @@ pub struct SportsMetadata {
     /// Comma-separated list of tag ids associated with the sport; see
     /// [`tag_ids`](Self::tag_ids).
     pub tags: Option<String>,
-    /// Series identifier linking the sport to a tournament or season series.
-    pub series: Option<String>,
+    /// Series identifier linking the sport to a tournament or season series (a string on
+    /// the wire).
+    pub series: Option<SeriesId>,
 }
 
 impl SportsMetadata {
@@ -98,10 +102,13 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing team is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if `id` is not an
+    ///   integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the team does not exist;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn get_team(&self, id: impl Into<TeamId>) -> Result<Team> {
         let id = id.into();
+        check_integer_id("id", id.as_str())?;
         self.transport.get(&["teams", id.as_str()]).send().await
     }
 
@@ -140,8 +147,8 @@ pub struct ListTeams {
 
 #[derive(Debug, Clone, Default)]
 struct ListTeamsParams {
-    limit: Option<u64>,
-    offset: Option<u64>,
+    limit: Option<u32>,
+    offset: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     league: Vec<String>,
@@ -151,20 +158,21 @@ struct ListTeamsParams {
 
 impl ListTeams {
     setters! {
-        /// Maximum number of teams per page.
-        limit: u64;
-        /// Number of teams to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of teams per page (`limit`; the docs give a minimum of `0` and no
+        /// maximum).
+        limit: u32;
+        /// Number of teams to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Only teams in these leagues.
-        league: many String;
-        /// Only teams with these names.
-        name: many String;
-        /// Only teams with these abbreviations.
-        abbreviation: many String;
+        /// Filter by leagues (`league`, repeated).
+        leagues => league: many String;
+        /// Filter by team names (`name`, repeated).
+        names => name: many String;
+        /// Filter by abbreviations (`abbreviation`, repeated).
+        abbreviations => abbreviation: many String;
     }
 
     async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Team>> {
@@ -186,16 +194,17 @@ impl ListTeams {
     ///
     /// See [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Team>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every team from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error.
+    /// A page shorter than [`limit`](Self::limit) does not end it, because the docs give no
+    /// maximum `limit` and the server may return fewer teams, so the last request returns
+    /// an empty page.
     pub fn into_stream(self) -> Paginated<Team> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -241,6 +250,11 @@ mod tests {
             "series": "10345"
         }"#;
         let sport: SportsMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(sport.series, Some(SeriesId::from("10345")));
+        assert_eq!(
+            serde_json::to_value(&sport).unwrap()["series"],
+            serde_json::json!("10345")
+        );
         let ids: Vec<_> = sport.tag_ids().collect();
         assert_eq!(
             ids,

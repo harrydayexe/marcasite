@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     GammaClient, ImageOptimization,
-    util::{PageParams, setters},
+    util::{PageParams, check_integer_id, check_path_text, setters},
 };
 
 polyoxide_core::string_id! {
@@ -44,7 +44,9 @@ pub struct Comment {
     /// Comment text.
     pub body: Option<String>,
     /// Type of the entity the comment is attached to. The spec types this as a plain
-    /// string (the `parent_entity_type` filter documents `Event`, `Series` and `market`).
+    /// string and documents no values, so it is kept exactly as sent (the
+    /// `parent_entity_type` request filter documents `Event`, `Series` and `market`; see
+    /// [`CommentParentEntityType`]).
     pub parent_entity_type: Option<String>,
     /// Id of the entity the comment is attached to (wire name `parentEntityID`).
     #[serde(rename = "parentEntityID")]
@@ -97,7 +99,8 @@ pub struct CommentProfile {
     pub profile_image: Option<String>,
     /// Optimized profile image metadata.
     pub profile_image_optimized: Option<ImageOptimization>,
-    /// The author's positions (included with `get_positions=true`).
+    /// The author's positions. See the `get_positions` request flag (documented only as a
+    /// boolean).
     pub positions: Option<Vec<CommentPosition>>,
 }
 
@@ -108,7 +111,10 @@ pub struct CommentProfile {
 pub struct CommentPosition {
     /// Outcome token id.
     pub token_id: Option<TokenId>,
-    /// Position size (a string on the wire).
+    /// Position size. The spec types this as a string (`positionSize`); it is parsed as a
+    /// decimal (an empty string or `null` becomes `None`, other non-numeric text fails
+    /// decoding) and serializes back as a JSON string.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub position_size: Option<Decimal>,
 }
 
@@ -146,7 +152,7 @@ pub struct CommentCount {
 }
 
 impl GammaClient {
-    /// Lists comments (offset pagination), typically on one event, series or market.
+    /// Lists comments (offset pagination).
     ///
     /// See <https://docs.polymarket.com/api-reference/comments/list-comments>.
     ///
@@ -173,7 +179,10 @@ impl GammaClient {
         }
     }
 
-    /// Gets the comments of a comment thread by comment id.
+    /// Gets comments by comment id (`GET /comments/{id}`).
+    ///
+    /// The docs do not describe which comments the list holds beyond the summary "Get
+    /// comments by comment id".
     ///
     /// See <https://docs.polymarket.com/api-reference/comments/get-comments-by-comment-id>.
     pub fn get_comments_by_id(&self, id: impl Into<CommentId>) -> GetCommentsById {
@@ -184,7 +193,11 @@ impl GammaClient {
         }
     }
 
-    /// Lists the comments written by a user (offset pagination).
+    /// Lists the comments of a user address (offset pagination).
+    ///
+    /// The spec types `user_address` as a plain string with no pattern, so it is not
+    /// checked against the EVM address pattern; it must only be non-empty and not `.` or
+    /// `..`.
     ///
     /// See <https://docs.polymarket.com/api-reference/comments/get-comments-by-user-address>.
     pub fn list_comments_by_user(&self, user_address: impl Into<Address>) -> ListCommentsByUser {
@@ -206,8 +219,8 @@ pub struct ListComments {
 
 #[derive(Debug, Clone, Default)]
 struct ListCommentsParams {
-    limit: Option<u64>,
-    offset: Option<u64>,
+    limit: Option<u32>,
+    offset: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     parent_entity_type: Option<CommentParentEntityType>,
@@ -218,21 +231,22 @@ struct ListCommentsParams {
 
 impl ListComments {
     setters! {
-        /// Maximum number of comments per page.
-        limit: u64;
-        /// Number of comments to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of comments per page (`limit`; the docs give a minimum of `0` and
+        /// no maximum).
+        limit: u32;
+        /// Number of comments to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Only comments on this type of entity.
+        /// The `parent_entity_type` filter.
         parent_entity_type: CommentParentEntityType;
-        /// Only comments on the entity with this id.
+        /// The `parent_entity_id` filter (an integer).
         parent_entity_id: i64;
-        /// Include the authors' positions.
+        /// The `get_positions` flag (documented only as a boolean).
         get_positions: bool;
-        /// Only comments by holders.
+        /// The `holders_only` filter (documented only as a boolean).
         holders_only: bool;
     }
 
@@ -261,16 +275,17 @@ impl ListComments {
     ///
     /// See [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Comment>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every comment from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error.
+    /// A page shorter than [`limit`](Self::limit) does not end it, because the docs give no
+    /// maximum `limit` and the server may return fewer comments, so the last request
+    /// returns an empty page.
     pub fn into_stream(self) -> Paginated<Comment> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -294,7 +309,7 @@ struct GetCommentsByIdParams {
 
 impl GetCommentsById {
     setters! {
-        /// Include the authors' positions.
+        /// The `get_positions` flag (documented only as a boolean).
         get_positions: bool;
     }
 
@@ -302,8 +317,11 @@ impl GetCommentsById {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if the id is not
+    ///   an integer (one or more ASCII digits), checked before sending;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Comment>> {
+        check_integer_id("id", self.id.as_str())?;
         let mut query = Query::new();
         query.push_opt("get_positions", self.params.get_positions);
         self.client
@@ -326,17 +344,19 @@ pub struct ListCommentsByUser {
 
 impl ListCommentsByUser {
     setters! {
-        /// Maximum number of comments per page.
-        limit: u64;
-        /// Number of comments to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of comments per page (`limit`; the docs give a minimum of `0` and
+        /// no maximum).
+        limit: u32;
+        /// Number of comments to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
     }
 
     async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Comment>> {
+        check_path_text("user_address", self.user_address.as_str())?;
         self.client
             .transport
             .get(&["comments", "user_address", self.user_address.as_str()])
@@ -349,18 +369,21 @@ impl ListCommentsByUser {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `user_address`) if the
+    ///   address is empty, `.` or `..`, checked before sending;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Comment>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every comment from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error.
+    /// A page shorter than [`limit`](Self::limit) does not end it, because the docs give no
+    /// maximum `limit` and the server may return fewer comments, so the last request
+    /// returns an empty page.
     pub fn into_stream(self) -> Paginated<Comment> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -409,6 +432,34 @@ mod tests {
         // `commentID` is an integer on the wire and stays one when re-serialized.
         let value = serde_json::to_value(reaction).unwrap();
         assert_eq!(value["commentID"], serde_json::json!(100));
+    }
+
+    /// `positionSize` is string-typed: `""` is "absent", other non-numeric text fails, and
+    /// the value serializes back as a string.
+    #[test]
+    fn position_size_is_a_string_typed_amount() {
+        let position: CommentPosition =
+            serde_json::from_str(r#"{"tokenId":"1","positionSize":""}"#).unwrap();
+        assert_eq!(position.position_size, None);
+        let position: CommentPosition = serde_json::from_str(r#"{"positionSize":"10.5"}"#).unwrap();
+        assert_eq!(position.position_size, Some(Decimal::new(105, 1)));
+        assert_eq!(
+            serde_json::to_value(&position).unwrap()["positionSize"],
+            serde_json::json!("10.5")
+        );
+        assert!(serde_json::from_str::<CommentPosition>(r#"{"positionSize":"many"}"#).is_err());
+        // An invalid nested amount fails the whole comment.
+        let err = serde_json::from_str::<Comment>(
+            r#"{"profile":{"positions":[{"positionSize":"many"}]}}"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("many"), "{err}");
+        let comment: Comment =
+            serde_json::from_str(r#"{"profile":{"positions":[{"positionSize":""}]}}"#).unwrap();
+        assert_eq!(
+            comment.profile.unwrap().positions.unwrap()[0].position_size,
+            None
+        );
     }
 
     #[test]

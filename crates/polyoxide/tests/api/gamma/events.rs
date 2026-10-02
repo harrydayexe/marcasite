@@ -12,7 +12,10 @@ use wiremock::{
     matchers::{method, path, query_param},
 };
 
-use super::{fixture, json, json_value, pairs, query_of, requests};
+use super::{
+    fixture, internal_error, json, json_value, no_retry_gamma, pairs, query_of, requests,
+    validation_error,
+};
 use crate::common;
 
 #[tokio::test]
@@ -33,10 +36,10 @@ async fn list_events_sends_every_filter_and_decodes() {
         .offset(20)
         .order("volume")
         .ascending(true)
-        .id(["1", "2"])
+        .ids(["1", "2"])
         .tag_id("3")
-        .exclude_tag_id(["4", "5"])
-        .slug(["s"])
+        .exclude_tag_ids(["4", "5"])
+        .slugs(["s"])
         .tag_slug("politics")
         .related_tags(true)
         .active(true)
@@ -416,9 +419,9 @@ async fn list_events_keyset_sends_every_filter() {
         .limit(1)
         .order("volume")
         .ascending(false)
-        .after_cursor("c")
-        .id(["1"])
-        .slug(["s"])
+        .cursor("c")
+        .ids(["1"])
+        .slugs(["s"])
         .closed(true)
         .live(false)
         .featured(true)
@@ -434,13 +437,13 @@ async fn list_events_keyset_sends_every_filter() {
         .end_date_max(at)
         .start_time_min(at)
         .start_time_max(at)
-        .tag_id(["10"])
+        .tag_ids(["10"])
         .tag_slug("sports")
-        .exclude_tag_id(["11"])
+        .exclude_tag_ids(["11"])
         .related_tags(true)
         .tag_match("all")
-        .series_id([SeriesId::from("12")])
-        .game_id([13, 14])
+        .series_ids([SeriesId::from("12")])
+        .game_ids([13, 14])
         .event_date(at)
         .event_week(15)
         .featured_order(true)
@@ -504,7 +507,8 @@ async fn list_events_keyset_sends_every_filter() {
             ("locale", "en"),
         ])
     );
-    assert_eq!(page.events.unwrap().len(), 1);
+    assert_eq!(page.items().len(), 1);
+    assert_eq!(page.next_cursor(), None);
     assert_eq!(page.next_cursor, None);
 }
 
@@ -537,8 +541,8 @@ async fn list_events_keyset_stream_and_validation() {
 
     let err = gamma
         .list_events_keyset()
-        .tag_id(["1", "2"])
-        .exclude_tag_id(["2"])
+        .tag_ids(["1", "2"])
+        .exclude_tag_ids(["02"])
         .send()
         .await
         .unwrap_err();
@@ -573,6 +577,77 @@ async fn list_events_keyset_reports_503() {
     let err = gamma.list_events_keyset().send().await.unwrap_err();
     let api = err.api_error().unwrap();
     assert_eq!(api.status().as_u16(), 503);
+    // Documented as "keyset pagination is not configured": a configuration state, told
+    // apart from other 503s by its error type.
     assert_eq!(api.error_type(), Some("service unavailable"));
-    assert!(err.is_retryable());
+    assert_eq!(api.message(), Some("keyset pagination is not configured"));
+}
+
+#[tokio::test]
+async fn list_events_keyset_reports_documented_422_and_500() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/events/keyset"))
+        .and(query_param("after_cursor", "bogus"))
+        .respond_with(validation_error())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/events/keyset"))
+        .respond_with(internal_error())
+        .mount(&server)
+        .await;
+
+    let gamma = no_retry_gamma(&server);
+    let err = gamma
+        .list_events_keyset()
+        .cursor("bogus")
+        .send()
+        .await
+        .unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status().as_u16(), 422);
+    assert_eq!(api.error_type(), Some("validation error"));
+
+    let err = gamma.list_events_keyset().send().await.unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status().as_u16(), 500);
+    assert_eq!(api.error_type(), Some("internal error"));
+    assert_eq!(api.message(), Some("cannot get the information"));
+}
+
+#[tokio::test]
+async fn list_events_keyset_pages_manually_with_next_cursor() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/events/keyset"))
+        .and(query_param("after_cursor", "c1"))
+        .respond_with(json(r#"{"events":[{"id":"2"}],"next_cursor":""}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/events/keyset"))
+        .respond_with(json(r#"{"events":[{"id":"1"}],"next_cursor":"c1"}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let gamma = common::polymarket(&server).gamma().clone();
+    let mut ids = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut request = gamma.list_events_keyset();
+        if let Some(cursor) = cursor.take() {
+            request = request.cursor(cursor);
+        }
+        let page = request.send().await.unwrap();
+        cursor = page.next_cursor().map(str::to_owned);
+        ids.extend(page.into_items().into_iter().map(|e| e.id.unwrap()));
+        if cursor.is_none() {
+            break;
+        }
+    }
+    // An empty `next_cursor` is the end, like an absent one.
+    assert_eq!(ids, vec![EventId::from("1"), EventId::from("2")]);
 }

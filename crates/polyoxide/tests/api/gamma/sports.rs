@@ -1,7 +1,7 @@
 //! `/teams` and `/sports` endpoints.
 
 use futures_util::TryStreamExt as _;
-use polyoxide::gamma::{TagId, TeamId};
+use polyoxide::gamma::{SeriesId, TagId, TeamId};
 use serde_json::json;
 use wiremock::{
     Mock,
@@ -28,9 +28,9 @@ async fn list_teams_sends_every_filter_and_decodes() {
         .offset(0)
         .order("name")
         .ascending(true)
-        .league(["nba", "nfl"])
-        .name(["Lakers"])
-        .abbreviation(["LAL"])
+        .leagues(["nba", "nfl"])
+        .names(["Lakers"])
+        .abbreviations(["LAL"])
         .send()
         .await
         .unwrap();
@@ -109,6 +109,7 @@ async fn sports_metadata_and_market_types() {
     let gamma = common::polymarket(&server).gamma().clone();
     let sports = gamma.get_sports_metadata().await.unwrap();
     assert_eq!(sports[0].sport.as_deref(), Some("sport-value"));
+    assert_eq!(sports[0].series, Some(SeriesId::from("series-value")));
     assert_eq!(
         sports[0].tag_ids().collect::<Vec<_>>(),
         vec![TagId::from("tags-value")]

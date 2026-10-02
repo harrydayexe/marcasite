@@ -16,13 +16,14 @@ polyoxide_core::string_id! {
 }
 
 polyoxide_core::string_enum! {
-    /// Which related tags to return (the `status` filter of the related-tags endpoints).
+    /// The `status` filter of the related-tags endpoints (the spec documents the values,
+    /// not their meaning).
     pub enum RelatedTagsStatus {
-        /// Related tags with active events.
+        /// The value `active`.
         Active => "active",
-        /// Related tags with closed events.
+        /// The value `closed`.
         Closed => "closed",
-        /// All related tags.
+        /// The value `all`.
         All => "all",
     }
 }
@@ -104,9 +105,6 @@ impl GammaClient {
 
     /// Gets a tag by id.
     ///
-    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the tag does not exist;
-    /// see [`Error::is_not_found`](crate::Error::is_not_found).
-    ///
     /// See <https://docs.polymarket.com/api-reference/tags/get-tag-by-id>.
     pub fn get_tag(&self, id: impl Into<TagId>) -> GetTag {
         GetTag {
@@ -117,8 +115,6 @@ impl GammaClient {
     }
 
     /// Gets a tag by slug.
-    ///
-    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the tag does not exist.
     ///
     /// See <https://docs.polymarket.com/api-reference/tags/get-tag-by-slug>.
     pub fn get_tag_by_slug(&self, slug: impl Into<String>) -> GetTag {
@@ -190,8 +186,8 @@ pub struct ListTags {
 
 #[derive(Debug, Clone, Default)]
 struct ListTagsParams {
-    limit: Option<u64>,
-    offset: Option<u64>,
+    limit: Option<u32>,
+    offset: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     include_template: Option<bool>,
@@ -200,17 +196,18 @@ struct ListTagsParams {
 
 impl ListTags {
     setters! {
-        /// Maximum number of tags per page.
-        limit: u64;
-        /// Number of tags to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of tags per page (`limit`; the docs give a minimum of `0` and no
+        /// maximum).
+        limit: u32;
+        /// Number of tags to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Include tag templates.
+        /// The `include_template` flag (documented only as a boolean).
         include_template: bool;
-        /// Only carousel tags (`true`) or only non-carousel tags (`false`).
+        /// The `is_carousel` filter (documented only as a boolean).
         is_carousel: bool;
     }
 
@@ -238,16 +235,17 @@ impl ListTags {
     ///
     /// See [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Tag>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every tag from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error.
+    /// A page shorter than [`limit`](Self::limit) does not end it, because the docs give no
+    /// maximum `limit` and the server may return fewer tags, so the last request returns an
+    /// empty page.
     pub fn into_stream(self) -> Paginated<Tag> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -271,7 +269,7 @@ struct GetTagParams {
 
 impl GetTag {
     setters! {
-        /// Include the tag template.
+        /// The `include_template` flag (documented only as a boolean).
         include_template: bool;
     }
 
@@ -279,17 +277,22 @@ impl GetTag {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing tag is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if the id
+    ///   is not an integer (parameter `id`) or the slug is empty, `.` or `..` (parameter
+    ///   `slug`);
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the tag does not exist (see
+    ///   [`Error::is_not_found`](crate::Error::is_not_found));
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Tag> {
+        let segments = self.lookup.path("tags", &[])?;
         let mut query = Query::new();
         query.push_opt("include_template", self.params.include_template);
-        let transport = &self.client.transport;
-        let request = match &self.lookup {
-            Lookup::Id(id) => transport.get(&["tags", id.as_str()]),
-            Lookup::Slug(slug) => transport.get(&["tags", "slug", slug.as_str()]),
-        };
-        request.query(query).send().await
+        self.client
+            .transport
+            .get(&segments)
+            .query(query)
+            .send()
+            .await
     }
 }
 
@@ -321,9 +324,9 @@ pub struct GetRelatedTagRelationships {
 
 impl GetRelatedTagRelationships {
     setters! {
-        /// Leave out related tags without events.
+        /// The `omit_empty` flag (documented only as a boolean).
         omit_empty: bool;
-        /// Which related tags to return.
+        /// The `status` filter.
         status: RelatedTagsStatus;
     }
 
@@ -331,14 +334,18 @@ impl GetRelatedTagRelationships {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if the id
+    ///   is not an integer (parameter `id`) or the slug is empty, `.` or `..` (parameter
+    ///   `slug`);
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<RelatedTag>> {
-        let transport = &self.client.transport;
-        let request = match &self.lookup {
-            Lookup::Id(id) => transport.get(&["tags", id.as_str(), "related-tags"]),
-            Lookup::Slug(slug) => transport.get(&["tags", "slug", slug.as_str(), "related-tags"]),
-        };
-        request.query(self.params.query()).send().await
+        let segments = self.lookup.path("tags", &["related-tags"])?;
+        self.client
+            .transport
+            .get(&segments)
+            .query(self.params.query())
+            .send()
+            .await
     }
 }
 
@@ -354,9 +361,9 @@ pub struct GetRelatedTags {
 
 impl GetRelatedTags {
     setters! {
-        /// Leave out related tags without events.
+        /// The `omit_empty` flag (documented only as a boolean).
         omit_empty: bool;
-        /// Which related tags to return.
+        /// The `status` filter.
         status: RelatedTagsStatus;
     }
 
@@ -364,16 +371,18 @@ impl GetRelatedTags {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if the id
+    ///   is not an integer (parameter `id`) or the slug is empty, `.` or `..` (parameter
+    ///   `slug`);
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Tag>> {
-        let transport = &self.client.transport;
-        let request = match &self.lookup {
-            Lookup::Id(id) => transport.get(&["tags", id.as_str(), "related-tags", "tags"]),
-            Lookup::Slug(slug) => {
-                transport.get(&["tags", "slug", slug.as_str(), "related-tags", "tags"])
-            }
-        };
-        request.query(self.params.query()).send().await
+        let segments = self.lookup.path("tags", &["related-tags", "tags"])?;
+        self.client
+            .transport
+            .get(&segments)
+            .query(self.params.query())
+            .send()
+            .await
     }
 }
 

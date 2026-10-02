@@ -3,11 +3,17 @@
 use polyoxide_core::{Query, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{Event, GammaClient, Pagination, Profile, TagId, util::setters};
+use super::{
+    Event, GammaClient, Pagination, Profile, TagId,
+    util::{check_integer_ids, setters},
+};
 
 /// Results of [`GammaClient::search`] (`components/schemas/Search`).
+///
+/// The spec calls this schema `Search`; in this crate [`Search`] is the request builder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[doc(alias = "Search")]
 pub struct SearchResults {
     /// Matching events.
     pub events: Option<Vec<Event>>,
@@ -34,9 +40,11 @@ pub struct SearchTag {
 }
 
 impl GammaClient {
-    /// Searches markets, events and profiles.
+    /// Searches markets, events and profiles (`GET /public-search`).
     ///
-    /// `q` is the (required) search text.
+    /// `q` is the (required) search text. The endpoint is paginated with
+    /// [`page`](Search::page) and reports `pagination.hasMore`; there is no
+    /// `into_stream()` because the docs do not say whether pages are numbered from 0 or 1.
     ///
     /// See <https://docs.polymarket.com/api-reference/search/search-markets-events-and-profiles>.
     ///
@@ -77,8 +85,8 @@ pub struct Search {
 struct SearchParams {
     cache: Option<bool>,
     events_status: Option<String>,
-    limit_per_type: Option<u64>,
-    page: Option<u64>,
+    limit_per_type: Option<u32>,
+    page: Option<u32>,
     events_tag: Vec<String>,
     keep_closed_markets: Option<i64>,
     sort: Option<String>,
@@ -92,31 +100,34 @@ struct SearchParams {
 
 impl Search {
     setters! {
-        /// Whether to use the server-side cache.
+        /// The `cache` flag (documented only as a boolean).
         cache: bool;
-        /// Only events with this status (the spec documents no values).
+        /// The `events_status` filter (a string; the spec documents no values).
         events_status: into String;
-        /// Maximum number of results per result type.
-        limit_per_type: u64;
-        /// Page number.
-        page: u64;
-        /// Only events with these tags.
-        events_tag: many String;
+        /// The `limit_per_type` parameter (an integer).
+        limit_per_type: u32;
+        /// The `page` parameter (an integer; the docs do not say whether pages are numbered
+        /// from 0 or 1).
+        page: u32;
+        /// The `events_tag` filter (repeated strings).
+        events_tags => events_tag: many String;
         /// The `keep_closed_markets` parameter (an integer; the spec documents no values).
         keep_closed_markets: i64;
-        /// Sort field.
+        /// The `sort` parameter (a string; the spec documents no values).
         sort: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Also search tags.
+        /// The `search_tags` flag (documented only as a boolean).
         search_tags: bool;
-        /// Also search profiles.
+        /// The `search_profiles` flag (documented only as a boolean).
         search_profiles: bool;
-        /// Only events with this recurrence.
+        /// The `recurrence` filter (a string; the spec documents no values).
         recurrence: into String;
-        /// Exclude events with these tags.
-        exclude_tag_id: many TagId;
-        /// The `optimized` flag (undocumented beyond its boolean type).
+        /// Tag ids to exclude (`exclude_tag_id`, repeated). The spec types them as
+        /// integers, so an id that is not one or more ASCII digits is rejected before
+        /// sending with [`Error::Validation`](crate::Error::Validation).
+        exclude_tag_ids => exclude_tag_id: many TagId;
+        /// The `optimized` flag (documented only as a boolean).
         optimized: bool;
     }
 
@@ -124,9 +135,13 @@ impl Search {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `exclude_tag_id`) if an
+    ///   [`exclude_tag_ids`](Self::exclude_tag_ids) entry is not an integer, checked before
+    ///   sending;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<SearchResults> {
         let p = &self.params;
+        check_integer_ids("exclude_tag_id", &p.exclude_tag_id)?;
         let mut q = Query::new();
         q.push("q", &self.q)
             .push_opt("cache", p.cache)
