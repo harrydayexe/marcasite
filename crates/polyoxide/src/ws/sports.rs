@@ -311,8 +311,8 @@ pub struct SportResult {
     /// updates that end a game, in place of [`game_id`](Self::game_id).
     pub metadata_game_id: Option<String>,
     /// League abbreviation (`leagueAbbreviation`), lower case: observed `atp`, `wta`,
-    /// `wta challenger`, `challenger`, `cricket`, `mlbb`, `lol`, `cs2`, `r6siege`, `val`
-    /// and `ow`.
+    /// `wta challenger`, `challenger`, `cricket`, `mlbb`, `lol`, `cs2`, `r6siege`, `val`,
+    /// `dota2` and `ow`.
     pub league_abbreviation: String,
     /// Home team or player (`homeTeam`). Absent on the updates that end a game.
     pub home_team: Option<String>,
@@ -328,7 +328,7 @@ pub struct SportResult {
     /// `"000-000|1-1|Bo3"` (esports: round score, map score, series format).
     pub score: String,
     /// Current period, kept as sent: observed `"S1"`-`"S3"` (tennis sets), `"1/3"`-`"3/3"`
-    /// and `"2/5"` (esports maps), `"FT"` (final) and `"Live"`. The spec's list (`1H`,
+    /// and `"2/5"` (esports maps), `"FT"` (final) and `"Live"` / `"LIVE"` (mixed case). The spec's list (`1H`,
     /// `Q1`, `Top 1st`, ...) was not observed on any live frame.
     pub period: String,
     /// Elapsed time in the current period, kept as sent (the spec says `MM:SS` or an empty

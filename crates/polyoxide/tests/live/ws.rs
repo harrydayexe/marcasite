@@ -374,6 +374,63 @@ async fn market_channel_custom_features_sdk() {
     }
 }
 
+/// SPEC_DEVIATIONS.md, WebSocket market: `new_market` carries the undocumented
+/// `taker_base_fee`, `fees_enabled` and `fee_schedule`. New (short-lived) markets are
+/// announced to every `custom_feature_enabled` subscriber; if none is announced within the
+/// window the test only reports it, because nothing can be pinned then.
+#[tokio::test]
+#[ignore = "live network"]
+async fn market_channel_new_market_fee_fields() {
+    let s = sample().await;
+    let raw = capture(
+        MARKET_URL,
+        Some(market_hello(&s.token_ids, true)),
+        Some("PING"),
+        Duration::from_secs(60),
+        usize::MAX,
+    )
+    .await;
+    let new_markets: Vec<Value> = raw
+        .frames
+        .iter()
+        .filter_map(|f| serde_json::from_str::<Value>(f).ok())
+        .flat_map(|v| match v {
+            Value::Array(items) => items,
+            other => vec![other],
+        })
+        .filter(|v| v["event_type"] == "new_market")
+        .collect();
+    if new_markets.is_empty() {
+        eprintln!("NOTE no new_market event within 60 s: fee fields not pinned this run");
+        return;
+    }
+    for frame in &new_markets {
+        assert!(frame["taker_base_fee"].is_string(), "{frame}");
+        assert!(frame["fees_enabled"].is_boolean(), "{frame}");
+        let schedule = &frame["fee_schedule"];
+        for key in ["exponent", "rate", "rebate_rate"] {
+            assert!(schedule[key].is_string(), "{key} in {frame}");
+        }
+        assert!(schedule["taker_only"].is_boolean(), "{frame}");
+        let event: MarketEvent = serde_json::from_value(frame.clone()).unwrap();
+        let MarketEvent::NewMarket(market) = event else {
+            panic!("not a NewMarket: {event:?}");
+        };
+        assert!(market.taker_base_fee.is_some() && market.fees_enabled.is_some());
+        assert!(market.fee_schedule.is_some(), "{market:?}");
+        // Every timestamp on the channel is Unix milliseconds.
+        assert!(
+            within_a_day(market.timestamp_millis().unwrap()),
+            "{market:?}"
+        );
+        check_value(
+            "WS market new_market",
+            frame,
+            &MarketEvent::NewMarket(market),
+        );
+    }
+}
+
 /// Adds a token to a running subscription with `subscribe`, then removes it.
 #[tokio::test]
 #[ignore = "live network"]

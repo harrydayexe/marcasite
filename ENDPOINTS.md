@@ -158,7 +158,7 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-o
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` |
+| [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` (page size differs from the spec: see `SPEC_DEVIATIONS.md`) |
 
 ## WebSocket channels (public)
 
@@ -168,7 +168,7 @@ defaults (override with `*ChannelBuilder::url`).
 | Status | Channel | URL | Docs | Rust |
 |---|---|---|---|---|
 | [x] | Market channel | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | [local](docs/api-reference/wss/market.md) / [online](https://docs.polymarket.com/api-reference/wss/market), spec `docs/specs/asyncapi.json` | `MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)`, also on the cloneable `MarketChannelHandle` from `handle()` |
-| [x] | Sports channel | `wss://sports-api.polymarket.com/ws` | [local](docs/api-reference/wss/sports.md) / [online](https://docs.polymarket.com/api-reference/wss/sports), spec `docs/specs/asyncapi-sports.json` | `SportsChannel::connect()` → `Stream<Item = Result<SportsEvent>>` |
+| [x] | Sports channel | `wss://sports-api.polymarket.com/ws` | [local](docs/api-reference/wss/sports.md) / [online](https://docs.polymarket.com/api-reference/wss/sports), spec `docs/specs/asyncapi-sports.json` | `SportsChannel::connect()` → `Stream<Item = Result<SportsEvent>>` (live shape and heartbeat differ from the spec: see `SPEC_DEVIATIONS.md`) |
 | [x] | PolyBolt `price.polymarket` (public channel only) | `wss://ws-live-v2.polymarket.com/ws` | [local](docs/api-reference/wss/polybolt.md) / [online](https://docs.polymarket.com/api-reference/wss/polybolt), spec `docs/specs/polybolt-asyncapi.json` | `PolyBoltChannel::connect()` → `Stream<Item = Result<PolyBoltEvent>>`; `subscribe` / `unsubscribe(PolyBoltSubscription::price_polymarket(..))`, `ping`, also on the cloneable `PolyBoltChannelHandle` from `handle()` |
 
 ## Out of scope (requires authentication)
