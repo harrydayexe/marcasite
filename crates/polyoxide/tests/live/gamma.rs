@@ -8,7 +8,7 @@ use std::{collections::HashSet, fmt::Debug};
 
 use futures_util::{Stream, StreamExt as _, TryStreamExt as _};
 use polyoxide::{
-    Error,
+    Decimal, Error,
     gamma::{
         Comment, CommentCount, CommentParentEntityType, Event, EventCreator, EventTweetCount,
         EventsKeysetPage, EventsPage, Market, MarketDescription, MarketsKeysetPage, Profile,
@@ -16,10 +16,37 @@ use polyoxide::{
         SportsMarketTypes, SportsMetadata, Tag, Team,
     },
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
 use crate::common::{GAMMA, Raw, check, get, pm, post, sample};
+
+/// A raw `GET` returning the HTTP status and the JSON body (`null` if it is not JSON), for
+/// pinning live behaviour that the SDK deliberately does not allow or that is an error.
+async fn raw(path: &str, query: &[(&str, &str)]) -> (u16, Value) {
+    let response = reqwest::Client::builder()
+        .user_agent("polyoxide-live-tests")
+        .build()
+        .unwrap()
+        .get(format!("{GAMMA}{path}"))
+        .query(query)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("GET {path}: {e}"));
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap();
+    (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+}
+
+/// The first market of the first event that has one, in a search response.
+fn first_market(search: &Value) -> &Value {
+    search["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|e| e["markets"].get(0))
+        .expect("a market in the search results")
+}
 
 /// Number of distinct values yielded by `items` (by `Debug` rendering).
 fn distinct<T: Debug>(items: impl IntoIterator<Item = T>) -> usize {
@@ -988,35 +1015,6 @@ async fn list_markets_keyset_filters() {
 
 #[tokio::test]
 #[ignore = "live network"]
-async fn list_markets_keyset_decimalized() {
-    // The spec documents `decimalized` as a bare boolean. Live treats `decimalized=true` as a
-    // filter: the sample market (a regular binary market) is not returned with it set.
-    let s = sample().await;
-    let gamma = pm();
-    let plain = gamma
-        .gamma()
-        .list_markets_keyset()
-        .condition_ids([s.condition_id.as_str()])
-        .send()
-        .await
-        .unwrap();
-    let decimalized = gamma
-        .gamma()
-        .list_markets_keyset()
-        .condition_ids([s.condition_id.as_str()])
-        .decimalized(true)
-        .send()
-        .await
-        .unwrap();
-    eprintln!(
-        "decimalized: plain={} decimalized=true={}",
-        plain.items().len(),
-        decimalized.items().len()
-    );
-}
-
-#[tokio::test]
-#[ignore = "live network"]
 async fn list_markets_keyset_stream_pages() {
     let markets: Vec<Market> = take_stream(
         pm().gamma()
@@ -1213,18 +1211,67 @@ async fn list_series() {
 #[tokio::test]
 #[ignore = "live network"]
 async fn list_series_order_volume24hr_descending() {
-    // Live answers `GET /series?order=volume24hr&ascending=false` with HTTP 500 once `limit`
-    // is 11 or more (limit 10 and below, `ascending=true`, or no `order` all succeed).
-    let series = pm()
+    // SPEC_DEVIATIONS.md, "Series: ordering by volume24hr descending returns 500" (server
+    // bug, not worked around). Live answers `GET /series?order=volume24hr&ascending=false`
+    // with HTTP 500 for a large enough `limit` (20 and up on 2026-10-02; the threshold shifts
+    // with the data). `limit` 100 fails; `limit` 5, ascending order, and `order=volume` all
+    // succeed. This test asserts the 500 so a server-side fix shows up here.
+    let big = pm()
         .gamma()
         .list_series()
-        .limit(20)
+        .limit(100)
+        .order("volume24hr")
+        .ascending(false)
+        .send()
+        .await;
+    match big {
+        Err(Error::Api(api)) => {
+            assert_eq!(api.status().as_u16(), 500, "{api:?}");
+            assert_eq!(api.error_type(), Some("internal error"));
+        }
+        other => panic!("expected the live 500 for volume24hr desc, got {other:?}"),
+    }
+    let (status, _) = raw(
+        "/series",
+        &[
+            ("limit", "100"),
+            ("order", "volume24hr"),
+            ("ascending", "false"),
+        ],
+    )
+    .await;
+    assert_eq!(status, 500);
+
+    // What works: a small limit, ascending order, and `volume`.
+    let small = pm()
+        .gamma()
+        .list_series()
+        .limit(5)
         .order("volume24hr")
         .ascending(false)
         .send()
         .await
         .unwrap();
-    assert!(!series.is_empty());
+    assert!(!small.is_empty());
+    let by_volume = pm()
+        .gamma()
+        .list_series()
+        .limit(50)
+        .order("volume")
+        .ascending(false)
+        .send()
+        .await
+        .unwrap();
+    assert!(!by_volume.is_empty());
+    check::<Vec<Series>>(
+        "GET /series?order=volume&ascending=false",
+        &get(
+            GAMMA,
+            "/series",
+            &[("limit", "50"), ("order", "volume"), ("ascending", "false")],
+        )
+        .await,
+    );
 }
 
 #[tokio::test]
@@ -1336,9 +1383,7 @@ async fn list_comments() {
     let entity_id: i64 = c.entity_id.parse().unwrap();
     let comments = pm()
         .gamma()
-        .list_comments()
-        .parent_entity_type(entity_type)
-        .parent_entity_id(entity_id)
+        .list_comments(entity_type, entity_id)
         .limit(20)
         .order("createdAt")
         .ascending(false)
@@ -1386,13 +1431,14 @@ async fn list_comments_stream_pages() {
     let entity_id: i64 = c.entity_id.parse().unwrap();
     let comments: Vec<Comment> = take_stream(
         pm().gamma()
-            .list_comments()
-            .parent_entity_type(if c.entity_type == "Series" {
-                CommentParentEntityType::Series
-            } else {
-                CommentParentEntityType::Event
-            })
-            .parent_entity_id(entity_id)
+            .list_comments(
+                if c.entity_type == "Series" {
+                    CommentParentEntityType::Series
+                } else {
+                    CommentParentEntityType::Event
+                },
+                entity_id,
+            )
             .limit(2)
             .into_stream(),
         3,
@@ -1405,19 +1451,148 @@ async fn list_comments_stream_pages() {
 #[tokio::test]
 #[ignore = "live network"]
 async fn list_comments_market_parent_type() {
-    // The spec lists `market` as a `parent_entity_type`; this records what live does with it
-    // (live has rejected it with 422 and listed `Event, Series, PerpsAsset`).
+    // SPEC_DEVIATIONS.md, "Comment parent entity type": the spec lists `market` as a
+    // `parent_entity_type` and no `PerpsAsset`. Live rejects `market` with a 422 naming
+    // `Event, Series, PerpsAsset`, so the SDK has no `Market` variant. A raw `&str` still
+    // reaches the wire as `Unknown("market")`, which pins the server behaviour.
     let s = sample().await;
     let result = pm()
         .gamma()
-        .list_comments()
-        .parent_entity_type(CommentParentEntityType::Market)
-        .parent_entity_id(s.market_id.parse().unwrap())
+        .list_comments("market", s.market_id.parse().unwrap())
         .limit(5)
         .send()
         .await;
-    eprintln!("list_comments(parent_entity_type=market) -> {result:?}");
-    result.unwrap();
+    match result {
+        Err(Error::Api(api)) => {
+            assert_eq!(api.status().as_u16(), 422);
+            let message = api.message().unwrap_or_default();
+            assert!(message.contains("PerpsAsset"), "{message}");
+            assert!(!message.contains("market"), "{message}");
+        }
+        other => panic!("expected a 422 API error for `market`, got {other:?}"),
+    }
+    let (status, body) = raw(
+        "/comments",
+        &[
+            ("parent_entity_type", "market"),
+            ("parent_entity_id", &s.market_id),
+        ],
+    )
+    .await;
+    assert_eq!(status, 422, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn list_comments_perps_asset_parent_type() {
+    // `PerpsAsset` is accepted live (undocumented). Perps asset 1 has comments.
+    let comments = pm()
+        .gamma()
+        .list_comments(CommentParentEntityType::PerpsAsset, 1)
+        .limit(5)
+        .send()
+        .await
+        .unwrap();
+    assert!(!comments.is_empty());
+    assert!(
+        comments
+            .iter()
+            .all(|c| c.parent_entity_type == Some(CommentParentEntityType::PerpsAsset))
+    );
+    check::<Vec<Comment>>(
+        "GET /comments?parent_entity_type=PerpsAsset",
+        &get(
+            GAMMA,
+            "/comments",
+            &[
+                ("limit", "5"),
+                ("parent_entity_type", "PerpsAsset"),
+                ("parent_entity_id", "1"),
+            ],
+        )
+        .await,
+    );
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn comments_require_parent_type_and_id() {
+    // SPEC_DEVIATIONS.md, "Comments: parent entity is required": the spec marks neither
+    // parameter required; live answers 422 when either is missing.
+    for query in [
+        &[("limit", "1")][..],
+        &[("limit", "1"), ("parent_entity_type", "Event")][..],
+        &[("limit", "1"), ("parent_entity_id", "16167")][..],
+    ] {
+        let (status, body) = raw("/comments", query).await;
+        assert_eq!(status, 422, "{query:?}: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|m| m.contains("required")),
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn comment_offset_cap_is_200() {
+    // SPEC_DEVIATIONS.md, "Offset caps": `/comments` and `/comments/user_address/{addr}` accept
+    // offsets up to 200 and answer larger ones with a 422.
+    let c = comment_sample().await;
+    let user_path = format!("/comments/user_address/{}", c.user);
+    for (path, base) in [
+        (
+            "/comments".to_owned(),
+            vec![
+                ("parent_entity_type", c.entity_type),
+                ("parent_entity_id", c.entity_id.as_str()),
+                ("limit", "1"),
+            ],
+        ),
+        (user_path, vec![("limit", "1")]),
+    ] {
+        let mut ok = base.clone();
+        ok.push(("offset", "200"));
+        let (status, body) = raw(&path, &ok).await;
+        assert_eq!(status, 200, "{path} offset=200: {body}");
+        let mut too_far = base;
+        too_far.push(("offset", "201"));
+        let (status, body) = raw(&path, &too_far).await;
+        assert_eq!(status, 422, "{path} offset=201: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|m| m.contains("offset too large")),
+            "{body}"
+        );
+    }
+
+    // The SDK refuses before sending, and the stream ends with that error.
+    let err = pm()
+        .gamma()
+        .list_comments(CommentParentEntityType::Event, 16_167)
+        .offset(201)
+        .send()
+        .await;
+    assert!(matches!(&err, Err(Error::Validation(v)) if v.parameter() == "offset"));
+    // Event 16167 has well over 200 comments: the page at offset 200 is served, the next
+    // offset (201) is refused client-side.
+    let streamed: Vec<Result<Comment, Error>> = pm()
+        .gamma()
+        .list_comments(CommentParentEntityType::Event, 16_167)
+        .offset(200)
+        .limit(1)
+        .into_stream()
+        .collect()
+        .await;
+    assert!(streamed.len() >= 2, "{streamed:?}");
+    assert!(
+        matches!(streamed.last(), Some(Err(Error::Validation(v))) if v.parameter() == "offset"),
+        "stream ended with {:?}",
+        streamed.last().map(|r| r.as_ref().map(|_| ()))
+    );
 }
 
 #[tokio::test]
@@ -1713,18 +1888,65 @@ async fn search_optimized() {
     // `optimized=true` is documented only as a bare boolean. Live then returns a different
     // shape: `hasMore` instead of `pagination`, and `outcomes` / `outcomePrices` as JSON
     // arrays instead of JSON-encoded strings.
-    let result = pm()
+    // SPEC_DEVIATIONS.md, "Search: optimized=true changes the response shape". The SDK
+    // decodes both shapes into the same typed model.
+    let results = pm()
         .gamma()
         .search("election")
         .limit_per_type(3)
         .optimized(true)
         .send()
-        .await;
-    eprintln!(
-        "search(optimized=true) -> {:?}",
-        result.as_ref().map(|_| ())
+        .await
+        .unwrap();
+    assert!(results.has_more.is_some());
+    assert_eq!(results.pagination, None);
+    let events = results.events.as_ref().unwrap();
+    assert!(!events.is_empty());
+    let markets: Vec<_> = events
+        .iter()
+        .flat_map(|e| e.markets.iter().flatten())
+        .collect();
+    assert!(!markets.is_empty());
+    for market in &markets {
+        let outcomes = market.outcomes.as_ref().unwrap();
+        assert!(!outcomes.is_empty());
+        // `outcomePrices` is index-aligned with `outcomes` (an empty list means no price yet).
+        let prices = market.outcome_prices.as_ref().unwrap();
+        assert!(prices.is_empty() || prices.len() == outcomes.len());
+    }
+    let raw_optimized = get(
+        GAMMA,
+        "/public-search",
+        &[
+            ("q", "election"),
+            ("limit_per_type", "3"),
+            ("optimized", "true"),
+        ],
+    )
+    .await;
+    // Pin the live shape: `hasMore` and real arrays...
+    assert!(raw_optimized.json.get("hasMore").is_some());
+    assert!(raw_optimized.json.get("pagination").is_none());
+    let sample_market = first_market(&raw_optimized.json);
+    assert!(sample_market["outcomes"].is_array(), "{sample_market}");
+    assert!(sample_market["outcomePrices"].is_array(), "{sample_market}");
+    check::<SearchResults>("GET /public-search?optimized=true", &raw_optimized);
+
+    // ...against the regular search: `pagination` and JSON-encoded strings.
+    let raw_plain = get(
+        GAMMA,
+        "/public-search",
+        &[("q", "election"), ("limit_per_type", "3")],
+    )
+    .await;
+    assert!(raw_plain.json.get("pagination").is_some());
+    assert!(raw_plain.json.get("hasMore").is_none());
+    let sample_market = first_market(&raw_plain.json);
+    assert!(sample_market["outcomes"].is_string(), "{sample_market}");
+    assert!(
+        sample_market["outcomePrices"].is_string(),
+        "{sample_market}"
     );
-    result.unwrap();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1801,47 +2023,506 @@ async fn decode_keyset_ascending_pages() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// deviations from the docs: pinning tests (see SPEC_DEVIATIONS.md, "Gamma API")
+// ---------------------------------------------------------------------------------------
+
 #[tokio::test]
 #[ignore = "live network"]
 async fn offset_past_2000_is_typed_error() {
-    // Live rejects `offset > 2000` on events and markets with a 422 pointing at the keyset
-    // routes (not in the spec). The SDK must surface that as a typed API error, and the
-    // offset stream must end with it rather than panic or loop.
+    // SPEC_DEVIATIONS.md, "Offset caps". Live accepts `offset` up to 2000 on `/markets`,
+    // `/events` and `/events/pagination` and answers larger values with a 422 pointing at the
+    // keyset routes. `/tags`, `/series`, `/teams` and `/events/results` accept any offset.
+    for (path, keyset) in [
+        ("/markets", "/markets/keyset"),
+        ("/events", "/events/keyset"),
+        ("/events/pagination", "/events/keyset"),
+    ] {
+        let (status, body) = raw(path, &[("limit", "1"), ("offset", "2000")]).await;
+        assert_eq!(status, 200, "{path} offset=2000: {body}");
+        let (status, body) = raw(path, &[("limit", "1"), ("offset", "2001")]).await;
+        assert_eq!(status, 422, "{path} offset=2001: {body}");
+        let message = body["error"].as_str().unwrap_or_default();
+        assert!(message.contains("offset too large"), "{path}: {body}");
+        assert!(message.contains(keyset), "{path}: {body}");
+    }
+    for path in ["/tags", "/series", "/teams", "/events/results"] {
+        let (status, body) = raw(path, &[("limit", "1"), ("offset", "5000")]).await;
+        assert_eq!(status, 200, "{path} offset=5000: {body}");
+    }
+
+    // The SDK refuses before sending, naming the keyset alternative.
     let gamma = pm();
     let gamma = gamma.gamma();
     let err = gamma.list_markets().limit(1).offset(2001).send().await;
     match err {
-        Err(Error::Api(api)) => {
-            assert_eq!(api.status().as_u16(), 422);
-            assert!(
-                api.message().is_some_and(|m| m.contains("keyset")),
-                "{api:?}"
-            );
+        Err(Error::Validation(v)) => {
+            assert_eq!(v.parameter(), "offset");
+            assert!(v.to_string().contains("list_markets_keyset"), "{v}");
         }
-        other => panic!("expected a 422 API error, got {other:?}"),
+        other => panic!("expected a validation error, got {other:?}"),
     }
     let err = gamma.list_events().limit(1).offset(2001).send().await;
-    assert!(matches!(&err, Err(Error::Api(a)) if a.status().as_u16() == 422));
+    assert!(matches!(&err, Err(Error::Validation(v)) if v.parameter() == "offset"));
     let err = gamma
         .list_events_paginated()
         .limit(1)
         .offset(2001)
         .send()
         .await;
-    assert!(matches!(&err, Err(Error::Api(a)) if a.status().as_u16() == 422));
+    assert!(matches!(&err, Err(Error::Validation(v)) if v.parameter() == "offset"));
+    // 2000 itself is sent.
+    gamma
+        .list_markets()
+        .limit(1)
+        .offset(2000)
+        .send()
+        .await
+        .unwrap();
 
+    // The offset stream yields the pages up to the last accepted offset, then ends with the
+    // validation error (no request is sent for it).
     let streamed: Vec<Result<Market, Error>> = gamma
         .list_markets()
         .limit(100)
         .offset(1950)
         .into_stream()
-        .take(200)
+        .take(300)
         .collect()
         .await;
     let ok = streamed.iter().filter(|r| r.is_ok()).count();
+    assert!(ok >= 100, "only {ok} markets before the end");
     assert!(
-        matches!(streamed.last(), Some(Err(Error::Api(a))) if a.status().as_u16() == 422),
+        matches!(streamed.last(), Some(Err(Error::Validation(v))) if v.parameter() == "offset"),
         "stream ended with {:?} after {ok} items",
         streamed.last().map(|r| r.as_ref().map(|_| ()))
     );
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn order_fields_are_camel_case() {
+    // SPEC_DEVIATIONS.md, "The `order` parameter takes camelCase field names": the spec's
+    // keyset example is `volume_num,liquidity_num`; live rejects snake_case with a 422 and
+    // accepts the camelCase JSON names (`volumeNum`, `liquidityNum`).
+    for (path, snake, camel) in [
+        ("/markets", "volume_num", "volumeNum"),
+        (
+            "/markets/keyset",
+            "volume_num,liquidity_num",
+            "volumeNum,liquidityNum",
+        ),
+        ("/markets", "start_date", "startDate"),
+        ("/events", "start_date", "startDate"),
+        ("/events/keyset", "start_date", "startDate"),
+        ("/events/pagination", "start_date", "startDate"),
+        ("/series", "start_date", "startDate"),
+        ("/tags", "created_at", "createdAt"),
+        ("/teams", "created_at", "createdAt"),
+    ] {
+        let (status, body) = raw(path, &[("limit", "2"), ("order", snake)]).await;
+        assert_eq!(status, 422, "{path} order={snake}: {body}");
+        assert_eq!(
+            body["error"].as_str(),
+            Some("order fields are not valid"),
+            "{path} order={snake}: {body}"
+        );
+        let (status, body) = raw(path, &[("limit", "2"), ("order", camel)]).await;
+        assert_eq!(status, 200, "{path} order={camel}: {body}");
+    }
+
+    // The SDK passes `order` through unchanged, so camelCase works end to end.
+    let gamma = pm();
+    let gamma = gamma.gamma();
+    let by_volume = gamma
+        .list_markets()
+        .limit(5)
+        .order("volumeNum")
+        .ascending(false)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        by_volume
+            .windows(2)
+            .all(|w| w[0].volume_num >= w[1].volume_num)
+    );
+    let keyset = gamma
+        .list_markets_keyset()
+        .limit(5)
+        .order("volumeNum,liquidityNum")
+        .ascending(false)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(keyset.items().len(), 5);
+    let events = gamma
+        .list_events()
+        .limit(5)
+        .order("startDate")
+        .ascending(false)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(events.len(), 5);
+    let err = gamma
+        .list_markets()
+        .limit(1)
+        .order("volume_num")
+        .send()
+        .await;
+    assert!(matches!(&err, Err(Error::Api(a)) if a.status().as_u16() == 422));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn decimalized_filters_by_tick_size() {
+    // SPEC_DEVIATIONS.md, "`decimalized` on the markets keyset acts as a filter": the spec only
+    // says "boolean". Live returns only markets with `orderPriceMinTickSize` 0.001 for `true`
+    // and only 0.01 for `false`; unset returns both.
+    let gamma = pm();
+    let gamma = gamma.gamma();
+    let page = |decimalized: Option<bool>| {
+        let mut request = gamma
+            .list_markets_keyset()
+            .limit(100)
+            .order("volume24hr")
+            .ascending(false);
+        if let Some(decimalized) = decimalized {
+            request = request.decimalized(decimalized);
+        }
+        request.send()
+    };
+    let tick = |m: &Market| m.order_price_min_tick_size;
+    let sub_cent = Decimal::new(1, 3);
+    let cent = Decimal::new(1, 2);
+
+    let only_true = page(Some(true)).await.unwrap();
+    assert!(!only_true.items().is_empty());
+    assert!(only_true.items().iter().all(|m| tick(m) == Some(sub_cent)));
+    let only_false = page(Some(false)).await.unwrap();
+    assert!(!only_false.items().is_empty());
+    assert!(only_false.items().iter().all(|m| tick(m) == Some(cent)));
+    let unset = page(None).await.unwrap();
+    assert!(unset.items().iter().any(|m| tick(m) == Some(sub_cent)));
+    assert!(unset.items().iter().any(|m| tick(m) == Some(cent)));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn timestamp_formats_beyond_rfc3339() {
+    // SPEC_DEVIATIONS.md, "Timestamps are not uniformly RFC 3339": besides fractional seconds
+    // of any length (`2025-09-22T21:37:46.914643Z`, `...46.9Z`), live sends space-separated
+    // `2026-05-28 05:29:05+00` / `... 05:29:05.547+00` for `Market.closedTime`,
+    // `Market.gameStartTime`, `Tag.publishedAt` (kept as `String`) and an odd
+    // `...+00:00:00` offset on some `Market.umaEndDate`. Date-time fields typed as
+    // `DateTime<Utc>` must decode all the fractional-second lengths.
+    fn space_separated(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        bytes.len() >= 22
+            && bytes[10] == b' '
+            && bytes[4] == b'-'
+            && bytes[13] == b':'
+            && s.ends_with("+00")
+    }
+    let markets = pm()
+        .gamma()
+        .list_markets()
+        .closed(true)
+        .order("id")
+        .ascending(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    let closed: Vec<&str> = markets
+        .iter()
+        .filter_map(|m| m.closed_time.as_deref())
+        .collect();
+    assert!(!closed.is_empty());
+    assert!(
+        closed.iter().any(|t| space_separated(t)),
+        "no space-separated closedTime in {closed:?}"
+    );
+    let sports = pm()
+        .gamma()
+        .list_markets()
+        .sports_market_types(["moneyline"])
+        .order("id")
+        .ascending(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        sports
+            .iter()
+            .filter_map(|m| m.game_start_time.as_deref())
+            .any(space_separated),
+        "no space-separated gameStartTime"
+    );
+    let tags = pm().gamma().list_tags().limit(100).send().await.unwrap();
+    assert!(
+        tags.iter()
+            .filter_map(|t| t.published_at.as_deref())
+            .any(space_separated),
+        "no space-separated publishedAt"
+    );
+    // Fractional seconds of every length decode into `DateTime<Utc>` fields.
+    assert!(markets.iter().all(|m| m.created_at.is_some()));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn undocumented_market_keys() {
+    // SPEC_DEVIATIONS.md, "Undocumented fields: Market". These keys are in every live
+    // market (the rarer ones, such as the AMM and Twitter-card keys, are pinned by the
+    // captured fixtures in `tests/api/gamma/fixtures/live`).
+    let markets = pm()
+        .gamma()
+        .list_markets()
+        .closed(false)
+        .order("volume24hr")
+        .ascending(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(markets.len(), 100);
+    for m in &markets {
+        assert!(m.neg_risk.is_some(), "{:?}", m.id);
+        assert!(m.approved.is_some(), "{:?}", m.id);
+        assert!(m.cyom.is_some(), "{:?}", m.id);
+        assert!(m.combo_status.is_some(), "{:?}", m.id);
+        assert!(m.holding_rewards_enabled.is_some(), "{:?}", m.id);
+        assert!(m.pager_duty_notification_enabled.is_some(), "{:?}", m.id);
+        assert!(m.version.is_some(), "{:?}", m.id);
+        assert!(m.market_maker_address.is_some(), "{:?}", m.id);
+    }
+    assert!(markets.iter().any(|m| m.neg_risk_market_id.is_some()));
+    assert!(markets.iter().any(|m| m.neg_risk_request_id.is_some()));
+    assert!(markets.iter().any(|m| m.fee_type.is_some()));
+    assert!(markets.iter().any(|m| m.position_ids.is_some()));
+    assert!(markets.iter().any(|m| m.submitted_by.is_some()));
+    assert!(markets.iter().any(|m| m.clob_rewards.is_some()));
+    // JSON-in-a-string lists decode (SPEC_DEVIATIONS.md, "Market list fields").
+    for m in &markets {
+        let outcomes = m.outcomes.as_ref().unwrap();
+        assert!(!outcomes.is_empty(), "{:?}", m.id);
+        let tokens = m.clob_token_ids.as_ref().unwrap();
+        assert_eq!(tokens.len(), outcomes.len(), "{:?}", m.id);
+        assert!(m.uma_resolution_statuses.is_some(), "{:?}", m.id);
+    }
+    assert!(markets.iter().any(|m| {
+        m.outcome_prices
+            .as_ref()
+            .is_some_and(|p| p.len() == m.outcomes.as_ref().map_or(0, Vec::len))
+    }));
+    // Sports markets carry provider metadata.
+    let sports = pm()
+        .gamma()
+        .list_markets()
+        .sports_market_types(["moneyline"])
+        .closed(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    assert!(sports.iter().any(|m| m.market_metadata.is_some()));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn market_list_fields_are_json_encoded_strings() {
+    // SPEC_DEVIATIONS.md, "Market list fields": every route but the optimized search sends
+    // `outcomes`, `outcomePrices`, `clobTokenIds` and `umaResolutionStatuses` as JSON-encoded
+    // strings (the spec types them as plain strings without saying so).
+    let s = sample().await;
+    let by_id = get(GAMMA, &format!("/markets/{}", s.market_id), &[])
+        .await
+        .json;
+    let listed = get(GAMMA, "/markets", &[("limit", "1")]).await.json;
+    let keyset = get(GAMMA, "/markets/keyset", &[("limit", "1")]).await.json;
+    for (route, market) in [
+        ("/markets/{id}", &by_id),
+        ("/markets", &listed[0]),
+        ("/markets/keyset", &keyset["markets"][0]),
+    ] {
+        for field in [
+            "outcomes",
+            "outcomePrices",
+            "clobTokenIds",
+            "umaResolutionStatuses",
+        ] {
+            assert!(
+                market[field].is_string(),
+                "{route}.{field}: {}",
+                market[field]
+            );
+        }
+    }
+    let market = pm()
+        .gamma()
+        .get_market(s.market_id.as_str())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(market.clob_token_ids.as_ref().unwrap().len(), 2);
+    assert_eq!(market.outcomes.as_ref().unwrap().len(), 2);
+    assert_eq!(market.outcome_prices.as_ref().unwrap().len(), 2);
+    let tokens: Vec<&str> = market
+        .clob_token_ids
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str())
+        .collect();
+    assert_eq!(
+        tokens,
+        s.token_ids.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn undocumented_event_keys() {
+    // SPEC_DEVIATIONS.md, "Undocumented fields: Event".
+    let gamma = pm();
+    let gamma = gamma.gamma();
+    let sports = gamma
+        .list_events()
+        .tag_slug("sports")
+        .active(true)
+        .closed(false)
+        .order("volume24hr")
+        .ascending(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    for e in &sports {
+        assert!(e.version.is_some(), "{:?}", e.id);
+        assert!(e.neg_risk_augmented.is_some(), "{:?}", e.id);
+    }
+    assert!(sports.iter().any(|e| e.event_metadata.is_some()));
+    assert!(sports.iter().any(|e| e.game_id.is_some()));
+    let sport = sports
+        .iter()
+        .find_map(|e| e.sport.as_ref())
+        .expect("a sport");
+    assert!(sport.id.is_some() && sport.name.is_some() && sport.primary_tag_id.is_some());
+    assert!(sport.created_at.is_some());
+    let teams = sports
+        .iter()
+        .find_map(|e| e.teams.as_ref())
+        .expect("event teams");
+    assert!(teams.iter().any(|t| t.color.is_some()));
+    assert!(teams.iter().any(|t| t.provider_id.is_some()));
+    assert!(teams.iter().any(|t| t.ordering.is_some()));
+
+    let politics = gamma
+        .list_events()
+        .tag_slug("politics")
+        .active(true)
+        .closed(false)
+        .order("volume24hr")
+        .ascending(false)
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    assert!(politics.iter().any(|e| e.country_name.is_some()));
+    assert!(politics.iter().any(|e| e.election_type.is_some()));
+    assert!(politics.iter().any(|e| e.cumulative_markets.is_some()));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn undocumented_profile_keys() {
+    // SPEC_DEVIATIONS.md, "Undocumented fields: Profile and PublicProfile".
+    let s = sample().await;
+    let public = pm()
+        .gamma()
+        .get_public_profile(s.user.as_str())
+        .await
+        .unwrap();
+    assert!(public.taker_tier.is_some());
+    assert!(public.taker_tier_name.is_some());
+    assert!(public.weighted_volume.is_some());
+    assert!(
+        public
+            .users
+            .as_ref()
+            .is_some_and(|u| u.iter().all(|u| u.community_mod.is_some()))
+    );
+    let profile = pm().gamma().get_profile(s.user.as_str()).await.unwrap();
+    assert!(profile.taker_tier.is_some());
+    assert!(profile.taker_tier_name.is_some());
+    assert!(profile.weighted_volume.is_some());
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn undocumented_series_sports_team_and_tag_keys() {
+    // SPEC_DEVIATIONS.md, "Undocumented fields: SeriesSummary, SportsMetadata, Team, Tag".
+    let gamma = pm();
+    let gamma = gamma.gamma();
+    let sports = gamma.get_sports_metadata().await.unwrap();
+    assert!(!sports.is_empty());
+    for sport in &sports {
+        assert!(sport.id.is_some(), "{sport:?}");
+        assert!(sport.name.is_some(), "{sport:?}");
+    }
+    assert!(sports.iter().any(|s| s.created_at.is_some()));
+    assert!(sports.iter().any(|s| s.primary_tag_id.is_some()));
+    let teams = gamma.list_teams().limit(100).send().await.unwrap();
+    assert!(teams.iter().any(|t| t.color.is_some()));
+    assert!(teams.iter().any(|t| t.provider_id.is_some()));
+    // The series summary of the sample series (any series with events).
+    if let Some(id) = &sample().await.series_id {
+        let summary = gamma.get_series_summary(id.as_str()).await.unwrap();
+        assert!(summary.volume.is_some());
+        assert!(summary.volume_24hr.is_some());
+    }
+    // `activeEventsCount` is on the tags returned by related-tags/tags.
+    let related = gamma.get_related_tags("2").send().await.unwrap();
+    assert!(!related.is_empty());
+    assert!(related.iter().all(|t| t.active_events_count.is_some()));
+}
+
+#[tokio::test]
+#[ignore = "live network"]
+async fn undocumented_comment_media() {
+    // SPEC_DEVIATIONS.md, "Undocumented fields: Comment". Comments with a GIF carry `media`;
+    // look for one in the most recent comments of the busiest events.
+    let events = get(
+        GAMMA,
+        "/events",
+        &[
+            ("limit", "30"),
+            ("active", "true"),
+            ("closed", "false"),
+            ("order", "volume24hr"),
+            ("ascending", "false"),
+        ],
+    )
+    .await
+    .json;
+    for event in events.as_array().unwrap() {
+        let id: i64 = event["id"].as_str().unwrap().parse().unwrap();
+        let comments = pm()
+            .gamma()
+            .list_comments(CommentParentEntityType::Event, id)
+            .limit(100)
+            .send()
+            .await
+            .unwrap();
+        if let Some(media) = comments.iter().find_map(|c| c.media.as_ref()) {
+            let media = &media[0];
+            assert!(media.provider.is_some() && media.url.is_some());
+            assert!(media.media_type.is_some() && media.created_at.is_some());
+            return;
+        }
+    }
+    eprintln!("no comment with media found in the 30 busiest events; media is not pinned today");
 }
