@@ -1,5 +1,9 @@
 # marcasite
 
+> **mar·ca·site** */ˈmɑːrkəsaɪt/* (noun)
+>
+> *A pale yellow-to-bronze iron sulfide mineral (FeS₂), chemically identical to pyrite but with a different crystal structure. Often called "white iron pyrite."*
+
 An unofficial, idiomatic and fully typed Rust SDK for the Polymarket Predictions APIs.
 Not affiliated with or endorsed by Polymarket.
 
@@ -19,14 +23,18 @@ Not affiliated with or endorsed by Polymarket.
 | Combos / RFQ: combo-eligible markets | `marcasite::combos::CombosClient` | `combos` |
 | WebSockets: market channel, sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
 
+## Quick start
+
+```bash
+cargo add marcasite
+```
+
 All features are on by default. To compile only what you use:
 
 ```toml
 [dependencies]
 marcasite = { version = "0.1", default-features = false, features = ["gamma", "clob"] }
 ```
-
-## Quick start
 
 The examples use [`tokio`](https://docs.rs/tokio) (with the `macros` and `rt-multi-thread`
 features) and [`futures-util`](https://docs.rs/futures-util) for stream combinators:
