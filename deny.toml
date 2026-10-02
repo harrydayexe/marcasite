@@ -19,6 +19,7 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
+    "CC0-1.0",
     # Mozilla's root certificate data (webpki-root-certs, via reqwest -> rustls-platform-verifier).
     "CDLA-Permissive-2.0",
 ]
