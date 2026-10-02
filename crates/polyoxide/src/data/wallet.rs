@@ -399,7 +399,8 @@ pub struct UserPnlSeries {
     ///
     /// The docs do not list the values of this field. It is decoded as a [`PnlFidelity`]
     /// (the vocabulary of [`fidelity`](Self::fidelity)); any other value is kept as
-    /// [`PnlFidelity::Unknown`].
+    /// [`PnlFidelity::Unknown`]. Live it was `1d` for every interval and fidelity tried
+    /// (`fidelity` itself echoes the request, `1h` by default).
     pub source_fidelity: PnlFidelity,
     /// Dense cumulative points on the requested grid, oldest first.
     pub points: Vec<UserPnlPoint>,

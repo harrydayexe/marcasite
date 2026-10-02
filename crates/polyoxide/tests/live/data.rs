@@ -2601,6 +2601,52 @@ async fn condition_with_event_id_is_rejected_live() {
     }
 }
 
+/// Pins SPEC_DEVIATIONS.md "positions `title` limit": 200 characters, not bytes. 200
+/// two-byte characters are accepted live and by the SDK; 201 characters are a `400`
+/// naming `title` (the SDK rejects them before sending).
+#[tokio::test]
+#[ignore = "live network"]
+async fn positions_title_limit_counts_characters() {
+    let s = sample().await;
+    let accented = "é".repeat(200);
+    assert_eq!(accented.len(), 400, "200 characters, 400 bytes");
+    raw(
+        "/positions",
+        &[("user", &s.user), ("title", &accented), ("limit", "1")],
+    )
+    .await;
+    let too_long = "é".repeat(201);
+    let e = raw_error(
+        "/positions",
+        &[("user", &s.user), ("title", &too_long), ("limit", "1")],
+    )
+    .await;
+    assert_eq!(e.status, 400);
+    assert_eq!(e.body["parameter"], "title");
+    assert!(e.body["error"].as_str().unwrap().contains("200 characters"));
+
+    let client = pm();
+    let data = client.data();
+    data.list_positions()
+        .user(s.user.as_str())
+        .title(accented)
+        .limit(1)
+        .send()
+        .await
+        .unwrap();
+    let err = data
+        .list_positions()
+        .user(s.user.as_str())
+        .title(too_long)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "title"),
+        "{err:?}"
+    );
+}
+
 /// Violations of documented formats are caught before any request is sent.
 #[tokio::test]
 #[ignore = "live network"]
