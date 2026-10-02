@@ -946,10 +946,12 @@ async fn get_current_rebated_fees() {
         "INFO rebates sample: {}",
         raw.text.chars().take(300).collect::<String>()
     );
-    // The SDK call is made first so that the decode failure, if any, names the SDK method.
-    let fees = clob().get_current_rebated_fees(date, maker.as_str()).await;
+    let fees = clob()
+        .get_current_rebated_fees(date, maker.as_str())
+        .await
+        .unwrap();
+    assert!(!fees.is_empty());
     check::<Vec<RebatedFees>>("GET /rebates/current", &raw);
-    assert!(!fees.unwrap().is_empty());
 }
 
 /// A maker without rebates on the date: the live API answers `null` (not `[]`).
