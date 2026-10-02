@@ -31,10 +31,14 @@ async fn get_supported_assets() {
             "{asset:?}"
         );
     }
-    check::<SupportedAssets>(
-        "GET /supported-assets",
-        &get(BRIDGE, "/supported-assets", &[]).await,
+    let raw = get(BRIDGE, "/supported-assets", &[]).await;
+    // SPEC_DEVIATIONS.md, Bridge: the undocumented top-level `note`.
+    assert!(
+        raw.json["note"].is_string(),
+        "GET /supported-assets no longer has a top-level `note`: update SPEC_DEVIATIONS.md"
     );
+    assert!(assets.note.is_some());
+    check::<SupportedAssets>("GET /supported-assets", &raw);
 }
 
 #[tokio::test]
@@ -70,13 +74,34 @@ async fn get_quote() {
         }),
     )
     .await;
-    // Open question 23: for a 10 USDC input, which of the two USD fields is the amount sent?
-    eprintln!(
-        "NOTE quote: estInputUsd={} estOutputUsd={} swapImpact={} swapImpactUsd={}",
-        raw.json["estInputUsd"],
-        raw.json["estOutputUsd"],
-        raw.json["estFeeBreakdown"]["swapImpact"],
-        raw.json["estFeeBreakdown"]["swapImpactUsd"],
+    // SPEC_DEVIATIONS.md, Bridge: the spec's `estInputUsd` / `estOutputUsd` descriptions are
+    // swapped. For a 10 USDC input, `estInputUsd` is about the amount sent (10) and
+    // `estOutputUsd` the (slightly lower) amount received.
+    let input = raw.json["estInputUsd"].as_f64().expect("estInputUsd");
+    let output = raw.json["estOutputUsd"].as_f64().expect("estOutputUsd");
+    assert!(
+        (input - 10.0).abs() < 0.5 && output <= input + 1e-9,
+        "estInputUsd={input} estOutputUsd={output}: the live meaning changed, update SPEC_DEVIATIONS.md"
+    );
+    assert_eq!(
+        quote
+            .est_input_usd
+            .unwrap()
+            .to_string()
+            .parse::<f64>()
+            .unwrap(),
+        input
+    );
+    // Percent fields use 1 = 1%: `swapImpactUsd` is `swapImpact`% of the amount sent.
+    let impact = raw.json["estFeeBreakdown"]["swapImpact"]
+        .as_f64()
+        .unwrap_or(0.0);
+    let impact_usd = raw.json["estFeeBreakdown"]["swapImpactUsd"]
+        .as_f64()
+        .unwrap_or(0.0);
+    assert!(
+        (impact * input / 100.0 - impact_usd).abs() < 0.001,
+        "swapImpact={impact} swapImpactUsd={impact_usd}: the percent scale changed, update SPEC_DEVIATIONS.md"
     );
     check::<Quote>("POST /quote", &raw);
 }
@@ -95,28 +120,23 @@ async fn get_quote_incomplete_request_is_rejected() {
 
 /// The spec documents `/status/{address}` for a *bridge* address (from `/deposit` or
 /// `/withdraw`). A plain wallet address, such as the sample user's, is what a caller might
-/// try first: record what the live API does with it. It must end in a typed outcome.
+/// try first. SPEC_DEVIATIONS.md, Bridge (server bug): the live API answers HTTP 500
+/// `cannot get transaction status`; the SDK surfaces it as a typed API error.
 #[tokio::test]
 #[ignore = "live network"]
-async fn list_transactions_for_user_wallet() {
+async fn list_transactions_for_user_wallet_is_a_500() {
     let s = sample().await;
-    match pm()
+    let err = pm()
         .bridge()
         .list_transactions(s.user.as_str())
         .send()
         .await
-    {
-        Ok(page) => eprintln!(
-            "NOTE GET /status/<user wallet>: {} transactions",
-            page.items().len()
-        ),
-        Err(Error::Api(api)) => eprintln!(
-            "NOTE GET /status/<user wallet>: HTTP {} {:?} (spec 500 example: `cannot get transaction status`)",
-            api.status(),
-            api.message()
-        ),
-        Err(other) => panic!("GET /status/<user wallet>: unexpected error {other:?}"),
-    }
+        .expect_err("a non-bridge address used to be a 500; update SPEC_DEVIATIONS.md");
+    let Error::Api(api) = &err else {
+        panic!("expected a typed API error, got {err:?}")
+    };
+    assert_eq!(api.status().as_u16(), 500, "{err:?}");
+    assert_eq!(api.message(), Some("cannot get transaction status"));
 }
 
 #[tokio::test]
@@ -131,6 +151,17 @@ async fn list_transactions_for_bridge_address() {
         .unwrap();
     assert!(!page.items().is_empty() && page.items().len() <= 3);
     let path = format!("/status/{DOCUMENTED_BRIDGE_ADDRESS}");
+    // Open question 25: `createdTimeMs` is always an integer (the model decodes it as
+    // integer milliseconds, so a fractional value would fail the checks below).
+    let all = get(BRIDGE, &path, &[("limit", "100")]).await;
+    for transaction in all.json["transactions"].as_array().unwrap() {
+        if let Some(created) = transaction.get("createdTimeMs") {
+            assert!(
+                created.is_u64(),
+                "createdTimeMs is not an integer: {created}"
+            );
+        }
+    }
     check::<TransactionStatusPage>(
         "GET /status/{address}?limit=3",
         &get(BRIDGE, &path, &[("limit", "3")]).await,

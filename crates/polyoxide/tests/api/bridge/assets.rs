@@ -11,12 +11,12 @@ use crate::common;
 #[tokio::test]
 async fn get_supported_assets_decodes() {
     let server = common::server().await;
-    // Field values are the per-field `example`s of `SupportedAsset` / `Token` in
-    // `docs/specs/bridge-openapi.yaml` (the endpoint has no response example).
+    // Captured from `GET https://bridge.polymarket.com/supported-assets` on 2026-10-02
+    // (trimmed to one asset). The top-level `note` is not in `docs/specs/bridge-openapi.yaml`.
     Mock::given(method("GET"))
         .and(path("/supported-assets"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"supportedAssets":[{"chainId":"1","chainName":"Ethereum","token":{"name":"USD Coin","symbol":"USDC","address":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","decimals":6},"minCheckoutUsd":45}]}"#,
+            r#"{"supportedAssets":[{"chainId":"1","chainName":"Ethereum","token":{"name":"TrueUSD","symbol":"TUSD","address":"0x0000000000085d4780B73119b644AE5ecd22b376","decimals":18},"minCheckoutUsd":3}],"note":"These are the currently supported chains and assets for deposits and withdrawals."}"#,
             "application/json",
         ))
         .expect(1)
@@ -32,8 +32,12 @@ async fn get_supported_assets_decodes() {
         panic!("expected one asset, got {assets:?}")
     };
     assert_eq!(asset.chain_id, Some(ChainId::from("1")));
-    assert_eq!(asset.min_checkout_usd, Some(Decimal::from(45)));
-    assert_eq!(asset.token.as_ref().unwrap().decimals, Some(6));
+    assert_eq!(asset.min_checkout_usd, Some(Decimal::from(3)));
+    assert_eq!(asset.token.as_ref().unwrap().decimals, Some(18));
+    assert_eq!(
+        assets.note.as_deref(),
+        Some("These are the currently supported chains and assets for deposits and withdrawals.")
+    );
 }
 
 #[tokio::test]

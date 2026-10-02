@@ -17,12 +17,18 @@ polyoxide_core::string_id! {
 ///
 /// The field is optional because the spec does not mark it as required; use
 /// [`SupportedAssets::assets`] for a slice that is empty when it is absent.
+///
+/// The live API also sends a top-level `note` string the spec does not document
+/// (see [`note`](Self::note) and `SPEC_DEVIATIONS.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct SupportedAssets {
     /// Supported assets with the minimum amounts for deposits and withdrawals.
     pub supported_assets: Option<Vec<SupportedAsset>>,
+    /// A human-readable remark, e.g. `"These are the currently supported chains and assets
+    /// for deposits and withdrawals."`. Undocumented; observed live (2026-10-02).
+    pub note: Option<String>,
 }
 
 impl SupportedAssets {
@@ -131,10 +137,29 @@ mod tests {
         );
     }
 
+    /// Captured from `GET https://bridge.polymarket.com/supported-assets` on 2026-10-02
+    /// (trimmed to one asset). The top-level `note` is not in the spec.
+    #[test]
+    fn deserializes_live_capture_with_note() {
+        let json = r#"{"supportedAssets":[{"chainId":"1","chainName":"Ethereum",
+            "token":{"name":"TrueUSD","symbol":"TUSD","address":"0x0000000000085d4780B73119b644AE5ecd22b376","decimals":18},
+            "minCheckoutUsd":3}],
+            "note":"These are the currently supported chains and assets for deposits and withdrawals."}"#;
+        let assets: SupportedAssets = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            assets.note.as_deref(),
+            Some(
+                "These are the currently supported chains and assets for deposits and withdrawals."
+            )
+        );
+        assert_eq!(assets.assets().len(), 1);
+    }
+
     #[test]
     fn missing_list_is_an_empty_slice() {
         let assets: SupportedAssets = serde_json::from_str("{}").unwrap();
         assert_eq!(assets.supported_assets, None);
+        assert_eq!(assets.note, None);
         assert!(assets.assets().is_empty());
     }
 

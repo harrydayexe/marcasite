@@ -24,27 +24,31 @@ fn documented_request() -> QuoteRequest {
         .to_token_address("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB")
 }
 
-/// `200` example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
+/// Captured from `POST https://bridge.polymarket.com/quote` on 2026-10-02 with the request
+/// of [`documented_request`] (recipient replaced by another wallet). Note that
+/// `estInputUsd` (the amount sent) is higher than `estOutputUsd` (the amount received),
+/// the reverse of the spec's descriptions, and that percentages use 1 = 1%
+/// (`swapImpact` 0.0226 next to `swapImpactUsd` 0.002261 on about 10 USD).
 const RESPONSE: &str = r#"{
-    "estCheckoutTimeMs": 25000,
+    "estCheckoutTimeMs": 26000,
     "estFeeBreakdown": {
-        "appFeeLabel": "Fun.xyz fee",
+        "appFeeLabel": "Swap fee",
         "appFeePercent": 0,
         "appFeeUsd": 0,
         "fillCostPercent": 0,
         "fillCostUsd": 0,
-        "gasUsd": 0.003854,
+        "gasUsd": 0.004396,
         "maxSlippage": 0,
-        "minReceived": 14.488305,
-        "swapImpact": 0,
-        "swapImpactUsd": 0,
-        "totalImpact": 0,
-        "totalImpactUsd": 0
+        "minReceived": 9.897267000000001,
+        "swapImpact": 0.022611130556527827,
+        "swapImpactUsd": 0.002261,
+        "totalImpact": 0.022611130556527827,
+        "totalImpactUsd": 0.002261
     },
-    "estInputUsd": 14.488305,
-    "estOutputUsd": 14.488305,
-    "estToTokenBaseUnit": "14491203",
-    "quoteId": "0x00c34ba467184b0146406d62b0e60aaa24ed52460bd456222b6155a0d9de0ad5"
+    "estInputUsd": 9.9995,
+    "estOutputUsd": 9.997239,
+    "estToTokenBaseUnit": "9997739",
+    "quoteId": "0x179093403500f72a05fd6c0f511c57dd25279a572ced63033e4d3a1e07a1bce9"
 }"#;
 
 fn client_with_one_retry(server: &MockServer) -> BridgeClient {
@@ -83,18 +87,19 @@ async fn get_quote_posts_json_body_and_decodes() {
         .get_quote(documented_request())
         .await
         .unwrap();
-    assert_eq!(quote.est_checkout_time_ms, Some(25_000));
-    assert_eq!(quote.est_input_usd, Some(Decimal::new(14_488_305, 6)));
-    assert_eq!(quote.est_to_token_base_unit.as_deref(), Some("14491203"));
+    assert_eq!(quote.est_checkout_time_ms, Some(26_000));
+    assert_eq!(quote.est_input_usd, Some(Decimal::new(99_995, 4)));
+    assert_eq!(quote.est_output_usd, Some(Decimal::new(9_997_239, 6)));
+    assert_eq!(quote.est_to_token_base_unit.as_deref(), Some("9997739"));
     assert_eq!(
         quote.quote_id,
         Some(QuoteId::from(
-            "0x00c34ba467184b0146406d62b0e60aaa24ed52460bd456222b6155a0d9de0ad5"
+            "0x179093403500f72a05fd6c0f511c57dd25279a572ced63033e4d3a1e07a1bce9"
         ))
     );
     assert_eq!(
         quote.est_fee_breakdown.unwrap().gas_usd,
-        Some(Decimal::new(3_854, 6))
+        Some(Decimal::new(4_396, 6))
     );
 }
 
@@ -147,7 +152,7 @@ async fn quote_is_retried_because_it_is_read_only() {
         .get_quote(documented_request())
         .await
         .unwrap();
-    assert_eq!(quote.est_checkout_time_ms, Some(25_000));
+    assert_eq!(quote.est_checkout_time_ms, Some(26_000));
 }
 
 #[tokio::test]

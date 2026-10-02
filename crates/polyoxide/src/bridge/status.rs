@@ -63,6 +63,7 @@ pub struct Transaction {
     pub tx_hash: Option<String>,
     /// When the transfer was created (wire name `createdTimeMs`, Unix milliseconds).
     /// Missing while the status is [`DepositDetected`](TransactionStatus::DepositDetected).
+    /// Always an integer live (never fractional).
     #[serde(
         rename = "createdTimeMs",
         default,
@@ -125,6 +126,12 @@ impl BridgeClient {
     /// are supported. Use [`ListTransactions::send`] for one page (repeat it without a
     /// cursor to track recent activity) or [`ListTransactions::into_stream`] to walk the
     /// full history.
+    ///
+    /// **A plain wallet address is not a bridge address.** The live API answers `500`
+    /// `{"error":"cannot get transaction status"}` (a server bug; the spec only documents
+    /// that body as a generic 500 example) for an address it does not know as a bridge
+    /// address, which surfaces as [`Error::Api`](crate::Error::Api) with status `500`. See
+    /// `SPEC_DEVIATIONS.md`.
     ///
     /// See <https://docs.polymarket.com/api-reference/bridge/get-transaction-status>.
     ///
@@ -234,7 +241,8 @@ impl ListTransactions {
     /// - [`Error::Validation`](crate::Error::Validation) if the address is empty (or `.` or
     ///   `..`) or the limit is outside `1..=100` (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` for an invalid address, limit
-    ///   or cursor (e.g. a stale cursor), or `500` on a server error.
+    ///   or cursor (e.g. a stale cursor), or `500` on a server error (also what the live API returns for an address that is not a
+    ///   bridge address).
     /// - [`Error::Decode`](crate::Error::Decode) if the response does not match the
     ///   documented schema, including a missing `transactions` or `nextCursor`.
     /// - Any other [`Error`](crate::Error) for transport or rate limiting failures.

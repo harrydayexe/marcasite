@@ -128,10 +128,15 @@ pub struct Quote {
     pub est_checkout_time_ms: Option<u64>,
     /// Breakdown of the estimated fees.
     pub est_fee_breakdown: Option<FeeBreakdown>,
-    /// `estInputUsd`. The spec describes it as "Estimated token amount received in USD".
+    /// `estInputUsd`: the estimated value of the amount **sent** (the input), in USD.
+    ///
+    /// The spec's descriptions of `estInputUsd` and `estOutputUsd` are swapped; the live
+    /// API (2026-10-02) sends the input value here (about the amount sent) and the lower,
+    /// after-fees value in [`est_output_usd`](Self::est_output_usd). See `SPEC_DEVIATIONS.md`.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub est_input_usd: Option<Decimal>,
-    /// `estOutputUsd`. The spec describes it as "Estimated token amount sent in USD".
+    /// `estOutputUsd`: the estimated value of the amount **received** (the output), in USD.
+    /// See [`est_input_usd`](Self::est_input_usd) for the swapped spec descriptions.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub est_output_usd: Option<Decimal>,
     /// Estimated amount of the destination token received (`estToTokenBaseUnit`; the
@@ -143,7 +148,9 @@ pub struct Quote {
 
 /// Breakdown of the estimated fees of a [`Quote`] (`components/schemas/FeeBreakdown`).
 ///
-/// Percentages are as sent by the API; the spec does not say whether `1` means 1% or 100%.
+/// Percentages are as sent by the API and use a scale where `1` means 1% (observed live:
+/// `swapImpact` `0.0226` next to `swapImpactUsd` `0.002261` on a roughly 10 USD transfer is
+/// 0.0226%); the spec does not say.
 /// Every field is optional because the spec marks none as required.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

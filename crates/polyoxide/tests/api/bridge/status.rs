@@ -215,6 +215,34 @@ async fn stale_cursor_is_a_400() {
     assert_eq!(err.api_error().unwrap().message(), Some("invalid request"));
 }
 
+/// Live (2026-10-02): an address that is not a bridge address (e.g. a plain wallet) gets
+/// HTTP 500 `{"error":"cannot get transaction status"}`. A server bug, surfaced as a typed
+/// API error with status 500 (see `SPEC_DEVIATIONS.md`).
+#[tokio::test]
+async fn non_bridge_address_is_a_typed_500() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/status/0xcb1822859cef82cd2eb4e6276c7916e692995130"))
+        .respond_with(ResponseTemplate::new(500).set_body_raw(
+            r#"{"error":"cannot get transaction status"}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .bridge()
+        .list_transactions("0xcb1822859cef82cd2eb4e6276c7916e692995130")
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(err.status().map(|s| s.as_u16()), Some(500));
+    assert_eq!(
+        err.api_error().unwrap().message(),
+        Some("cannot get transaction status")
+    );
+}
+
 #[tokio::test]
 async fn invalid_parameters_are_rejected_before_sending() {
     let server = common::server().await;
