@@ -1178,7 +1178,8 @@ async fn list_prices_history() {
         windowed
             .items()
             .iter()
-            .all(|p| p.timestamp >= start - Duration::seconds(1))
+            .all(|p| p.timestamp >= start - Duration::seconds(3600)),
+        "points are bucket-aligned: the first may precede `start` by under one bucket"
     );
     check::<Page<PricePoint>>(
         "GET /v2/prices-history?start&end&bucket_seconds",
