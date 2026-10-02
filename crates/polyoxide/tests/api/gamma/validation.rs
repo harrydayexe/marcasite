@@ -1,10 +1,14 @@
 //! Client-side checks made before any request is sent: integer-typed ids (paths and
 //! filters) must be ASCII digits, slugs and addresses in paths must be usable segments.
 
-use futures_util::TryStreamExt as _;
+use futures_util::{StreamExt as _, TryStreamExt as _};
 use polyoxide::{Error, Result, gamma::GammaClient};
+use wiremock::{
+    Mock,
+    matchers::{method, path, query_param},
+};
 
-use super::requests;
+use super::{json, requests};
 use crate::common;
 
 /// The parameter named by a validation error, or `""` for any other outcome.
@@ -144,6 +148,124 @@ async fn integer_typed_query_filters_are_rejected_before_sending() {
         .await;
     assert_eq!(parameter(streamed), "id");
     assert!(requests(&server).await.is_empty());
+}
+
+/// Live rejects `offset` above 2000 on `/markets`, `/events` and `/events/pagination` with a
+/// `422` ("offset too large, use /markets/keyset ..."); the SDK refuses it before sending.
+#[tokio::test]
+async fn offsets_above_2000_are_rejected_before_sending() {
+    let server = common::server().await;
+    let gamma = common::polymarket(&server).gamma().clone();
+
+    assert_eq!(
+        parameter(gamma.list_markets().offset(2001).send().await),
+        "offset"
+    );
+    assert_eq!(
+        parameter(gamma.list_events().offset(2001).send().await),
+        "offset"
+    );
+    assert_eq!(
+        parameter(gamma.list_events_paginated().offset(2001).send().await),
+        "offset"
+    );
+    let message = gamma
+        .list_markets()
+        .offset(5000)
+        .send()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        message.contains("5000") && message.contains("list_markets_keyset"),
+        "{message}"
+    );
+    let message = gamma
+        .list_events()
+        .offset(2001)
+        .send()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("list_events_keyset"), "{message}");
+
+    // A stream that starts past the cap yields the validation error and ends.
+    let streamed: Result<Vec<_>> = gamma
+        .list_markets()
+        .offset(2100)
+        .into_stream()
+        .try_collect()
+        .await;
+    assert_eq!(parameter(streamed), "offset");
+    assert!(requests(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn offset_2000_itself_is_sent() {
+    let server = common::server().await;
+    for route in ["/markets", "/events"] {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("offset", "2000"))
+            .respond_with(json("[]"))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/events/pagination"))
+        .and(query_param("offset", "2000"))
+        .respond_with(json(r#"{"data":[],"pagination":{"hasMore":false}}"#))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let gamma = common::polymarket(&server).gamma().clone();
+    gamma.list_markets().offset(2000).send().await.unwrap();
+    gamma.list_events().offset(2000).send().await.unwrap();
+    gamma
+        .list_events_paginated()
+        .offset(2000)
+        .send()
+        .await
+        .unwrap();
+}
+
+/// The offset stream walks up to the last accepted offset (2000), then yields one validation
+/// error without sending a request, and ends.
+#[tokio::test]
+async fn offset_stream_ends_with_a_validation_error_past_2000() {
+    let server = common::server().await;
+    // 21 pages of 100 (offsets 0, 100, ..., 2000), then offset 2100 is refused client-side.
+    Mock::given(method("GET"))
+        .and(path("/markets"))
+        .respond_with(|request: &wiremock::Request| {
+            let offset: usize = request
+                .url
+                .query_pairs()
+                .find(|(k, _)| k == "offset")
+                .map(|(_, v)| v.parse().unwrap())
+                .unwrap();
+            let body: Vec<String> = (0..100)
+                .map(|i| format!(r#"{{"id":"{}"}}"#, offset + i))
+                .collect();
+            json(format!("[{}]", body.join(",")))
+        })
+        .expect(21)
+        .mount(&server)
+        .await;
+
+    let results: Vec<_> = common::polymarket(&server)
+        .gamma()
+        .list_markets()
+        .limit(100)
+        .into_stream()
+        .collect()
+        .await;
+    assert_eq!(results.len(), 2100 + 1);
+    assert!(results[..2100].iter().all(Result::is_ok));
+    let last = results.into_iter().last().unwrap();
+    assert_eq!(parameter(last.map(|_| ())), "offset");
+    assert_eq!(requests(&server).await.len(), 21);
 }
 
 #[test]

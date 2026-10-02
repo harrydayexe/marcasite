@@ -251,6 +251,9 @@ mod tests {
             "logo": null,
             "abbreviation": "LAL",
             "alias": null,
+            "color": null,
+            "providerId": null,
+            "ordering": null,
             "createdAt": "2024-01-01T00:00:00Z",
             "updatedAt": null
         });

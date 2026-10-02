@@ -7,10 +7,15 @@
 //! types as plain `string` (`Market` `liquidity`, `volume`, `fee`, `umaBond`, `umaReward`
 //! and `CommentPosition.positionSize`): they hold numeric strings (`"1.5"`), because the
 //! crate decodes them as decimals. Whether the server always sends numeric text there is
-//! an open question; `""` and `null` decode as `None`.
+//! an open question; `""` and `null` decode as `None`. The list-in-a-string fields (`Market`
+//! `outcomes`, `outcomePrices`, `clobTokenIds`, `umaResolutionStatuses`) hold JSON-encoded
+//! lists, as the live API sends them.
+//!
+//! `fixtures/live/*.json` are responses captured from the live API; see `live`.
 
 mod comments;
 mod events;
+mod live;
 mod markets;
 mod models;
 mod profiles;
@@ -42,6 +47,19 @@ pub fn fixture(name: &str) -> Value {
     );
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     serde_json::from_str(&text).unwrap()
+}
+
+/// Loads `fixtures/live/{name}.json`, a response captured from the live API, and returns its
+/// `body` (the file also records the `_captured` route and date).
+pub fn live_fixture(name: &str) -> Value {
+    let path = format!(
+        "{}/tests/api/gamma/fixtures/live/{name}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut wrapper: Value = serde_json::from_str(&text).unwrap();
+    assert!(wrapper.get("_captured").is_some(), "{path}: no `_captured`");
+    wrapper["body"].take()
 }
 
 /// Every request the server received, in order.

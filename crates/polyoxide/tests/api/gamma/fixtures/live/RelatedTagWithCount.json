@@ -1,0 +1,18 @@
+{
+  "_captured": {
+    "route": "GET /tags/2/related-tags/tags (first element)",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "id": "126",
+    "label": "Trump",
+    "slug": "trump",
+    "forceShow": false,
+    "publishedAt": "2023-11-02 21:23:16.384+00",
+    "updatedBy": 15,
+    "createdAt": "2023-11-02T21:23:16.39Z",
+    "updatedAt": "2026-04-17T20:39:14.206724Z",
+    "activeEventsCount": 330
+  }
+}

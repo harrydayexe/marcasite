@@ -1,7 +1,7 @@
 {
   "id": "id-value",
   "body": "body-value",
-  "parentEntityType": "parentEntityType-value",
+  "parentEntityType": "Event",
   "parentEntityID": 7,
   "parentCommentID": "parentCommentID-value",
   "userAddress": "0x7c3db723f1d4d8cb9c550095203b686cb11e5c6b",
