@@ -8,7 +8,7 @@
 //! | Service | Client | Feature |
 //! |---|---|---|
 //! | Gamma API: events, markets, tags, series, comments, sports, search, profiles | [`gamma::GammaClient`] | `gamma` |
-//! | CLOB API: order books, prices, spreads, markets, price history, rewards | [`clob::ClobClient`] | `clob` |
+//! | CLOB API: order books, prices, spreads, markets, price history, rewards, rebates, builder trades | [`clob::ClobClient`] | `clob` |
 //! | Data API v2: positions, PnL, trades, activity, leaderboards, holders | [`data::DataClient`] | `data` |
 //! | Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`] | `relayer` |
 //! | Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`] | `bridge` |
