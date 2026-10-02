@@ -4,6 +4,7 @@ mod boards;
 mod errors;
 mod feeds;
 mod fixtures;
+mod live_fixtures;
 mod markets;
 mod service;
 mod wallet;
