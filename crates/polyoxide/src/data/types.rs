@@ -214,6 +214,14 @@ pub struct ComboLeg {
     /// Outcome token id of the leg.
     pub leg_position_id: TokenId,
     /// On-chain condition id of the leg's market.
+    ///
+    /// Live, the two routes that carry combo legs disagree on its format for the same leg:
+    /// `/v2/activity/combos` serves the market's bytes32 condition id (`0x` plus 64 hex
+    /// digits), while `/v2/positions/combos` serves a 62-digit, `0x01`/`0x02`-prefixed
+    /// value (e.g. `0x0104db2bc4f21eef1caf06186806e548800000000000000000000000000000`)
+    /// that is not the market's condition id. The same leg has the same
+    /// [`leg_position_id`](Self::leg_position_id) on both. The value is kept as served;
+    /// do not use it as a `condition` filter on the single-market routes.
     pub leg_condition_id: ConditionId,
     /// Index of the outcome the combo takes on this leg;
     /// [`UNLABELED_OUTCOME_INDEX`] means the outcome could not be labeled.
@@ -364,6 +372,31 @@ pub(crate) mod datetime_or_empty {
     }
 }
 
+/// An optional epoch-seconds timestamp for which the API serves `0` when there is none:
+/// `0`, `null` and a missing key all deserialize as `None`, and `None` serializes back as
+/// `0`, as on the wire. Use with `#[serde(default, with = "...")]`.
+pub(crate) mod seconds_or_zero {
+    use chrono::{DateTime, Utc};
+    use polyoxide_core::serde_util::timestamp_seconds_option;
+    use serde::{Deserializer, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Option<DateTime<Utc>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(value) => timestamp_seconds_option::serialize(&Some(*value), serializer),
+            None => serializer.serialize_i64(0),
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<DateTime<Utc>>, D::Error> {
+        Ok(timestamp_seconds_option::deserialize(deserializer)?.filter(|t| t.timestamp() != 0))
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // Request helpers
 // ---------------------------------------------------------------------------------------
@@ -447,13 +480,47 @@ pub(crate) fn any_value(_: &'static str, _: &str) -> std::result::Result<(), Val
 }
 
 /// A condition id: `0x` followed by 64 hex digits, the format the overview documents for
-/// the `condition` key (combo condition ids included).
+/// the `condition` key of the single-market routes.
 pub(crate) fn condition_id(
     parameter: &'static str,
     value: &str,
 ) -> std::result::Result<(), ValidationError> {
     validate::bytes32(parameter, value)
 }
+
+/// A combo condition id: `0x` followed by one to 64 hex digits.
+///
+/// The overview documents combo condition ids as `0x03`-prefixed, but live they are `0x`
+/// plus **62** hex digits (31 bytes, e.g.
+/// `0x037cb523f88f4c6ef6a31c33f8a2e72be70000000000000000000000000000`), and the server
+/// answers `400` to a 64-digit id (`invalid combo condition id`). The check is deliberately
+/// looser than live (any 1 to 64 digits) so that a change in the id length on Polymarket's
+/// side does not turn into a client-side rejection; the server has the last word. See
+/// `SPEC_DEVIATIONS.md`.
+pub(crate) fn combo_condition_id(
+    parameter: &'static str,
+    value: &str,
+) -> std::result::Result<(), ValidationError> {
+    let valid = value.strip_prefix("0x").is_some_and(|hex| {
+        (1..=COMBO_CONDITION_MAX_HEX_DIGITS).contains(&hex.len())
+            && hex.bytes().all(|b| b.is_ascii_hexdigit())
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(ValidationError::new(
+            parameter,
+            format!(
+                "must be a combo condition id: `0x` followed by 1 to \
+                 {COMBO_CONDITION_MAX_HEX_DIGITS} hex digits (live ids have 62), got {value:?}"
+            ),
+        ))
+    }
+}
+
+/// The most hex digits a combo condition id may have before it cannot be a combo id at
+/// all (a bytes32).
+const COMBO_CONDITION_MAX_HEX_DIGITS: usize = 64;
 
 /// An integer id: one or more ASCII digits.
 pub(crate) fn integer_id(
@@ -593,9 +660,10 @@ pub(crate) mod test_ids {
     /// A second condition id.
     pub(crate) const CONDITION_2: &str =
         "0x1111111111111111111111111111111111111111111111111111111111111111";
-    /// A combo condition id (`0x03`-prefixed, 64 hex digits).
+    /// A combo condition id as served live: `0x` plus 62 hex digits (captured 2026-10-02
+    /// from `GET /v2/positions/combos`).
     pub(crate) const COMBO_CONDITION: &str =
-        "0x03aa000000000000000000000000000000000000000000000000000000000001";
+        "0x033c72a79df1dfd46683b15b5c0ce78ef50000000000000000000000000000";
 }
 
 #[cfg(test)]

@@ -31,7 +31,7 @@ async fn list_trades_sends_filters_and_decodes() {
         .and(query_param("taker_only", "false"))
         .and(query_param("filter_type", "CASH"))
         .and(query_param("filter_amount", "10.5"))
-        .and(query_param("event_id", "1,2"))
+        .and(query_param_is_missing("event_id"))
         .and(query_param_is_missing("user"))
         .and(query_param_is_missing("offset"))
         .respond_with(
@@ -46,7 +46,6 @@ async fn list_trades_sends_filters_and_decodes() {
         .data()
         .list_trades()
         .conditions([CONDITION])
-        .event_ids(["1", "2"])
         .side(Side::Buy)
         .taker_only(false)
         .filter_type(FilterType::Cash)

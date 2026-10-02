@@ -89,15 +89,17 @@ pub struct LeaderboardUserEntry {
     pub x_username: String,
     /// Profile verification badge.
     pub verified: bool,
-    /// Rank on the PnL board, exposed as served.
+    /// Rank on the PnL board; `None` means unranked on that board.
     ///
-    /// The docs give two readings of "unranked": the schema says a `null` rank (`None`)
-    /// means unranked on that board, while the `/v2/leaderboard` description says a rank
-    /// of `0` on this arm means unranked, not first. Treat both `None` and `Some(0)` as
-    /// unranked.
+    /// The docs give two readings of "unranked": the schema says a `null` rank, while the
+    /// `/v2/leaderboard` description says a rank of `0`. Live it is always `null`: `0` was
+    /// never observed (checked 2026-10-02 over several hundred wallet/board combinations),
+    /// and a wallet ranked on one board but not the other has `null` for the unranked one.
+    /// The value is kept as served, so a `Some(0)` would still decode; treat it as
+    /// unranked as well.
     pub rank_pnl: Option<u32>,
-    /// Rank on the volume board, exposed as served; `None` and `Some(0)` both mean
-    /// unranked (see [`rank_pnl`](Self::rank_pnl)).
+    /// Rank on the volume board; `None` means unranked on that board (see
+    /// [`rank_pnl`](Self::rank_pnl)).
     pub rank_volume: Option<u32>,
 }
 
