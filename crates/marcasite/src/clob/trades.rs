@@ -291,8 +291,8 @@ mod tests {
         }]
     }"#;
 
-    /// Example response of `GET /builder/trades` in docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/trade/get-builder-trades.md): no `builderCode` / `builderFee`,
+    /// Example response of `GET /builder/trades` in docs/polymarket/specs/clob-openapi.yaml
+    /// (docs/polymarket/api-reference/trade/get-builder-trades.md): no `builderCode` / `builderFee`,
     /// micro-unit amounts.
     const DOCUMENTED_EXAMPLE: &str = r#"{
         "limit": 300,

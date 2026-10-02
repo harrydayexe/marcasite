@@ -870,7 +870,7 @@ mod tests {
     }"#;
 
     /// Field names and types from `components/schemas/HoldersPage`, `MetaHolder` and
-    /// `Holder` in `docs/specs/data-v2-openapi.json`.
+    /// `Holder` in `docs/polymarket/specs/data-v2-openapi.json`.
     #[test]
     fn deserializes_holders_page() {
         let json = format!(

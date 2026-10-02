@@ -14,7 +14,7 @@ use crate::common;
 const CONDITION_ID: &str = "0xbd31dc8a20211944f6b70f31557f1001557b59905b7738480ca09bd4532f84af";
 
 /// A `PaginatedSimplifiedMarkets` page (fields from the schema in
-/// docs/specs/clob-openapi.yaml; the spec has no example).
+/// docs/polymarket/specs/clob-openapi.yaml; the spec has no example).
 fn simplified_page(ids: &[&str], next_cursor: &str) -> String {
     let data: Vec<_> = ids
         .iter()

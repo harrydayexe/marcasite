@@ -9,10 +9,10 @@ use wiremock::{
 
 use crate::common;
 
-/// Example bridge address from `docs/specs/bridge-openapi.yaml`.
+/// Example bridge address from `docs/polymarket/specs/bridge-openapi.yaml`.
 const BRIDGE_ADDRESS: &str = "EXoZue2avJae1d45B3fVw2unhkrtToSYQqHtHgfZ2cbE";
 
-/// `200` example of `GET /status/{address}` in `docs/specs/bridge-openapi.yaml`.
+/// `200` example of `GET /status/{address}` in `docs/polymarket/specs/bridge-openapi.yaml`.
 const EXAMPLE: &str = r#"{
     "transactions": [
         {

@@ -39,6 +39,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --all-features
 
+  sdk-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: extractions/setup-just@v3
+      - uses: Swatinem/rust-cache@v2
+      # Installs the pinned nightly (`docs_nightly` in the justfile) and fails if docs/sdk/
+      # does not match the code.
+      - run: just docs-md-check
+
   deny:
     runs-on: ubuntu-latest
     steps:

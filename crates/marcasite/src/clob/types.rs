@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn page_maps_end_sentinel() {
-        // Envelope from the `/rewards/markets/current` example in docs/specs/clob-openapi.yaml.
+        // Envelope from the `/rewards/markets/current` example in docs/polymarket/specs/clob-openapi.yaml.
         let page: Page<serde_json::Value> =
             serde_json::from_str(r#"{"limit":500,"count":0,"next_cursor":"LTE=","data":[]}"#)
                 .unwrap();
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn book_request_serialization() {
         // Request body examples of `POST /books` and `POST /prices` in
-        // docs/specs/clob-openapi.yaml.
+        // docs/polymarket/specs/clob-openapi.yaml.
         let body = vec![
             BookRequest::from("0xabc123def456..."),
             BookRequest::new("0xdef456abc123...").with_side(Side::Sell),

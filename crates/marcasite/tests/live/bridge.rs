@@ -13,10 +13,10 @@ use serde_json::json;
 use crate::common::{BRIDGE, check, get, pm, post, sample};
 
 /// An address that appears as a bridge deposit address in
-/// `docs/api-reference/bridge/create-bridge-addresses.md`; it has a history of transfers.
+/// `docs/polymarket/api-reference/bridge/create-bridge-addresses.md`; it has a history of transfers.
 const DOCUMENTED_BRIDGE_ADDRESS: &str = "0x23566f8b2E82aDfCf01846E54899d110e97AC053";
 
-/// Polygon USDC and pUSD, as in the `POST /quote` example of `docs/specs/bridge-openapi.yaml`.
+/// Polygon USDC and pUSD, as in the `POST /quote` example of `docs/polymarket/specs/bridge-openapi.yaml`.
 const POLYGON_USDC: &str = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
 const POLYGON_PUSD: &str = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB";
 

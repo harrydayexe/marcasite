@@ -164,7 +164,7 @@ impl GammaClient {
 
     /// Gets the profile of a user address.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getPublicProfileByUserAddress` (no
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getPublicProfileByUserAddress` (no
     /// published doc page).
     ///
     /// # Errors
@@ -188,7 +188,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/PublicProfileResponse` and
-    /// `PublicProfileUser` in `docs/specs/gamma-openapi.yaml`; the address is the documented
+    /// `PublicProfileUser` in `docs/polymarket/specs/gamma-openapi.yaml`; the address is the documented
     /// example of the `address` parameter.
     #[test]
     fn deserializes_public_profile() {

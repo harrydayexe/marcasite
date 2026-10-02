@@ -12,7 +12,7 @@ use crate::common;
 #[tokio::test]
 async fn get_server_time() {
     let server = common::server().await;
-    // Example response of `GET /time` in docs/specs/clob-openapi.yaml.
+    // Example response of `GET /time` in docs/polymarket/specs/clob-openapi.yaml.
     Mock::given(method("GET"))
         .and(path("/time"))
         .respond_with(json("1234567890"))

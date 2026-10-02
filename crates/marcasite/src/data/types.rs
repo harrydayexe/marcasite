@@ -668,7 +668,7 @@ mod tests {
     use super::*;
 
     /// The pagination object from the example response in
-    /// `docs/api-reference/data-api/overview.md` ("Make a First Request").
+    /// `docs/polymarket/api-reference/data-api/overview.md` ("Make a First Request").
     #[test]
     fn deserializes_overview_pagination() {
         let json = r#"{
@@ -744,7 +744,7 @@ mod tests {
         assert_eq!(empty.next_cursor(), None);
     }
 
-    /// Values from `components/schemas/ErrorCode` in `docs/specs/data-v2-openapi.json`.
+    /// Values from `components/schemas/ErrorCode` in `docs/polymarket/specs/data-v2-openapi.json`.
     #[test]
     fn error_codes() {
         for (wire, code) in [

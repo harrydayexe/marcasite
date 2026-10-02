@@ -11,7 +11,7 @@ use marcasite::{
 
 use crate::common::{RELAYER, check, get, pm, sample};
 
-/// The example id from `docs/api-reference/relayer/get-a-transaction-by-id.md`.
+/// The example id from `docs/polymarket/api-reference/relayer/get-a-transaction-by-id.md`.
 const DOCUMENTED_TRANSACTION_ID: &str = "0190b317-a1d3-7bec-9b91-eeb6dcd3a620";
 
 fn is_decimal(s: &str) -> bool {

@@ -465,7 +465,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Comment`, `CommentProfile`,
-    /// `CommentPosition` and `Reaction` in `docs/specs/gamma-openapi.yaml` (the docs publish
+    /// `CommentPosition` and `Reaction` in `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish
     /// no example body).
     #[test]
     fn deserializes_comment_wire_names_and_types() {

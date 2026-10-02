@@ -1,7 +1,7 @@
 //! Gamma API integration tests.
 //!
 //! The Gamma docs publish no example response bodies, so `fixtures/*.json` are generated
-//! from `components/schemas` in `docs/specs/gamma-openapi.yaml`: every documented property
+//! from `components/schemas` in `docs/polymarket/specs/gamma-openapi.yaml`: every documented property
 //! is present with a placeholder value of its documented type (nested `Market`, `Event` and
 //! `Series` objects are reduced to `{"id": "9"}`). The exception is the amounts the spec
 //! types as plain `string` (`Market` `liquidity`, `volume`, `fee`, `umaBond`, `umaReward`

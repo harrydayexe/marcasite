@@ -281,8 +281,8 @@ impl ListComboMarkets {
 mod tests {
     use super::*;
 
-    /// `200` example of `GET /v1/rfq/combo-markets` in `docs/specs/combos-rfq-openapi.yaml`
-    /// (also on `docs/api-reference/combo-markets/get-combo-markets.md`).
+    /// `200` example of `GET /v1/rfq/combo-markets` in `docs/polymarket/specs/combos-rfq-openapi.yaml`
+    /// (also on `docs/polymarket/api-reference/combo-markets/get-combo-markets.md`).
     const EXAMPLE: &str = r#"{
         "markets": [
             {

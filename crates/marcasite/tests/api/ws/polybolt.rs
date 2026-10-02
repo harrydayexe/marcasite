@@ -1,6 +1,6 @@
 //! PolyBolt `price.polymarket` (`/ws`) against a mock server.
 //!
-//! Message bodies are the examples in `docs/specs/polybolt-asyncapi.json`.
+//! Message bodies are the examples in `docs/polymarket/specs/polybolt-asyncapi.json`.
 
 use futures_core::stream::FusedStream as _;
 use marcasite::{

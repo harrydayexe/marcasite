@@ -1,6 +1,6 @@
 # Spec deviations
 
-Places where the live Polymarket API disagrees with its documentation (`docs/`, fetched
+Places where the live Polymarket API disagrees with its documentation (`docs/polymarket/`, fetched
 2026-10-01), and what marcasite does about it. **The SDK follows the live API** (see `AGENTS.md`);
 this file records each departure so it can be revisited if Polymarket changes the API or fixes the
 docs.
@@ -21,7 +21,7 @@ Observed: 2026-10-02 unless stated.
 
 ## Gamma API
 
-Spec lines refer to `docs/specs/gamma-openapi.yaml`. Pinning tests are in
+Spec lines refer to `docs/polymarket/specs/gamma-openapi.yaml`. Pinning tests are in
 `crates/marcasite/tests/live/gamma.rs`; responses captured from the live API for offline tests are
 in `crates/marcasite/tests/api/gamma/fixtures/live/` (decoded by `tests/api/gamma/live.rs`).
 
@@ -208,7 +208,7 @@ in `crates/marcasite/tests/api/gamma/fixtures/live/` (decoded by `tests/api/gamm
 ## CLOB API
 
 All CLOB pinning tests are in `crates/marcasite/tests/live/clob.rs`. Spec paths below are in
-`docs/specs/clob-openapi.yaml`.
+`docs/polymarket/specs/clob-openapi.yaml`.
 
 ### `GET /midpoint` response field is `mid`, not `mid_price`
 
@@ -428,7 +428,7 @@ All CLOB pinning tests are in `crates/marcasite/tests/live/clob.rs`. Spec paths 
 
 Pinning tests are in `crates/marcasite/tests/live/data.rs` (`just test-live data`) unless a path is
 given; the offline decode tests of captured rows are in
-`crates/marcasite/tests/api/data/live_fixtures.rs`. Spec = `docs/specs/data-v2-openapi.json`.
+`crates/marcasite/tests/api/data/live_fixtures.rs`. Spec = `docs/polymarket/specs/data-v2-openapi.json`.
 
 ### Combo condition ids are `0x` + 62 hex digits
 
@@ -674,7 +674,7 @@ Checked and **not** a deviation: the `/v2/positions` `title` limit is 200 *chara
 
 ### Sports channel: heartbeat is a protocol-level ping every 15 s, not a text `ping` every 5 s
 
-- **Kind:** Mismatch (docs: `specs/asyncapi-sports.json` and `docs/api-reference/wss/sports.md`: the server sends a text `ping` every 5 s and expects `pong` within 10 s).
+- **Kind:** Mismatch (docs: `specs/asyncapi-sports.json` and `docs/polymarket/api-reference/wss/sports.md`: the server sends a text `ping` every 5 s and expects `pong` within 10 s).
 - **Live:** no text `ping` in 400 frames or in 90 s of idle observation; the server sends an empty **WebSocket protocol ping frame every 15 s** (observed at 15.0, 30.1, 45.0, 60.0, 75.0 and 90.0 s) and answers a client protocol ping with a pong. A client text `ping` gets no reply.
 - **SDK:** protocol pings are answered automatically by the transport and count as activity. The text `ping` to `pong` auto-reply is kept in case the documented behaviour appears. **Bug fixed:** `SportsChannel::DEFAULT_IDLE_TIMEOUT` was 15 s (three times the documented 5 s), which equals the live ping interval, so a quiet channel could time out right as a ping was due. It is now 45 s (three times the live interval).
 - **Pinning tests:** `ws::sports_channel_sends_protocol_pings` (a protocol ping arrives within 25 s, no text `ping`); offline `protocol_pings_keep_a_quiet_channel_alive`.

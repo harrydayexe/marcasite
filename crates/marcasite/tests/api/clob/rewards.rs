@@ -18,7 +18,7 @@ use crate::common;
 const CONDITION_ID: &str = "0xbd31dc8a20211944f6b70f31557f1001557b59905b7738480ca09bd4532f84af";
 
 /// A `PaginatedCurrentReward` page based on the `GET /rewards/markets/current` example in
-/// docs/specs/clob-openapi.yaml.
+/// docs/polymarket/specs/clob-openapi.yaml.
 fn current_page(condition_ids: &[&str], next_cursor: &str) -> String {
     let data: Vec<_> = condition_ids
         .iter()
@@ -124,7 +124,7 @@ async fn invalid_cursor_is_an_api_error() {
 async fn raw_rewards_for_market() {
     let server = common::server().await;
     // Example response of `GET /rewards/markets/{condition_id}` in
-    // docs/specs/clob-openapi.yaml.
+    // docs/polymarket/specs/clob-openapi.yaml.
     let body = json!({
         "limit": 100,
         "count": 1,
@@ -198,7 +198,7 @@ async fn raw_rewards_for_market_stream() {
     assert_eq!(markets[0].question, "Q?");
 }
 
-/// Example response of `GET /rewards/markets/multi` in docs/specs/clob-openapi.yaml.
+/// Example response of `GET /rewards/markets/multi` in docs/polymarket/specs/clob-openapi.yaml.
 const MULTI: &str = r#"{
     "limit": 50,
     "count": 1,
@@ -304,7 +304,7 @@ async fn markets_with_rewards_page_size_limit() {
 }
 
 /// A `PaginatedMultiMarketInfo` page with one market per id, based on the
-/// `GET /rewards/markets/multi` example in docs/specs/clob-openapi.yaml.
+/// `GET /rewards/markets/multi` example in docs/polymarket/specs/clob-openapi.yaml.
 fn multi_page(market_ids: &[&str], next_cursor: &str) -> String {
     let mut page: serde_json::Value = serde_json::from_str(MULTI).unwrap();
     let template = page["data"][0].clone();

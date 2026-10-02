@@ -9,7 +9,7 @@ impl GammaClient {
     ///
     /// Returns the plain-text body of a successful response (the spec's example is `"OK"`).
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getGammaStatus` (no published doc
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getGammaStatus` (no published doc
     /// page).
     ///
     /// ```no_run

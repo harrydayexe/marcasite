@@ -8,7 +8,7 @@ use wiremock::{
 
 use crate::common;
 
-/// Example wallet address from `docs/specs/relayer-openapi.yaml`.
+/// Example wallet address from `docs/polymarket/specs/relayer-openapi.yaml`.
 const WALLET: &str = "0x6d8c4e9aDF5748Af82Dabe2C6225207770d6B4fa";
 
 #[tokio::test]

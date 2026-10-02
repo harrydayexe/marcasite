@@ -361,7 +361,7 @@ mod tests {
     use crate::clob::types::test_util::round_trip;
 
     /// Field names and types from `components/schemas/PricesHistoryResponse` /
-    /// `MarketPrice` in docs/specs/clob-openapi.yaml (the spec has no example).
+    /// `MarketPrice` in docs/polymarket/specs/clob-openapi.yaml (the spec has no example).
     #[test]
     fn deserializes_prices_history() {
         let json = r#"{"history":[{"t":1700000000,"p":0.45},{"t":1700003600,"p":0.5}]}"#;
@@ -378,7 +378,7 @@ mod tests {
     }
 
     /// Field names and types from `components/schemas/BatchPricesHistoryResponse` in
-    /// docs/specs/clob-openapi.yaml (the spec has no example).
+    /// docs/polymarket/specs/clob-openapi.yaml (the spec has no example).
     #[test]
     fn deserializes_batch_prices_history() {
         let json = r#"{"history":{"123":[{"t":1700000000,"p":0.45}],"456":[]}}"#;

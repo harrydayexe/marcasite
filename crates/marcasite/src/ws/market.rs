@@ -1,6 +1,6 @@
 //! CLOB market channel: `wss://ws-subscriptions-clob.polymarket.com/ws/market`.
 //!
-//! Spec: `docs/specs/asyncapi.json`; page: `docs/api-reference/wss/market.md`.
+//! Spec: `docs/polymarket/specs/asyncapi.json`; page: `docs/polymarket/api-reference/wss/market.md`.
 
 use std::{
     pin::Pin,
@@ -1057,7 +1057,7 @@ mod tests {
     }
 
     // Requests: `components/messages/subscriptionRequest` and
-    // `subscriptionRequestUpdate` examples in `docs/specs/asyncapi.json`.
+    // `subscriptionRequestUpdate` examples in `docs/polymarket/specs/asyncapi.json`.
 
     #[test]
     fn serializes_subscription_requests() {
@@ -1124,7 +1124,7 @@ mod tests {
         assert!(matches!(empty.to_json(), Err(Error::Validation(_))));
     }
 
-    // Events: `components/messages/*` examples in `docs/specs/asyncapi.json`.
+    // Events: `components/messages/*` examples in `docs/polymarket/specs/asyncapi.json`.
 
     #[test]
     fn deserializes_book() {

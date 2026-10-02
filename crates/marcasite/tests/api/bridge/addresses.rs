@@ -13,7 +13,7 @@ use wiremock::{
 
 use crate::common;
 
-/// Example values from `docs/specs/bridge-openapi.yaml`.
+/// Example values from `docs/polymarket/specs/bridge-openapi.yaml`.
 const WALLET: &str = "0x56687bf447db6ffa42ffe2204a05edaa20f55839";
 const BUILDER_CODE: &str = "0x00000000000000000000000000000000000000000000000000000000abcd1234";
 

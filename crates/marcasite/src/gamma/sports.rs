@@ -118,7 +118,7 @@ impl GammaClient {
 
     /// Gets a sports team by id.
     ///
-    /// See `docs/specs/gamma-openapi.yaml`, operationId `getTeam` (no published doc page).
+    /// See `docs/polymarket/specs/gamma-openapi.yaml`, operationId `getTeam` (no published doc page).
     ///
     /// # Errors
     ///
@@ -240,7 +240,7 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Team` in
-    /// `docs/specs/gamma-openapi.yaml`.
+    /// `docs/polymarket/specs/gamma-openapi.yaml`.
     #[test]
     fn team_id_is_an_integer_on_the_wire() {
         let json = serde_json::json!({
@@ -264,7 +264,7 @@ mod tests {
     }
 
     /// Field descriptions from `components/schemas/SportsMetadata` in
-    /// `docs/specs/gamma-openapi.yaml`.
+    /// `docs/polymarket/specs/gamma-openapi.yaml`.
     #[test]
     fn sports_metadata_splits_tag_ids() {
         let json = r#"{

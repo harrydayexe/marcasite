@@ -13,7 +13,7 @@ use wiremock::{
 
 use crate::common;
 
-/// Request example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
+/// Request example of `POST /quote` in `docs/polymarket/specs/bridge-openapi.yaml`.
 fn documented_request() -> QuoteRequest {
     QuoteRequest::new()
         .from_amount_base_unit("10000000")

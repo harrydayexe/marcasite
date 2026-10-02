@@ -12,7 +12,7 @@ use crate::common;
 async fn get_supported_assets_decodes() {
     let server = common::server().await;
     // Captured from `GET https://bridge.polymarket.com/supported-assets` on 2026-10-02
-    // (trimmed to one asset). The top-level `note` is not in `docs/specs/bridge-openapi.yaml`.
+    // (trimmed to one asset). The top-level `note` is not in `docs/polymarket/specs/bridge-openapi.yaml`.
     Mock::given(method("GET"))
         .and(path("/supported-assets"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
@@ -63,7 +63,7 @@ async fn server_error_is_typed() {
     assert_eq!(api.message(), Some("boom"));
 }
 
-/// `docs/api-reference/rate-limits.md` documents a 50 req / 10 s limit for the Bridge API.
+/// `docs/polymarket/api-reference/rate-limits.md` documents a 50 req / 10 s limit for the Bridge API.
 #[tokio::test]
 async fn rate_limit_is_typed_with_retry_after() {
     let server = common::server().await;

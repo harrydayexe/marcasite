@@ -102,8 +102,16 @@ async fn main() -> marcasite::Result<()> {
 
 ## Development
 
-The API reference in [`docs/`](docs/) is a verbatim copy of the official documentation and is the
-source of truth for every type. Contributor and agent guidance lives in [`AGENTS.md`](AGENTS.md).
+The API reference in [`docs/polymarket/`](docs/polymarket/) is a verbatim copy of the official
+documentation and is the starting point for every type. Contributor and agent guidance lives in
+[`AGENTS.md`](AGENTS.md).
+
+### Docs for LLMs
+
+[`docs/sdk/`](docs/sdk/) holds the SDK's public API (every module, type and method, with
+signatures and rustdoc) as plain markdown, one file per module. It is generated from rustdoc by
+`just docs-md` and kept current by CI, so it can be dropped into an LLM's context (e.g. a Claude
+project) or read by a coding agent.
 
 ```sh
 just check   # fmt, clippy, tests, docs, cargo-deny — everything CI runs

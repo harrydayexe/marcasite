@@ -272,7 +272,7 @@ impl ListTransactions {
 mod tests {
     use super::*;
 
-    /// `200` example of `GET /status/{address}` in `docs/specs/bridge-openapi.yaml`.
+    /// `200` example of `GET /status/{address}` in `docs/polymarket/specs/bridge-openapi.yaml`.
     #[test]
     fn deserializes_documented_example() {
         let json = r#"{
