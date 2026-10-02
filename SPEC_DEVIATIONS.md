@@ -657,8 +657,8 @@ Checked and **not** a deviation: the `/v2/positions` `title` limit is 200 *chara
 ### Combos: `GET /v1/rfq/combo-markets` page size
 
 - **Kind:** Mismatch (docs: `limit` default `50`, maximum `100`).
-- **Live:** without `limit` the API returns `1000` markets; `limit=1000`, `limit=1001`, `limit=5000` and `limit=10000` are all accepted with `200` and return that many markets (no maximum was found below `10000`; `20000` and `100000` get `400`). `limit=0`, a negative or a non-numeric value get `400 {"error":"invalid limit"}`, as documented (`minimum: 1`).
-- **SDK:** `ListComboMarkets::limit` accepts `1..=1000` (`ValidationError` otherwise); the old client-side maximum of `100` was dropped. Without `limit` the live default of `1000` applies. The upper bound of `1000` is conservative: the live maximum was only probed, not documented.
+- **Live:** without `limit` the API returns `1000` markets; any `limit` from `1` to `10000` is accepted with `200` and returns up to that many markets. The maximum is exactly `10000`: `limit=10001` gets `400 {"error":"invalid rfq: invalid limit"}`, as do `limit=0`, a negative or a non-numeric value (the spec's `minimum: 1` matches).
+- **SDK:** `ListComboMarkets::limit` accepts `1..=10000`, the live range (`ValidationError` otherwise). Without `limit` the live default of `1000` applies.
 - **Pinning test:** `combos::list_combo_markets_limits`.
 
 (`volume` is an integer for some markets and a float for others; `serde_util::decimal_number` handles both. Ids are full length live, the docs' example abbreviates them.)

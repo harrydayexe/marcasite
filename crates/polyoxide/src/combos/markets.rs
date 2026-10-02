@@ -14,9 +14,9 @@ use super::CombosClient;
 
 /// The largest page size the SDK sends for `GET /v1/rfq/combo-markets`.
 ///
-/// The spec says `100`; the live API accepts at least `1000` (and, in practice, well
-/// beyond), so the SDK allows `1000`. See `SPEC_DEVIATIONS.md`.
-const MAX_LIMIT: u32 = 1000;
+/// The spec says `100`; the live API accepts up to `10000` (`10001` is a `400`), so the SDK
+/// allows that. See `SPEC_DEVIATIONS.md`.
+const MAX_LIMIT: u32 = 10_000;
 
 polyoxide_core::string_id! {
     /// The id of a market in the combo catalog (`ComboMarket.id`), e.g. `"1897034"`.
@@ -185,11 +185,12 @@ pub struct ListComboMarkets {
 }
 
 impl ListComboMarkets {
-    /// Number of markets per page, `1..=1000`.
+    /// Number of markets per page, `1..=10000`.
     ///
     /// The spec documents a default of `50` and a maximum of `100`; the live API returns
-    /// `1000` markets per page when no limit is set and accepts limits above `100`
-    /// (`0` and non-numeric values get `400`). The SDK allows `1..=1000`. See
+    /// `1000` markets per page when no limit is set and accepts limits up to `10000`
+    /// (`0`, values above `10000` and non-numeric values get `400`). The SDK allows
+    /// `1..=10000`. See
     /// `SPEC_DEVIATIONS.md`.
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
@@ -245,7 +246,7 @@ impl ListComboMarkets {
     ///
     /// # Errors
     ///
-    /// - [`Error::Validation`](crate::Error::Validation) if the limit is outside `1..=1000`
+    /// - [`Error::Validation`](crate::Error::Validation) if the limit is outside `1..=10000`
     ///   (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` for parameters the server
     ///   rejects.

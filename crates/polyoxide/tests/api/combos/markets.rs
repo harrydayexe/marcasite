@@ -222,7 +222,7 @@ async fn limit_is_validated_before_sending() {
         .await;
 
     let combos = common::polymarket(&server).combos().clone();
-    for limit in [0, 1001] {
+    for limit in [0, 10_001] {
         let err = combos
             .list_combo_markets()
             .limit(limit)
@@ -236,7 +236,7 @@ async fn limit_is_validated_before_sending() {
     }
     let results: Vec<_> = combos
         .list_combo_markets()
-        .limit(5000)
+        .limit(10_001)
         .into_stream()
         .collect()
         .await;

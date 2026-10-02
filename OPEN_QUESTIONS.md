@@ -59,16 +59,14 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
 
 16. Where the `missing_builder_code` warning appears; are `POST /deposit` / `/withdraw` idempotent?
     (Not observable read-only.)
-17. Combos `limit`: live accepts up to at least `10000` (`20000` is a `400`); the SDK caps at
-    `1000`. Raise it?
 
 ## WebSockets
 
-18. Meaning of market-channel subscription `level` 1–3 (no observable effect live).
-19. Sports channel: `elapsed`, `turn`, `turnProviderId` and `sportradarGameId` were seen on early
+17. Meaning of market-channel subscription `level` 1–3 (no observable effect live).
+18. Sports channel: `elapsed`, `turn`, `turnProviderId` and `sportradarGameId` were seen on early
     frames but their value types were never captured (modelled as optional strings). Recapture
     during US/EU game hours. `status` casing varies (`inprogress`, `InProgress`, `running`): keep a
     raw string with `status_is`, or a case-insensitive enum?
-20. Market-channel `new_market` `fee_schedule`: every field is `Option` because few frames were
+19. Market-channel `new_market` `fee_schedule`: every field is `Option` because few frames were
     seen. Tighten?
-21. PolyBolt: is "64 KB" 64,000 or 65,536 bytes (64,000 used)? Reconnection policy for all channels.
+20. PolyBolt: is "64 KB" 64,000 or 65,536 bytes (64,000 used)? Reconnection policy for all channels.

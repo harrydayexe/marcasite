@@ -90,15 +90,15 @@ async fn list_combo_markets_exclude() {
 }
 
 /// SPEC_DEVIATIONS.md, Combos: the spec says the default page size is 50 and the maximum
-/// 100; live returns 1000 without a `limit`, accepts `limit` above 100, and rejects 0. The
-/// SDK allows `1..=1000`.
+/// 100; live returns 1000 without a `limit`, accepts `limit` up to 10000, and rejects 0 and
+/// 10001. The SDK allows `1..=10000`.
 #[tokio::test]
 #[ignore = "live network"]
 async fn list_combo_markets_limits() {
     let err = pm()
         .combos()
         .list_combo_markets()
-        .limit(1001)
+        .limit(10_001)
         .send()
         .await
         .unwrap_err();
@@ -139,6 +139,17 @@ async fn list_combo_markets_limits() {
     let response = reqwest::Client::new()
         .get(format!("{COMBOS}/v1/rfq/combo-markets"))
         .query(&[("limit", "0")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 400);
+
+    // The live maximum is exactly 10000: `limit=10000` is a 200, `10001` a 400.
+    let max = get(COMBOS, "/v1/rfq/combo-markets", &[("limit", "10000")]).await;
+    assert!(max.json["markets"].is_array());
+    let response = reqwest::Client::new()
+        .get(format!("{COMBOS}/v1/rfq/combo-markets"))
+        .query(&[("limit", "10001")])
         .send()
         .await
         .unwrap();
