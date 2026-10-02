@@ -304,23 +304,14 @@ pub(crate) fn require_id(parameter: &'static str, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fails if a value of a list parameter is empty or, for a comma-separated list (`csv`),
-/// contains a comma, which would split it into several values on the wire.
+/// Fails if a value of a list parameter is empty.
 pub(crate) fn require_list_values<'a>(
     parameter: &'static str,
     values: impl IntoIterator<Item = &'a str>,
-    csv: bool,
 ) -> Result<()> {
     for value in values {
         if value.is_empty() {
             return Err(ValidationError::new(parameter, "must not contain an empty value").into());
-        }
-        if csv && value.contains(',') {
-            return Err(ValidationError::new(
-                parameter,
-                format!("value {value:?} contains a comma, the list separator"),
-            )
-            .into());
         }
     }
     Ok(())
@@ -364,6 +355,27 @@ pub(crate) mod timestamp_seconds_string {
         deserializer: D,
     ) -> Result<DateTime<Utc>, D::Error> {
         serde_util::timestamp_seconds::deserialize(deserializer)
+    }
+}
+
+/// Unix milliseconds sent as a decimal string (e.g. `"1790934258308"`); serializes back to a
+/// string.
+pub(crate) mod timestamp_millis_string {
+    use chrono::{DateTime, Utc};
+    use polyoxide_core::serde_util;
+    use serde::{Deserializer, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &DateTime<Utc>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&value.timestamp_millis())
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<DateTime<Utc>, D::Error> {
+        serde_util::timestamp_millis::deserialize(deserializer)
     }
 }
 
@@ -524,14 +536,10 @@ mod tests {
         );
         assert_eq!(parameter(require_id("token_id", "")), "token_id");
         assert!(require_id("token_id", "1").is_ok());
-        assert!(require_list_values("token_ids", ["1", "2"], true).is_ok());
-        assert!(require_list_values("token_ids", ["1,2"], false).is_ok());
+        assert!(require_list_values("token_ids", ["1", "2"]).is_ok());
+        assert!(require_list_values("token_ids", ["1,2"]).is_ok());
         assert_eq!(
-            parameter(require_list_values("token_ids", ["1", ""], true)),
-            "token_ids"
-        );
-        assert_eq!(
-            parameter(require_list_values("token_ids", ["1,2"], true)),
+            parameter(require_list_values("token_ids", ["1", ""])),
             "token_ids"
         );
     }
@@ -564,6 +572,25 @@ mod tests {
     struct WithTime {
         #[serde(with = "timestamp_seconds_string")]
         time: chrono::DateTime<chrono::Utc>,
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize)]
+    struct WithMillis {
+        #[serde(with = "timestamp_millis_string")]
+        time: chrono::DateTime<chrono::Utc>,
+    }
+
+    #[test]
+    fn timestamp_millis_string_round_trips() {
+        let parsed: WithMillis = serde_json::from_str(r#"{"time":"1790934258308"}"#).unwrap();
+        assert_eq!(parsed.time.timestamp_millis(), 1_790_934_258_308);
+        assert_eq!(
+            serde_json::to_string(&parsed).unwrap(),
+            r#"{"time":"1790934258308"}"#
+        );
+        let parsed: WithMillis = serde_json::from_str(r#"{"time":1790934258308}"#).unwrap();
+        assert_eq!(parsed.time.timestamp_millis(), 1_790_934_258_308);
+        assert!(serde_json::from_str::<WithMillis>(r#"{"time":"soon"}"#).is_err());
     }
 
     #[test]

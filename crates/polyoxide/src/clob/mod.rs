@@ -13,19 +13,15 @@
 //! |---|---|
 //! | `GET /time` | [`ClobClient::get_server_time`] |
 //! | `GET /book` | [`ClobClient::get_order_book`] |
-//! | `GET /books` | [`ClobClient::get_order_books`] |
-//! | `POST /books` | [`ClobClient::get_order_books_by_body`] |
+//! | `POST /books` | [`ClobClient::get_order_books`] |
 //! | `GET /price` | [`ClobClient::get_price`] |
-//! | `GET /prices` | [`ClobClient::get_prices`] |
-//! | `POST /prices` | [`ClobClient::get_prices_by_body`] |
+//! | `POST /prices` | [`ClobClient::get_prices`] |
 //! | `GET /midpoint` | [`ClobClient::get_midpoint`] |
-//! | `GET /midpoints` | [`ClobClient::get_midpoints`] |
-//! | `POST /midpoints` | [`ClobClient::get_midpoints_by_body`] |
+//! | `POST /midpoints` | [`ClobClient::get_midpoints`] |
 //! | `GET /spread` | [`ClobClient::get_spread`] |
 //! | `POST /spreads` | [`ClobClient::get_spreads`] |
 //! | `GET /last-trade-price` | [`ClobClient::get_last_trade_price`] |
-//! | `GET /last-trades-prices` | [`ClobClient::get_last_trade_prices`] |
-//! | `POST /last-trades-prices` | [`ClobClient::get_last_trade_prices_by_body`] |
+//! | `POST /last-trades-prices` | [`ClobClient::get_last_trade_prices`] |
 //! | `GET /fee-rate` | [`ClobClient::get_fee_rate`] |
 //! | `GET /fee-rate/{token_id}` | [`ClobClient::get_fee_rate_by_path`] |
 //! | `GET /tick-size` | [`ClobClient::get_tick_size`] |
@@ -48,7 +44,8 @@
 //! | `GET /builder/trades` | [`ClobClient::list_builder_trades`] |
 //!
 //! Authenticated CLOB endpoints (orders, trades of a user, API keys, user rewards, ...) are
-//! not implemented yet; see `ENDPOINTS.md`.
+//! not implemented yet; see `ENDPOINTS.md`. The places where the live API differs from the
+//! docs, and what the SDK does about each, are listed in `SPEC_DEVIATIONS.md`.
 //!
 //! # Naming
 //!
@@ -58,14 +55,17 @@
 //! or `None` on the last one: the CLOB marks the last page with the `next_cursor` value
 //! [`END_CURSOR`] (`"LTE="`). Every other endpoint is a `get_*` method.
 //!
-//! Several market-data endpoints exist in more than one documented form, and each form has
-//! its own method:
+//! Several market-data endpoints are documented in more than one form. The batch endpoints
+//! (`books`, `prices`, `midpoints`, `last-trades-prices`) are implemented as their `POST`
+//! (JSON array body) form only, under the plain plural name (`get_<things>`): the documented
+//! `GET` forms with a `token_ids` query parameter answer `400 Invalid payload` for every
+//! encoding on the live API, so they cannot be called (see `SPEC_DEVIATIONS.md`). The
+//! single-token endpoints with a path parameter keep a `_by_path` form:
 //!
 //! | Form | Method name | Example |
 //! |---|---|---|
 //! | `GET` with a single `token_id` query parameter | `get_<thing>` | [`ClobClient::get_midpoint`] |
-//! | `GET` with a comma-separated `token_ids` query parameter | `get_<things>` | [`ClobClient::get_midpoints`] |
-//! | `POST` with a JSON array request body | `get_<things>_by_body` | [`ClobClient::get_midpoints_by_body`] |
+//! | `POST` with a JSON array request body | `get_<things>` | [`ClobClient::get_midpoints`] |
 //! | `GET` with the token id as a path parameter | `get_<thing>_by_path` | [`ClobClient::get_fee_rate_by_path`] |
 //!
 //! `POST /spreads` has no `GET` counterpart and is simply [`ClobClient::get_spreads`].
@@ -75,17 +75,11 @@
 //! Requests are checked before they are sent, and a violation is an
 //! [`Error::Validation`](crate::Error::Validation) naming the parameter: required ids must
 //! not be empty, required lists (including the request bodies of the batch `POST` forms)
-//! must not be empty, ids in comma-separated lists must not contain a comma, and the
-//! documented limits ([`MAX_LAST_TRADE_PRICES_TOKEN_IDS`],
+//! must not be empty, and the documented limits ([`MAX_LAST_TRADE_PRICES_TOKEN_IDS`],
 //! [`MAX_BATCH_PRICES_HISTORY_MARKETS`], [`MAX_REWARDS_MARKETS_PAGE_SIZE`]) and patterns
-//! (builder codes and markets of [`ClobClient::list_builder_trades`]) are enforced.
-//!
-//! # URL length
-//!
-//! The docs give no limit on the length of a URL. A long `token_ids` list makes a long URL
-//! (token ids are up to 78 digits each, and every comma is percent-encoded), which proxies
-//! and CDNs commonly reject. The `_by_body` forms send the same request in the body instead,
-//! so prefer them for large batches.
+//! (builder codes and markets of [`ClobClient::list_builder_trades`]) are enforced. The
+//! price-history `fidelity` minimums that the live server enforces for the `1m` and `1w`
+//! intervals ([`MIN_FIDELITY_ONE_MONTH`], [`MIN_FIDELITY_ONE_WEEK`]) are checked as well.
 
 mod client;
 mod market_data;
@@ -110,7 +104,7 @@ pub use markets::{
 };
 pub use prices_history::{
     BatchPricesHistory, GetBatchPricesHistory, GetPricesHistory, MAX_BATCH_PRICES_HISTORY_MARKETS,
-    PriceHistoryInterval, PricePoint, PricesHistory,
+    MIN_FIDELITY_ONE_MONTH, MIN_FIDELITY_ONE_WEEK, PriceHistoryInterval, PricePoint, PricesHistory,
 };
 pub use rebates::RebatedFees;
 pub use rewards::{

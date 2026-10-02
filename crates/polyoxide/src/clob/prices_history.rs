@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use polyoxide_core::{Query, Result, serde_util, types::TokenId};
+use polyoxide_core::{Query, Result, ValidationError, serde_util, types::TokenId};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -15,23 +15,38 @@ use super::{
 /// Maximum number of markets per [`ClobClient::get_batch_prices_history`] request.
 pub const MAX_BATCH_PRICES_HISTORY_MARKETS: usize = 20;
 
+/// Minimum `fidelity` (in minutes) the server accepts with [`PriceHistoryInterval::OneMonth`].
+pub const MIN_FIDELITY_ONE_MONTH: u32 = 10;
+
+/// Minimum `fidelity` (in minutes) the server accepts with [`PriceHistoryInterval::OneWeek`].
+pub const MIN_FIDELITY_ONE_WEEK: u32 = 5;
+
 polyoxide_core::string_enum! {
     /// Time interval for price-history aggregation (the `interval` parameter).
     ///
     /// The CLOB spec lists the values (`max`, `all`, `1m`, `1w`, `1d`, `6h`, `1h`) without
-    /// describing them. The variant names follow the Data API v2 `GET /v2/prices-history`
-    /// docs, which list the same values as relative windows and size the default bucket
-    /// width of each "to their own span" (`1h`/`6h`/`1d` 60 s, `1w` 300 s, `1m` 1800 s), so
-    /// `1m` spans more than `1w`, i.e. a month. Whether the CLOB endpoints treat the values
-    /// the same way is not documented.
+    /// describing them. Live checks (2026-10-02) show they are windows ending now:
+    ///
+    /// - `1h`, `6h`, `1d`, `1w` are one hour, six hours, one day and one week;
+    /// - **`1m` is one month** (about 30 days), not one minute;
+    /// - `max` and `all` are the same: the whole available history, up to a cap on the number
+    ///   of points (about 4,300 observed), so a small `fidelity` only reaches back a few
+    ///   weeks (30 days at 10 minutes) while `1440` covers more than a year.
+    ///
+    /// The server enforces a minimum `fidelity` per window: **10 minutes for `1m`**, 5 for
+    /// `1w`, and answers `400` below it, including when `fidelity` is omitted (the default is
+    /// 1 minute). The request builders check this client-side
+    /// ([`MIN_FIDELITY_ONE_MONTH`], [`MIN_FIDELITY_ONE_WEEK`]). When `start_ts`/`end_ts` are
+    /// sent as well, the window of the timestamps is used, but the fidelity minimum of the
+    /// interval still applies. See `SPEC_DEVIATIONS.md`.
     pub enum PriceHistoryInterval {
         /// `max`.
         Max => "max",
         /// `all`.
         All => "all",
-        /// `1m`: one month (see the type docs).
+        /// `1m`: one month (needs `fidelity` of at least 10).
         OneMonth => "1m",
-        /// `1w`: one week.
+        /// `1w`: one week (needs `fidelity` of at least 5).
         OneWeek => "1w",
         /// `1d`: one day.
         OneDay => "1d",
@@ -39,6 +54,27 @@ polyoxide_core::string_enum! {
         SixHours => "6h",
         /// `1h`: one hour.
         OneHour => "1h",
+    }
+}
+
+/// Checks the `fidelity` minimum the server enforces for `interval` (see
+/// [`PriceHistoryInterval`]).
+fn check_fidelity(interval: Option<&PriceHistoryInterval>, fidelity: Option<u32>) -> Result<()> {
+    let minimum = match interval {
+        Some(PriceHistoryInterval::OneMonth) => MIN_FIDELITY_ONE_MONTH,
+        Some(PriceHistoryInterval::OneWeek) => MIN_FIDELITY_ONE_WEEK,
+        _ => return Ok(()),
+    };
+    match fidelity {
+        Some(fidelity) if fidelity >= minimum => Ok(()),
+        _ => Err(ValidationError::new(
+            "fidelity",
+            format!(
+                "interval {} needs a fidelity of at least {minimum} minutes",
+                interval.map_or("", PriceHistoryInterval::as_str)
+            ),
+        )
+        .into()),
     }
 }
 
@@ -191,8 +227,9 @@ pub struct GetPricesHistory {
 impl GetPricesHistory {
     /// Only points after this time (`startTs`, sent as Unix seconds).
     ///
-    /// This endpoint's docs say only "unix timestamp"; seconds is the unit documented for
-    /// the batch form's `start_ts`.
+    /// This endpoint's docs say only "unix timestamp"; live confirms seconds (milliseconds
+    /// are rejected as an interval that is too long). The server also appends one point at
+    /// the current time even when it lies after `end_ts` (see `SPEC_DEVIATIONS.md`).
     pub fn start_ts(mut self, start: DateTime<Utc>) -> Self {
         self.start_ts = Some(start);
         self
@@ -211,7 +248,8 @@ impl GetPricesHistory {
         self
     }
 
-    /// Accuracy of the data in minutes (server default: 1 minute).
+    /// Accuracy of the data in minutes (server default: 1 minute). The `1m` and `1w`
+    /// intervals need a minimum (see [`PriceHistoryInterval`]).
     pub fn fidelity(mut self, minutes: u32) -> Self {
         self.fidelity = Some(minutes);
         self
@@ -221,11 +259,14 @@ impl GetPricesHistory {
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if `market` is empty. Missing or
-    /// invalid parameters are an [`Error::Api`](crate::Error::Api) with status `400`. See
-    /// [`Error`](crate::Error) for the other cases.
+    /// [`Error::Validation`](crate::Error::Validation) if `market` is empty, or (parameter
+    /// `fidelity`) if the interval is `1m` or `1w` and the fidelity is missing or below the
+    /// server's minimum (10 and 5 minutes). Missing or invalid parameters are an
+    /// [`Error::Api`](crate::Error::Api) with status `400`. See [`Error`](crate::Error) for
+    /// the other cases.
     pub async fn send(self) -> Result<PricesHistory> {
         require_id("market", self.market.as_str())?;
+        check_fidelity(self.interval.as_ref(), self.fidelity)?;
         let mut query = Query::new();
         query
             .push("market", &self.market)
@@ -273,7 +314,8 @@ impl GetBatchPricesHistory {
         self
     }
 
-    /// Accuracy of the data in minutes (server default: 1 minute).
+    /// Accuracy of the data in minutes (server default: 1 minute). The `1m` and `1w`
+    /// intervals need a minimum (see [`PriceHistoryInterval`]).
     pub fn fidelity(mut self, minutes: u32) -> Self {
         self.fidelity = Some(minutes);
         self
@@ -285,12 +327,15 @@ impl GetBatchPricesHistory {
     ///
     /// [`Error::Validation`](crate::Error::Validation) (parameter `markets`) if there are no
     /// markets (the field is required), more than [`MAX_BATCH_PRICES_HISTORY_MARKETS`], or
-    /// an empty one. Missing or invalid parameters are an [`Error::Api`](crate::Error::Api)
-    /// with status `400`. See [`Error`](crate::Error) for the other cases.
+    /// an empty one; (parameter `fidelity`) if the interval is `1m` or `1w` and the fidelity
+    /// is missing or below the server's minimum (10 and 5 minutes). Missing or invalid
+    /// parameters are an [`Error::Api`](crate::Error::Api) with status `400`. See
+    /// [`Error`](crate::Error) for the other cases.
     pub async fn send(self) -> Result<BatchPricesHistory> {
         require_non_empty("markets", &self.markets)?;
+        check_fidelity(self.interval.as_ref(), self.fidelity)?;
         require_at_most("markets", &self.markets, MAX_BATCH_PRICES_HISTORY_MARKETS)?;
-        require_list_values("markets", self.markets.iter().map(TokenId::as_str), false)?;
+        require_list_values("markets", self.markets.iter().map(TokenId::as_str))?;
         let body = BatchPricesHistoryRequest {
             markets: &self.markets,
             start_ts: self.start_ts,
@@ -359,6 +404,22 @@ mod tests {
             serde_json::to_string(&body).unwrap(),
             r#"{"markets":["123","456"],"start_ts":1700000000,"interval":"1d","fidelity":60}"#
         );
+    }
+
+    #[test]
+    fn fidelity_minimums_per_interval() {
+        let is_fidelity_error = |result: Result<()>| matches!(&result, Err(polyoxide_core::Error::Validation(v)) if v.parameter() == "fidelity");
+        let month = PriceHistoryInterval::OneMonth;
+        let week = PriceHistoryInterval::OneWeek;
+        assert!(is_fidelity_error(check_fidelity(Some(&month), None)));
+        assert!(is_fidelity_error(check_fidelity(Some(&month), Some(9))));
+        assert!(check_fidelity(Some(&month), Some(10)).is_ok());
+        assert!(is_fidelity_error(check_fidelity(Some(&week), Some(4))));
+        assert!(check_fidelity(Some(&week), Some(5)).is_ok());
+        // No minimum for the other intervals, or without an interval.
+        assert!(check_fidelity(Some(&PriceHistoryInterval::OneDay), Some(1)).is_ok());
+        assert!(check_fidelity(Some(&PriceHistoryInterval::Max), None).is_ok());
+        assert!(check_fidelity(None, None).is_ok());
     }
 
     #[test]

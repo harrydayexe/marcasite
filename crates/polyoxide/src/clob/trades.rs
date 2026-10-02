@@ -18,17 +18,22 @@ use super::{
 };
 
 /// A trade attributed to a builder code (`components/schemas/BuilderTrade`).
+///
+/// Amounts (`size`, `size_usdc`, `fee`, `fee_usdc`, `builder_fee`) are decimal units, not
+/// the micro-units the spec examples show (live check, 2026-10-02): a trade of 5 shares at
+/// `0.01` has `size` `"5"` and `sizeUsdc` `"0.05"`. See `SPEC_DEVIATIONS.md`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct BuilderTrade {
     /// Trade id.
     pub id: TradeId,
-    /// Trade type, e.g. `"TAKER"` (the spec documents no fixed set of values).
+    /// Trade type, e.g. `"TAKER"` or `"MAKER"` (the spec documents no fixed set of values).
     pub trade_type: String,
     /// Hash of the taker order.
     pub taker_order_hash: OrderId,
-    /// Builder code the trade is attributed to.
+    /// The spec's builder-code field. Live it is always an empty string; the code is in
+    /// [`builder_code`](Self::builder_code) instead.
     pub builder: BuilderCode,
     /// Market (condition id).
     pub market: ConditionId,
@@ -36,17 +41,18 @@ pub struct BuilderTrade {
     pub asset_id: TokenId,
     /// Trade side.
     pub side: Side,
-    /// Trade size, exactly as sent (e.g. `"100000000"`; the spec does not state the unit).
+    /// Trade size in shares, as a decimal (e.g. `"5"`; the spec's example shows
+    /// micro-units, live sends decimal units).
     pub size: Decimal,
-    /// Trade size in USDC, exactly as sent (e.g. `"50000000"`; the spec does not state the
-    /// unit).
+    /// Trade size in USDC, as a decimal (e.g. `"0.05"`; the spec's example shows
+    /// micro-units, live sends decimal units).
     pub size_usdc: Decimal,
     /// Trade price.
     pub price: Decimal,
     /// Trade status, e.g. `"TRADE_STATUS_CONFIRMED"` (the spec documents no fixed set of
     /// values).
     pub status: String,
-    /// Market outcome, e.g. `"YES"`.
+    /// Market outcome label, e.g. `"Yes"` or `"Up"`.
     pub outcome: String,
     /// Outcome index.
     pub outcome_index: i64,
@@ -62,11 +68,19 @@ pub struct BuilderTrade {
     pub match_time: DateTime<Utc>,
     /// Bucket index.
     pub bucket_index: i64,
-    /// Fee amount, exactly as sent (e.g. `"300000"`; the spec does not state the unit).
+    /// Fee amount, as a decimal (live sends decimal units; the spec's example shows
+    /// micro-units).
     pub fee: Decimal,
-    /// Fee amount in USDC, exactly as sent (e.g. `"150000"`; the spec does not state the
-    /// unit).
+    /// Fee amount in USDC, as a decimal (live sends decimal units; the spec's example shows
+    /// micro-units).
     pub fee_usdc: Decimal,
+    /// Fee amount attributed to the builder, as a decimal. Undocumented; observed live
+    /// (wire name `builderFee`).
+    pub builder_fee: Option<Decimal>,
+    /// Builder code the trade is attributed to. Undocumented; observed live (wire name
+    /// `builderCode`), where it carries the code that the documented
+    /// [`builder`](Self::builder) field leaves empty.
+    pub builder_code: Option<BuilderCode>,
     /// Error message, if any (wire name `err_msg`).
     #[serde(rename = "err_msg")]
     pub err_msg: Option<String>,
@@ -242,12 +256,48 @@ mod tests {
     use super::*;
     use crate::clob::types::test_util::round_trip;
 
-    /// Example response of `GET /builder/trades` in docs/specs/clob-openapi.yaml
-    /// (docs/api-reference/trade/get-builder-trades.md).
+    /// Trimmed live response of `GET /builder/trades?builder_code=0x00..01` (captured
+    /// 2026-10-02, one of 300 items): decimal units, empty `builder`, `builderCode` and
+    /// `builderFee` present, `outcome` `"Up"`.
     const EXAMPLE: &str = r#"{
         "limit": 300,
         "next_cursor": "MzAw",
-        "count": 2,
+        "count": 1,
+        "data": [{
+            "id": "01a0d664-92cd-7a93-91ad-cac08aeef86d",
+            "tradeType": "MAKER",
+            "takerOrderHash": "0x3e354a3f471f454d6532caa1a8ac447d771af720bf14b330d541881517b7e31e",
+            "builder": "",
+            "market": "0x481fafed1cba1c490af3ac2b69ce2ca15710ff5e8b1b63f486b48471677b3ee1",
+            "assetId": "14819207982932366142943017817551212408227964397023321046800597001588471048639",
+            "side": "BUY",
+            "size": "5",
+            "sizeUsdc": "0.05",
+            "price": "0.01",
+            "status": "TRADE_STATUS_CONFIRMED",
+            "outcome": "Up",
+            "outcomeIndex": 0,
+            "owner": "ed03f028-74b2-3f73-542a-e78b73279d5b",
+            "maker": "0xBF119Cf0f6ff285688857487E669Adad35cF2CE1",
+            "transactionHash": "0x664500e429d4b54db4f1441f55ebc584d82a1be0c450bd009cef3043af8e9a6d",
+            "matchTime": "1790303310",
+            "bucketIndex": 0,
+            "fee": "0",
+            "feeUsdc": "0",
+            "builderFee": "0",
+            "builderCode": "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "createdAt": "2026-09-25T02:28:30.542213Z",
+            "updatedAt": "2026-09-25T02:28:38.460921Z"
+        }]
+    }"#;
+
+    /// Example response of `GET /builder/trades` in docs/specs/clob-openapi.yaml
+    /// (docs/api-reference/trade/get-builder-trades.md): no `builderCode` / `builderFee`,
+    /// micro-unit amounts.
+    const DOCUMENTED_EXAMPLE: &str = r#"{
+        "limit": 300,
+        "next_cursor": "MzAw",
+        "count": 1,
         "data": [{
             "id": "trade-123",
             "tradeType": "TAKER",
@@ -280,13 +330,33 @@ mod tests {
         assert_eq!(page.limit, 300);
         assert_eq!(page.next_cursor(), Some("MzAw"));
         let trade = &page.data[0];
-        assert_eq!(trade.id, "trade-123");
-        assert_eq!(trade.trade_type, "TAKER");
+        assert_eq!(trade.id, "01a0d664-92cd-7a93-91ad-cac08aeef86d");
+        assert_eq!(trade.trade_type, "MAKER");
+        assert_eq!(trade.builder, "");
+        assert_eq!(
+            trade.builder_code.as_ref().map(BuilderCode::as_str),
+            Some("0x0000000000000000000000000000000000000000000000000000000000000001")
+        );
+        assert_eq!(trade.builder_fee, Some(Decimal::ZERO));
         assert_eq!(trade.side, Side::Buy);
-        assert_eq!(trade.size, "100000000".parse::<Decimal>().unwrap());
-        assert_eq!(trade.price, "0.5".parse::<Decimal>().unwrap());
-        assert_eq!(trade.match_time.timestamp(), 1_700_000_000);
+        assert_eq!(trade.size, "5".parse::<Decimal>().unwrap());
+        assert_eq!(trade.size_usdc, "0.05".parse::<Decimal>().unwrap());
+        assert_eq!(trade.price, "0.01".parse::<Decimal>().unwrap());
+        assert_eq!(trade.outcome, "Up");
+        assert_eq!(trade.match_time.timestamp(), 1_790_303_310);
         assert_eq!(trade.err_msg, None);
+        assert_eq!(trade.created_at.map(|t| t.timestamp()), Some(1_790_303_310));
+    }
+
+    /// The documented example (no `builderCode` / `builderFee`) still decodes.
+    #[test]
+    fn deserializes_documented_example() {
+        let page: Page<BuilderTrade> = round_trip(DOCUMENTED_EXAMPLE);
+        let trade = &page.data[0];
+        assert_eq!(trade.id, "trade-123");
+        assert_eq!(trade.builder_code, None);
+        assert_eq!(trade.builder_fee, None);
+        assert_eq!(trade.size, "100000000".parse::<Decimal>().unwrap());
         assert_eq!(trade.created_at.map(|t| t.timestamp()), Some(1_704_067_200));
     }
 

@@ -216,10 +216,14 @@ pub struct MultiMarketInfo {
     /// Current spread (a JSON number on the wire).
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub spread: Option<Decimal>,
-    /// Market end date, exactly as sent (e.g. `"2024-08-10 00:00:00"`).
+    /// Market end date.
     ///
-    /// Kept as a string because the spec does not document its format.
-    pub end_date: Option<String>,
+    /// The spec documents no format; the docs example is `"2024-08-10 00:00:00"` and live
+    /// sends `"2025-05-01 12:00:00+00"` (UTC, a space instead of `T`, a short `+00` offset),
+    /// or `""` for some markets, which is `None`. Both spellings are read as UTC. Serializes
+    /// as RFC 3339.
+    #[serde(default, with = "serde_util::datetime_option")]
+    pub end_date: Option<DateTime<Utc>>,
     /// Outcome tokens.
     pub tokens: Vec<RewardsToken>,
     /// 24-hour trading volume (a JSON number on the wire).
@@ -761,7 +765,9 @@ mod tests {
                 ]
             }]
         }"#;
-        let page: Page<MultiMarketInfo> = round_trip(json);
+        // `end_date` is typed, so the documented `"2024-08-10 00:00:00"` does not re-serialize
+        // to itself.
+        let page: Page<MultiMarketInfo> = serde_json::from_str(json).unwrap();
         assert_eq!(page.next_cursor(), Some("NQ=="));
         let market = &page.data[0];
         assert_eq!(market.event_id, Some(EventId::from("12345")));
@@ -770,9 +776,55 @@ mod tests {
             market.created_at.map(|t| t.timestamp()),
             Some(1_714_564_800)
         );
-        assert_eq!(market.end_date.as_deref(), Some("2024-08-10 00:00:00"));
+        assert_eq!(market.end_date.map(|t| t.timestamp()), Some(1_723_248_000));
         assert_eq!(market.volume_24hr, Some(d("12345.67")));
         assert_eq!(market.one_day_price_change, Some(d("0.03")));
+    }
+
+    /// Trimmed live response of `GET /rewards/markets/multi?page_size=2` (captured 2026-10-02):
+    /// `end_date` is `"2025-05-01 12:00:00+00"`, `rewards_config` is empty, and a market may
+    /// have an empty `end_date`.
+    #[test]
+    fn deserializes_live_multi_market_info() {
+        let json = r#"{
+            "data": [{
+                "condition_id": "0x4623fe6008a2d6f85f1a8a1162636c0a403b15260ee1b884d377974abde32c99",
+                "market_id": "540507",
+                "market_slug": "nba-min-lal-2025-04-30-spread-away-6pt5",
+                "question": "Spread: Lakers (-6.5)",
+                "market_competitiveness": 0,
+                "rewards_config": [],
+                "rewards_max_spread": 0,
+                "rewards_min_size": 0,
+                "spread": 1,
+                "tokens": [
+                    {"token_id": "44694485871185117911287963923555117985825538163653551610144506234451354329397", "outcome": "Lakers", "price": 0.5},
+                    {"token_id": "29829366673661774681520275240061788133362526516570918782978727047442035861514", "outcome": "Timberwolves", "price": 0.5}
+                ],
+                "group_item_title": "Spread: Lakers (-6.5)",
+                "volume_24hr": 0,
+                "event_id": "23707",
+                "event_slug": "nba-min-lal-2025-04-30-v2",
+                "created_at": "2025-04-30T22:05:17.496666Z",
+                "one_day_price_change": 0,
+                "end_date": "2025-05-01 12:00:00+00"
+            }],
+            "next_cursor": "MQ==",
+            "limit": 100,
+            "count": 1
+        }"#;
+        let page: Page<MultiMarketInfo> = serde_json::from_str(json).unwrap();
+        let market = &page.data[0];
+        assert_eq!(
+            market.end_date.map(|t| t.to_rfc3339()),
+            Some("2025-05-01T12:00:00+00:00".to_owned())
+        );
+        assert_eq!(market.market_id, "540507");
+        assert_eq!(market.rewards_config, Some(vec![]));
+
+        let empty = json.replace("2025-05-01 12:00:00+00", "");
+        let page: Page<MultiMarketInfo> = serde_json::from_str(&empty).unwrap();
+        assert_eq!(page.data[0].end_date, None);
     }
 
     #[test]
