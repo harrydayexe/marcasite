@@ -7,6 +7,20 @@
 An unofficial, idiomatic and fully typed Rust SDK for the Polymarket Predictions APIs.
 Not affiliated with or endorsed by Polymarket.
 
+[![Crates.io][crates-badge]][crates-url]
+[![MIT licensed][mit-badge]][mit-url]
+[![Apache 2.0 licensed][apache-badge]][apache-url]
+[![Build Status][actions-badge]][actions-url]
+
+[crates-badge]: https://img.shields.io/crates/v/marcasite.svg
+[crates-url]: https://crates.io/crates/marcasite
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: https://github.com/harrydayexe/marcasite/blob/master/LICENSE-MIT
+[apache-badge]: https://img.shields.io/badge/license-Apache%202.0%20-blue.svg
+[apache-url]: https://github.com/harrydayexe/marcasite/blob/master/LICENSE-APACHE
+[actions-badge]: https://github.com/harrydayexe/marcasite/actions/workflows/release.yml/badge.svg
+[actions-url]: https://github.com/harrydayexe/marcasite/actions/workflows/release.yml
+
 > **Status:** pre-release. The **public (unauthenticated)** endpoints are covered; endpoints that
 > need API keys or signing (placing/cancelling orders, user channels, relayer submission, …) are not
 > implemented yet. See [`ENDPOINTS.md`](ENDPOINTS.md) for the per-endpoint checklist.
