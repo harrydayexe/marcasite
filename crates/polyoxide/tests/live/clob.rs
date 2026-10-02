@@ -19,7 +19,7 @@ use polyoxide::clob::{Side, TokenId};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
-use crate::common::{CLOB, check, get, pm, post, sample};
+use crate::common::{CLOB, GAMMA, check, get, pm, post, sample};
 
 /// Builder code used by the docs examples (`0x00..01`).
 const BUILDER_CODE: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -499,6 +499,59 @@ async fn list_sampling_simplified_markets_stream_pages() {
         clob().list_sampling_simplified_markets().into_stream(),
     )
     .await;
+}
+
+/// Pins SPEC_DEVIATIONS.md "Market listing pages": live pages hold 1000 markets, closed markets
+/// have `rewards.rates: null`, and the cursors are opaque base64 strings.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_market_listing_shape() {
+    let raw = get(CLOB, "/simplified-markets", &[]).await;
+    assert_eq!(raw.json["limit"], 1000, "{}", raw.json["limit"]);
+    assert_eq!(raw.json["count"], 1000);
+    assert_eq!(raw.json["data"].as_array().unwrap().len(), 1000);
+    let cursor = raw.json["next_cursor"].as_str().unwrap();
+    assert!(
+        cursor
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'='),
+        "{cursor}"
+    );
+    let page = clob().list_simplified_markets().send().await.unwrap();
+    assert_eq!(page.items().len(), 1000);
+    assert!(
+        page.items()
+            .iter()
+            .any(|m| m.rewards.as_ref().is_some_and(|r| r.rates.is_none())),
+        "no market with `rewards.rates: null`"
+    );
+}
+
+/// Pins the answers to open questions 17: `LiveActivityMarket.id` is the Gamma market id and
+/// `Market.question_id` is the Gamma `questionID` (compared on one sampling market).
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_gamma_id_equivalences() {
+    let listing = clob().list_sampling_markets().send().await.unwrap();
+    let market = listing
+        .items()
+        .iter()
+        .find(|m| m.condition_id.is_some() && m.question_id.is_some())
+        .expect("a sampling market");
+    let condition_id = market.condition_id.as_ref().unwrap().as_str();
+    let gamma = get(GAMMA, "/markets", &[("condition_ids", condition_id)]).await;
+    let gamma = &gamma.json[0];
+    assert_eq!(
+        gamma["questionID"].as_str(),
+        market.question_id.as_deref(),
+        "{condition_id}"
+    );
+    let live = clob().get_market_live_activity(condition_id).await.unwrap();
+    assert_eq!(
+        live.id.map(|id| id.to_string()).as_deref(),
+        gamma["id"].as_str(),
+        "{condition_id}"
+    );
 }
 
 /// Streams one item past the first page, which forces a second request, and checks that the
