@@ -1,6 +1,6 @@
 # Module `marcasite::bridge`
 
-> Generated from marcasite 0.1.0 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.1.1 (all features) by `just docs-md`. Do not edit.
 
 Bridge API client (`https://bridge.polymarket.com`).
 

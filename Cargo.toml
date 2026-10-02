@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/harrydayexe/marcasite"
@@ -14,7 +14,7 @@ categories = ["api-bindings", "web-programming::http-client", "finance"]
 [workspace.dependencies]
 # Exact version: marcasite-core's API is an implementation detail of marcasite (no semver
 # guarantees of its own), so the two crates are released in lockstep.
-marcasite-core = { path = "crates/marcasite-core", version = "=0.1.0", default-features = false }
+marcasite-core = { path = "crates/marcasite-core", version = "=0.1.1", default-features = false }
 chrono = { version = "0.4.41", default-features = false, features = [
     "std",
     "serde",

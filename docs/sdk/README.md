@@ -1,6 +1,6 @@
 # marcasite SDK reference
 
-> Generated from marcasite 0.1.0 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.1.1 (all features) by `just docs-md`. Do not edit.
 
 The public API of the [`marcasite`](https://crates.io/crates/marcasite) crate (an unofficial Rust SDK for the Polymarket Predictions APIs) as plain markdown, generated from rustdoc: every public module, type, method and signature, with its documentation. Each file is one module; re-exports are followed, so a type is documented in full on one page and linked from the others.
 
