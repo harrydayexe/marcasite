@@ -12,7 +12,7 @@ use wiremock::{
     matchers::{method, path, query_param, query_param_is_missing},
 };
 
-use super::fixtures::{self, WALLET};
+use super::fixtures::{self, CONDITION, WALLET};
 use crate::common;
 
 #[tokio::test]
@@ -24,11 +24,11 @@ async fn bad_request_exposes_error_body_and_trace_id() {
             ResponseTemplate::new(400)
                 .insert_header("x-trace-id", "trace-400")
                 .set_body_json(json!({
-                    "error": "malformed condition id '0xzz'",
+                    "error": "'user' is a known protocol contract address",
                     "code": "invalid_request",
                     "retryable": false,
                     "trace_id": "trace-400",
-                    "parameter": "condition"
+                    "parameter": "user"
                 })),
         )
         .expect(1)
@@ -38,7 +38,8 @@ async fn bad_request_exposes_error_body_and_trace_id() {
     let err = common::polymarket(&server)
         .data()
         .list_positions()
-        .conditions(["0xzz"])
+        .user(WALLET)
+        .conditions([CONDITION])
         .send()
         .await
         .unwrap_err();
@@ -46,9 +47,12 @@ async fn bad_request_exposes_error_body_and_trace_id() {
         panic!("expected Error::Api, got {err:?}")
     };
     assert_eq!(api.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(api.message(), Some("malformed condition id '0xzz'"));
+    assert_eq!(
+        api.message(),
+        Some("'user' is a known protocol contract address")
+    );
     assert_eq!(api.code(), Some("invalid_request"));
-    assert_eq!(api.parameter(), Some("condition"));
+    assert_eq!(api.parameter(), Some("user"));
     assert_eq!(api.retryable(), Some(false));
     assert_eq!(err.trace_id(), Some("trace-400"));
     assert_eq!(ErrorCode::from_error(&err), Some(ErrorCode::InvalidRequest));
@@ -240,4 +244,128 @@ async fn unknown_error_code_is_preserved() {
         ErrorCode::from_error(&err),
         Some(ErrorCode::Unknown("brand_new_code".to_owned()))
     );
+}
+
+/// The `400` body documented in `docs/api-reference/data-api/overview.md` ("Errors and Rate
+/// Limits") has only `error`: the message is kept and there is no typed code.
+#[tokio::test]
+async fn overview_error_body_without_code() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/positions"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!(
+            { "error": "required query param 'user' or 'condition' not provided" }
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .data()
+        .list_positions()
+        .conditions([CONDITION])
+        .send()
+        .await
+        .unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        api.message(),
+        Some("required query param 'user' or 'condition' not provided")
+    );
+    assert_eq!(api.code(), None);
+    assert_eq!(ErrorCode::from_error(&err), None);
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn html_error_body_is_kept_raw() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/oi"))
+        .respond_with(
+            ResponseTemplate::new(502)
+                .set_body_raw("<html><body>Bad gateway</body></html>", "text/html"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .data()
+        .get_open_interest()
+        .send()
+        .await
+        .unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(api.message(), None);
+    assert!(api.body().contains("Bad gateway"));
+    assert_eq!(ErrorCode::from_error(&err), None);
+}
+
+#[tokio::test]
+async fn not_found_and_method_not_allowed() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/value"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": "not found",
+            "code": "not_found",
+            "retryable": false,
+            "trace_id": "t-404"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/user-volume"))
+        .respond_with(ResponseTemplate::new(405).set_body_json(json!({
+            "error": "method not allowed",
+            "code": "method_not_allowed",
+            "retryable": false,
+            "trace_id": "t-405"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let data = common::polymarket(&server).data().clone();
+    let err = data.get_portfolio_value(WALLET).send().await.unwrap_err();
+    assert!(err.is_not_found());
+    assert_eq!(ErrorCode::from_error(&err), Some(ErrorCode::NotFound));
+    assert_eq!(err.trace_id(), Some("t-404"));
+    let err = data.get_user_volume(WALLET).send().await.unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::METHOD_NOT_ALLOWED));
+    assert_eq!(
+        ErrorCode::from_error(&err),
+        Some(ErrorCode::MethodNotAllowed)
+    );
+    assert!(!err.is_retryable());
+}
+
+/// A `503` whose body says `"retryable": false` is not retryable, whatever the status.
+#[tokio::test]
+async fn unavailable_503_marked_not_retryable() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/status"))
+        .respond_with(ResponseTemplate::new(503).set_body_json(json!({
+            "error": "serving dependency unavailable",
+            "code": "dependency_unavailable",
+            "retryable": false,
+            "trace_id": "t-503"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .data()
+        .get_status()
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(StatusCode::SERVICE_UNAVAILABLE));
+    assert_eq!(err.api_error().unwrap().retryable(), Some(false));
+    assert!(!err.is_retryable());
 }

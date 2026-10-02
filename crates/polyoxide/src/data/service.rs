@@ -104,9 +104,13 @@ impl DataClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); before the first freshness snapshot exists (or on a
-    /// dependency outage) the API answers `503`, an [`Error::Api`](crate::Error::Api) for
-    /// which [`Error::is_retryable`](crate::Error::is_retryable) is `true`.
+    /// Before the first freshness snapshot exists, on a timeout or on a serving-dependency
+    /// outage, the API answers `503`, returned as an [`Error::Api`](crate::Error::Api)
+    /// (retry after [`Error::retry_after`](crate::Error::retry_after) when present).
+    /// [`Error::is_retryable`](crate::Error::is_retryable) follows the error body's
+    /// `retryable` flag: a `503` with `"retryable": false` is not retryable (and is not
+    /// retried by a [`RetryPolicy`](crate::RetryPolicy)); only a `503` without the flag
+    /// falls back to the status. Otherwise see [`Error`](crate::Error).
     pub async fn get_status(&self) -> Result<ServiceStatus> {
         self.fetch_data(&["v2", "status"], Query::new()).await
     }

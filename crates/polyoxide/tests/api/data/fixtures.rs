@@ -9,19 +9,31 @@
 use serde_json::{Value, json};
 
 pub const WALLET: &str = "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748";
+/// A second wallet (`0x` + 40 hex digits).
+pub const WALLET_2: &str = "0x0000000000000000000000000000000000000001";
 pub const CONDITION: &str = "0xd9b06e2fd9ddb7ab61c9e3d5d8e074c555802478bbf75145804ff709a4246f79";
+/// A second condition id (`0x` + 64 hex digits, as the overview documents).
+pub const CONDITION_2: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+/// A combo condition id (`0x03`-prefixed, 64 hex digits).
+pub const COMBO_CONDITION: &str =
+    "0x03aa000000000000000000000000000000000000000000000000000000000001";
 pub const TOKEN: &str =
     "31974447302330162086995746309500877260929998201718217388109724292047967921664";
 
 /// `{ data, pagination }` with `has_more` derived from the cursor.
 pub fn page(items: Vec<Value>, next_cursor: Option<&str>) -> Value {
+    page_with(items, next_cursor, next_cursor.is_some())
+}
+
+/// `{ data, pagination }` with an explicit `has_more`.
+pub fn page_with(items: Vec<Value>, next_cursor: Option<&str>, has_more: bool) -> Value {
     let limit = items.len();
     json!({
         "data": items,
         "pagination": {
             "limit": limit,
             "offset": 0,
-            "has_more": next_cursor.is_some(),
+            "has_more": has_more,
             "next_cursor": next_cursor,
         }
     })
@@ -108,7 +120,7 @@ pub fn combo_leg() -> Value {
 /// `components/schemas/ComboPosition`.
 pub fn combo_position(id: &str) -> Value {
     json!({
-        "combo_condition_id": "0x03aa",
+        "combo_condition_id": COMBO_CONDITION,
         "outcome_index": 0,
         "outcome_label": "Yes",
         "combo_position_id": id,
@@ -177,7 +189,8 @@ pub fn trade(hash: &str) -> Value {
     })
 }
 
-/// `components/schemas/Activity`.
+/// `components/schemas/Activity` of a non-combo row: `is_combo` is omitted ("omitted from
+/// non-combo rows").
 pub fn activity(kind: &str, side: &str) -> Value {
     json!({
         "proxy_wallet": WALLET,
@@ -200,9 +213,16 @@ pub fn activity(kind: &str, side: &str) -> Value {
         "pseudonym": "",
         "bio": "",
         "profile_image": "",
-        "profile_image_optimized": "",
-        "is_combo": false
+        "profile_image_optimized": ""
     })
+}
+
+/// `components/schemas/Activity` of a combo trade row: the only rows that carry
+/// `is_combo`.
+pub fn combo_trade_activity(side: &str) -> Value {
+    let mut row = activity("TRADE", side);
+    row["is_combo"] = json!(true);
+    row
 }
 
 /// `components/schemas/ComboActivity`.
@@ -211,7 +231,7 @@ pub fn combo_activity() -> Value {
         "id": "0xfeed-3",
         "type": "SPLIT",
         "proxy_wallet": WALLET,
-        "combo_condition_id": "0x03aa",
+        "combo_condition_id": COMBO_CONDITION,
         "combo_position_id": "123",
         "block_number": 75000000,
         "timestamp": 1787133600,
@@ -239,6 +259,47 @@ pub fn holder_group(token_id: &str, wallet: &str) -> Value {
             "profile_image_optimized": "",
             "verified": false
         }]
+    })
+}
+
+/// `components/schemas/BuilderStanding`.
+pub fn builder_standing(rank: u64, code: &str) -> Value {
+    json!({
+        "rank": rank,
+        "builder_name": code,
+        "builder_code": code,
+        "profile_image": "",
+        "verified": true,
+        "volume": 123456.5,
+        "active_users": 42
+    })
+}
+
+/// `components/schemas/PricePoint`.
+pub fn price_point(timestamp: i64, price: f64, resolution_seconds: i64) -> Value {
+    json!({"timestamp": timestamp, "price": price, "resolution_seconds": resolution_seconds})
+}
+
+/// `components/schemas/BiggestWinner`. A `combo` row carries the combo condition, no Gamma
+/// event (`event_id` `0`, empty `event_slug`) and a `' / '`-joined title of its legs; a
+/// `market` row a regular condition and its event.
+pub fn biggest_winner(win_rank: u32, kind: &str) -> Value {
+    let combo = kind == "combo";
+    json!({
+        "win_rank": win_rank,
+        "kind": kind,
+        "user_id": WALLET,
+        "pnl": 900,
+        "initial_value": 100,
+        "final_value": 1000,
+        "resolved_at": 1787133600,
+        "condition_id": if combo { COMBO_CONDITION } else { CONDITION },
+        "position_id": "123",
+        "event_id": if combo { 0 } else { 42 },
+        "event_slug": if combo { "" } else { "slovan-bratislava-2026-08-19" },
+        "event_title": if combo { "Will A win? / Will B win?" } else { "Slovan Bratislava" },
+        "user_name": "",
+        "profile_image": ""
     })
 }
 

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     DataClient,
     types::{
-        ComboLeg, FilterType, Page, SortDirection, check_limit, check_list, collect_ids, distinct,
+        ComboLeg, FilterType, Page, SortDirection, any_value, check_limit, check_user,
+        check_wallet, collect_ids, condition_id, datetime_or_empty, distinct_values, epoch_seconds,
         page_stream,
     },
 };
@@ -79,31 +80,44 @@ pub struct Position {
     /// The on-chain condition id.
     pub condition_id: ConditionId,
     /// The current holding, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub current_size: Decimal,
     /// Weighted-average entry price per share, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub avg_price: Decimal,
     /// The fee-exclusive entry basis, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub entry_cost_usdc: Decimal,
     /// Attributed buy-fee total, in USDC. Disclosure only: `entry_cost_usdc` is already
     /// fee-exclusive.
+    #[serde(with = "serde_util::decimal_number")]
     pub entry_fees_usdc: Decimal,
     /// Gross (fee-inclusive) basis: `entry_cost_usdc + entry_fees_usdc`.
+    #[serde(with = "serde_util::decimal_number")]
     pub total_cost_usdc: Decimal,
     /// Live mark per share, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub current_price: Decimal,
     /// `current_size × current_price`, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub current_value: Decimal,
     /// Lifetime bought shares (never the current balance; that is `current_size`).
+    #[serde(with = "serde_util::decimal_number")]
     pub total_size: Decimal,
     /// Cumulative realized PnL, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_pnl: Decimal,
     /// Unrealized PnL: `current_value - entry_cost_usdc`, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub unrealized_pnl: Decimal,
     /// `realized_pnl + unrealized_pnl`, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub total_pnl: Decimal,
     /// `(current_value - entry_cost_usdc) / entry_cost_usdc`, as a percent.
+    #[serde(with = "serde_util::decimal_number")]
     pub percent_pnl: Decimal,
     /// `(current_value - total_size × avg_price) / (total_size × avg_price)`, as a percent.
+    #[serde(with = "serde_util::decimal_number")]
     pub percent_realized_pnl: Decimal,
     /// The row's actual state; can be narrower than the requested status.
     pub status: PositionStatus,
@@ -135,10 +149,12 @@ pub struct Position {
     pub opposite_outcome: String,
     /// Token id of the market's other outcome.
     pub opposite_token_id: TokenId,
-    /// Market end date; `1970-01-01` when Gamma has none.
+    /// Market end date. The sentinel `1970-01-01` (kept as served) means Gamma has none.
     pub end_date: NaiveDate,
-    /// The row's last economics event. The Unix epoch (`0` on the wire) when the position
-    /// has no native state.
+    /// The row's last economics event. The sentinel Unix epoch (`0` on the wire, kept as
+    /// served) means the position has no native state: such rows carry no clock and are
+    /// excluded by any [`start`](ListPositions::start) / [`end`](ListPositions::end)
+    /// bound.
     #[serde(with = "serde_util::timestamp_seconds")]
     pub last_event_at: DateTime<Utc>,
     /// Profile display name of the wallet.
@@ -200,27 +216,40 @@ pub struct ComboPosition {
     /// The holder's wallet.
     pub proxy_wallet: Address,
     /// Current holding, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub current_size: Decimal,
     /// Weighted-average entry price per share, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub entry_avg_price_usdc: Decimal,
     /// Entry cost basis in USDC (rounded weighted-average form).
+    #[serde(with = "serde_util::decimal_number")]
     pub entry_cost_usdc: Decimal,
     /// Exact fee-inclusive entry basis, in USDC. Do not reconstruct it as
     /// `entry_cost_usdc + entry_fees_usdc`.
+    #[serde(with = "serde_util::decimal_number")]
     pub gross_entry_cost_usdc: Decimal,
     /// Attributed buy-fee portion of `gross_entry_cost_usdc`, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub entry_fees_usdc: Decimal,
     /// Gross redemption payout received so far, in USDC (turnover, not profit).
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_payout_usdc: Decimal,
     /// Lifecycle state of the position.
     pub status: ComboPositionStatus,
     /// Whether the combo can be redeemed now.
     pub redeemable: bool,
-    /// First acquisition time.
-    #[serde(with = "serde_util::datetime")]
-    pub first_entry_at: DateTime<Utc>,
+    /// First acquisition time; `None` on rows without one.
+    ///
+    /// The schema declares `first_entry_at` a required RFC 3339 string, but also says that
+    /// [`first_entry_at_micros`](Self::first_entry_at_micros), its microsecond form, is
+    /// `null` or absent on "the NULL tail", so some rows have no first-entry time. The
+    /// docs do not say how `first_entry_at` is served on those rows: `""` and `null` both
+    /// decode as `None` (the key itself stays required), and `None` serializes back as
+    /// `""`.
+    #[serde(with = "datetime_or_empty")]
+    pub first_entry_at: Option<DateTime<Utc>>,
     /// `first_entry_at` at microsecond precision (`first_entry_at_micros`); `None` on the
-    /// null tail.
+    /// NULL tail.
     #[serde(default, with = "serde_util::timestamp_micros_option")]
     pub first_entry_at_micros: Option<DateTime<Utc>>,
     /// Number of legs in the combo.
@@ -250,6 +279,7 @@ pub struct PortfolioValue {
     pub proxy_wallet: Address,
     /// Portfolio value in USDC, rounded to 4 decimals: holdings marked to market plus
     /// non-terminal combos at cost basis. `0` for a user with no positions.
+    #[serde(with = "serde_util::decimal_number")]
     pub value: Decimal,
 }
 
@@ -355,6 +385,10 @@ pub struct UserPnlSeries {
     pub fidelity: PnlFidelity,
     /// Grid of the underlying observations: historical observations are daily even when
     /// carried onto a finer grid.
+    ///
+    /// The docs do not list the values of this field. It is decoded as a [`PnlFidelity`]
+    /// (the vocabulary of [`fidelity`](Self::fidelity)); any other value is kept as
+    /// [`PnlFidelity::Unknown`].
     pub source_fidelity: PnlFidelity,
     /// Dense cumulative points on the requested grid, oldest first.
     pub points: Vec<UserPnlPoint>,
@@ -373,55 +407,79 @@ pub struct UserPnlPoint {
     /// Chain block the point was observed at.
     pub source_block: i64,
     /// Realized PnL from market positions.
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_market_pnl: Decimal,
     /// Realized PnL from AMM liquidity-provision activity.
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_lp_pnl: Decimal,
     /// Realized PnL from combo positions.
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_combo_pnl: Decimal,
     /// `realized_market_pnl + realized_lp_pnl + realized_combo_pnl`.
+    #[serde(with = "serde_util::decimal_number")]
     pub realized_pnl: Decimal,
     /// Cumulative maker-attributed fill volume, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Cumulative maker-attributed fill volume, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume_usdc: Decimal,
     /// Cumulative maker-attributed fill count.
     pub trade_count: u64,
     /// Mark-to-market of open inventory.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub unrealized_pnl: Option<Decimal>,
     /// `realized_pnl + unrealized_pnl`; the position-only result.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub position_pnl: Option<Decimal>,
     /// Compatibility chart series:
     /// `position_pnl - realized_lp_pnl + fees_charged - fees_refunded`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub trade_pnl: Option<Decimal>,
     /// `realized_pnl + wallet_income`; settled economics, no marks.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub settled_pnl: Option<Decimal>,
     /// `position_pnl + wallet_income`; the all-in economic result.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub economic_pnl: Option<Decimal>,
     /// Negative cumulative fee charges.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub fees: Option<Decimal>,
     /// Refunds minus charges; a disclosure, not another PnL adjustment.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub fees_paid: Option<Decimal>,
     /// Total fees refunded.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub fees_refunded: Option<Decimal>,
     /// Maker-side fee rebates credited.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub maker_rebate: Option<Decimal>,
     /// Taker-side fee rebates credited.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub taker_rebate: Option<Decimal>,
     /// Reward-program income credited.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub reward_income: Option<Decimal>,
     /// Yield income credited.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub yield_income: Option<Decimal>,
     /// Referral income credited.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub referral_income: Option<Decimal>,
     /// `reward_income + yield_income + referral_income`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub sponsored_income: Option<Decimal>,
     /// All income credited to the wallet: rebates plus reward, yield and referral income.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub wallet_income: Option<Decimal>,
     /// Collateral moved into the wallet.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub deposits: Option<Decimal>,
     /// Collateral moved out of the wallet.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub withdrawals: Option<Decimal>,
     /// `deposits - withdrawals`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub cashflow_net: Option<Decimal>,
 }
 
@@ -434,6 +492,7 @@ pub struct UserStats {
     /// Distinct **markets** traded (not individual trades); an exact count.
     pub trades: u64,
     /// Largest single resolved win, in USDC; `0` when the wallet has no win over $1.
+    #[serde(with = "serde_util::decimal_number")]
     pub biggest_win: Decimal,
     /// Profile view count.
     pub views: u64,
@@ -450,8 +509,10 @@ pub struct UserStats {
 #[non_exhaustive]
 pub struct UserVolume {
     /// Both-sides traded volume over the window, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Both-sides cash volume over the window, in USD.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume_usdc: Decimal,
     /// Number of fills in the window.
     pub trade_count: u64,
@@ -478,7 +539,7 @@ impl DataClient {
     ///     .limit(50)
     ///     .send()
     ///     .await?;
-    /// for position in &page.items {
+    /// for position in page.items() {
     ///     let _ = (&position.title, position.current_value, position.total_pnl);
     /// }
     /// // Pass `page.next_cursor()` to `.cursor(..)` for the next page, or use
@@ -542,11 +603,14 @@ impl DataClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing or invalid address, or a known protocol
-    /// contract address, is an [`Error::Api`](crate::Error::Api) with status `400`
-    /// ([`ErrorCode::InvalidRequest`](super::ErrorCode::InvalidRequest)).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is not an EVM
+    /// address (`0x` followed by 40 hex digits), as the route requires; a known protocol
+    /// contract address is an [`Error::Api`](crate::Error::Api) with status `400`
+    /// ([`ErrorCode::InvalidRequest`](super::ErrorCode::InvalidRequest)); otherwise see
+    /// [`Error`](crate::Error).
     pub async fn get_approvals(&self, user: impl Into<Address>) -> Result<Approvals> {
         let user = user.into();
+        check_wallet(&user)?;
         let mut query = Query::new();
         query.push("user", &user);
         self.fetch_data(&["v2", "approvals"], query).await
@@ -573,10 +637,13 @@ impl DataClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing or invalid address, or a known protocol
-    /// contract address, is an [`Error::Api`](crate::Error::Api) with status `400`.
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is not `0x`
+    /// followed by 40 hex digits, as the route requires; a known protocol contract address
+    /// is an [`Error::Api`](crate::Error::Api) with status `400`; otherwise see
+    /// [`Error`](crate::Error).
     pub async fn get_user_stats(&self, user: impl Into<Address>) -> Result<Option<UserStats>> {
         let user = user.into();
+        check_wallet(&user)?;
         let mut query = Query::new();
         query.push("user", &user);
         self.fetch_data(&["v2", "user-stats"], query).await
@@ -625,7 +692,7 @@ impl ListPositions {
 
     /// Condition ids (`condition`, at most 20 distinct values). With [`user`](Self::user),
     /// narrows that user's positions; without it, anchors on the market's holders and
-    /// exactly one id is accepted.
+    /// exactly one id is accepted. Duplicates are sent once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -636,7 +703,7 @@ impl ListPositions {
     }
 
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -655,7 +722,7 @@ impl ListPositions {
     }
 
     /// Gamma event ids (`event_id`, at most 20 distinct values). Requires
-    /// [`user`](Self::user).
+    /// [`user`](Self::user). Duplicates are sent once.
     pub fn event_ids<I>(mut self, event_ids: I) -> Self
     where
         I: IntoIterator,
@@ -699,14 +766,16 @@ impl ListPositions {
         self
     }
 
-    /// Inclusive lower bound on `last_event_at` (`start`). Any bound excludes positions
-    /// without native state.
+    /// Inclusive lower bound on `last_event_at` (`start`, epoch seconds). Omitted (or the
+    /// Unix epoch, sent as `0`) means unbounded. Any bound excludes positions without
+    /// native state.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Inclusive upper bound on `last_event_at` (`end`).
+    /// Inclusive upper bound on `last_event_at` (`end`, epoch seconds). Omitted (or the
+    /// Unix epoch, sent as `0`) means unbounded.
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
@@ -719,22 +788,27 @@ impl ListPositions {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
+        if let Some(user) = &self.user {
+            check_user(user)?;
+        }
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
+        let event_ids = distinct_values("event_id", &self.event_ids, any_value)?;
         if self.user.is_none() {
-            if self.conditions.is_empty() {
+            if conditions.is_empty() {
                 return Err(ValidationError::new(
                     "user",
                     "at least one of `user` or `condition` is required",
                 )
                 .into());
             }
-            if distinct(&self.conditions) > 1 {
+            if conditions.len() > 1 {
                 return Err(ValidationError::new(
                     "condition",
                     "without `user`, exactly one condition id is accepted",
                 )
                 .into());
             }
-            if !self.event_ids.is_empty() {
+            if !event_ids.is_empty() {
                 return Err(ValidationError::new("event_id", "requires `user`").into());
             }
             if self.status == Some(PositionStatus::RedeemableLost) {
@@ -743,8 +817,6 @@ impl ListPositions {
                 );
             }
         }
-        check_list("condition", &self.conditions)?;
-        check_list("event_id", &self.event_ids)?;
         check_limit(self.limit, MAX_POSITIONS_LIMIT)?;
         if let Some(title) = &self.title {
             let chars = title.chars().count();
@@ -763,21 +835,23 @@ impl ListPositions {
             )
             .into());
         }
+        let start = epoch_seconds("start", self.start)?;
+        let end = epoch_seconds("end", self.end)?;
 
         let mut q = Query::new();
         q.push_opt("user", self.user.as_ref())
-            .push_csv("condition", &self.conditions)
+            .push_csv("condition", &conditions)
             .push_opt("limit", self.limit)
             .push_opt("cursor", cursor)
             .push_opt("status", self.status.as_ref())
-            .push_csv("event_id", &self.event_ids)
+            .push_csv("event_id", &event_ids)
             .push_opt("title", self.title.as_deref())
             .push_opt("filter_type", self.filter_type.as_ref())
             .push_opt("filter_amount", self.filter_amount)
             .push_opt("include_archived", self.include_archived)
             .push_opt("sort_by", self.sort_by.as_ref())
-            .push_opt("start", self.start.map(|t| t.timestamp()))
-            .push_opt("end", self.end.map(|t| t.timestamp()))
+            .push_opt("start", start)
+            .push_opt("end", end)
             .push_opt("sort_direction", self.sort_direction.as_ref());
         Ok(q)
     }
@@ -787,10 +861,12 @@ impl ListPositions {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if a documented constraint is
-    /// violated (no `user`/`condition` anchor, more than 20 condition or event ids, several
-    /// condition ids without `user`, `event_id` or `REDEEMABLE_LOST` without `user`,
-    /// `limit` above 1000, `title` over 200 characters, or `include_archived` with
-    /// `CLOSED`); otherwise see [`Error`](crate::Error).
+    /// violated (no `user`/`condition` anchor, an empty `user`, a condition id that is not
+    /// `0x` followed by 64 hex digits, more than 20 distinct condition or event ids,
+    /// several condition ids without `user`, `event_id` or `REDEEMABLE_LOST` without
+    /// `user`, `limit` above 1000, `title` over 200 characters, `include_archived` with
+    /// `CLOSED`, or a `start`/`end` before the Unix epoch); otherwise see
+    /// [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<Position>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(POSITIONS, query).await
@@ -800,8 +876,8 @@ impl ListPositions {
     ///
     /// Every page re-sends the same `user`/`condition` anchor and filters with the cursor,
     /// as the API requires (a bare cursor is rejected, and `title` and the `start`/`end`
-    /// window are not carried by the cursor). The stream ends when `next_cursor` is
-    /// `null`.
+    /// window are not carried by the cursor). The stream ends when the server reports no
+    /// further page.
     pub fn into_stream(self) -> Paginated<Position> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -827,7 +903,7 @@ pub struct ListComboPositions {
 
 impl ListComboPositions {
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -839,7 +915,8 @@ impl ListComboPositions {
         self
     }
 
-    /// Combo condition ids (`condition`, at most 20 distinct values).
+    /// Combo condition ids (`condition`, at most 20 distinct values). Duplicates are sent
+    /// once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -869,23 +946,25 @@ impl ListComboPositions {
     }
 
     /// Incremental-sync watermark: inclusive lower bound on `updated_at`
-    /// (`updated_after`). Without a status filter, switches to the mirror-complete sync
-    /// view.
+    /// (`updated_after`, epoch seconds). Without a status filter, switches to the
+    /// mirror-complete sync view.
     pub fn updated_after(mut self, updated_after: DateTime<Utc>) -> Self {
         self.updated_after = Some(updated_after);
         self
     }
 
     /// Incremental-sync watermark: inclusive upper bound on `updated_at`
-    /// (`updated_before`); must not precede [`updated_after`](Self::updated_after).
+    /// (`updated_before`, epoch seconds); must not precede
+    /// [`updated_after`](Self::updated_after).
     pub fn updated_before(mut self, updated_before: DateTime<Utc>) -> Self {
         self.updated_before = Some(updated_before);
         self
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
+        check_user(&self.user)?;
         check_limit(self.limit, MAX_POSITIONS_LIMIT)?;
-        check_list("condition", &self.conditions)?;
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         if self.statuses.contains(&ComboPositionStatus::Redeemable)
             && self
                 .statuses
@@ -896,15 +975,9 @@ impl ListComboPositions {
                 ValidationError::new("status", "REDEEMABLE must be the only status").into(),
             );
         }
-        for (name, bound) in [
-            ("updated_after", self.updated_after),
-            ("updated_before", self.updated_before),
-        ] {
-            if bound.is_some_and(|t| t.timestamp() < 0) {
-                return Err(ValidationError::new(name, "must not be negative").into());
-            }
-        }
-        if let (Some(after), Some(before)) = (self.updated_after, self.updated_before)
+        let updated_after = epoch_seconds("updated_after", self.updated_after)?;
+        let updated_before = epoch_seconds("updated_before", self.updated_before)?;
+        if let (Some(after), Some(before)) = (updated_after, updated_before)
             && before < after
         {
             return Err(
@@ -916,12 +989,12 @@ impl ListComboPositions {
         q.push("user", &self.user)
             .push_opt("limit", self.limit)
             .push_opt("cursor", cursor)
-            .push_csv("condition", &self.conditions)
+            .push_csv("condition", &conditions)
             .push_csv("status", &self.statuses)
             .push_opt("sort_by", self.sort_by.as_ref())
             .push_opt("sort_direction", self.sort_direction.as_ref())
-            .push_opt("updated_after", self.updated_after.map(|t| t.timestamp()))
-            .push_opt("updated_before", self.updated_before.map(|t| t.timestamp()));
+            .push_opt("updated_after", updated_after)
+            .push_opt("updated_before", updated_before);
         Ok(q)
     }
 
@@ -929,9 +1002,10 @@ impl ListComboPositions {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if `limit` is above 1000,
-    /// more than 20 condition ids are given, `REDEEMABLE` is combined with other statuses,
-    /// or the sync watermarks are negative or inverted; otherwise see
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
+    /// is above 1000, a condition id is not `0x` followed by 64 hex digits, more than 20
+    /// distinct condition ids are given, `REDEEMABLE` is combined with other statuses, or
+    /// the sync watermarks are negative or inverted; otherwise see
     /// [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<ComboPosition>> {
         let query = self.query(self.cursor.as_deref())?;
@@ -942,7 +1016,7 @@ impl ListComboPositions {
     /// lazily.
     ///
     /// Every page re-sends `user` (always required on this route) and the same filters
-    /// with the cursor. The stream ends when `next_cursor` is `null`.
+    /// with the cursor. The stream ends when the server reports no further page.
     pub fn into_stream(self) -> Paginated<ComboPosition> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -964,6 +1038,7 @@ pub struct GetPortfolioValue {
 impl GetPortfolioValue {
     /// Scopes the single-market term to these condition ids (`condition`, at most 20
     /// distinct values). Any condition filter excludes the portfolio-level combo term.
+    /// Duplicates are sent once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -977,14 +1052,16 @@ impl GetPortfolioValue {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if more than 20 condition ids
-    /// are given; otherwise see [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, a
+    /// condition id is not `0x` followed by 64 hex digits, or more than 20 distinct
+    /// condition ids are given; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<PortfolioValue> {
-        check_list("condition", &self.conditions)?;
+        check_user(&self.user)?;
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         let mut query = Query::new();
         query
             .push("user", &self.user)
-            .push_csv("condition", &self.conditions);
+            .push_csv("condition", &conditions);
         self.client.fetch_data(&["v2", "value"], query).await
     }
 }
@@ -1016,9 +1093,11 @@ impl GetUserPnl {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); an invalid wallet, interval or fidelity is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty; an
+    /// invalid wallet, interval or fidelity is an [`Error::Api`](crate::Error::Api) with
+    /// status `400`; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<UserPnlSeries> {
+        check_user(&self.user)?;
         let mut query = Query::new();
         query
             .push("user", &self.user)
@@ -1039,13 +1118,15 @@ pub struct GetUserVolume {
 }
 
 impl GetUserVolume {
-    /// Inclusive window start (`start`), floored to its UTC day. Omitted: no lower bound.
+    /// Inclusive window start (`start`, epoch seconds), floored to its UTC day. Omitted
+    /// (or the Unix epoch, sent as `0`): no lower bound.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Inclusive window end (`end`), floored to its UTC day. Omitted: no upper bound.
+    /// Inclusive window end (`end`, epoch seconds), floored to its UTC day. Omitted (or
+    /// the Unix epoch, sent as `0`): no upper bound.
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
@@ -1056,14 +1137,17 @@ impl GetUserVolume {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); an empty or invalid `user` is an
-    /// [`Error::Api`](crate::Error::Api) with status `400`.
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty or a
+    /// bound is before the Unix epoch; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<UserVolume> {
+        check_user(&self.user)?;
+        let start = epoch_seconds("start", self.start)?;
+        let end = epoch_seconds("end", self.end)?;
         let mut query = Query::new();
         query
             .push("user", &self.user)
-            .push_opt("start", self.start.map(|t| t.timestamp()))
-            .push_opt("end", self.end.map(|t| t.timestamp()));
+            .push_opt("start", start)
+            .push_opt("end", end);
         self.client.fetch_data(&["v2", "user-volume"], query).await
     }
 }
@@ -1071,7 +1155,11 @@ impl GetUserVolume {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::types::Envelope;
+    use crate::data::types::{
+        Envelope,
+        test_ids::{COMBO_CONDITION, CONDITION, CONDITION_2, WALLET},
+    };
+    use polyoxide_core::Error;
 
     /// The example response in `docs/api-reference/data-api/overview.md` ("Make a First
     /// Request") trims the row; the remaining required fields of
@@ -1128,7 +1216,7 @@ mod tests {
     #[test]
     fn deserializes_position_page() {
         let page: Page<Position> = serde_json::from_str(POSITION_PAGE).unwrap();
-        let p = page.items.first().unwrap();
+        let p = page.items().first().unwrap();
         assert_eq!(p.proxy_wallet, "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748");
         assert_eq!(p.status, PositionStatus::Redeemable);
         assert_eq!(p.current_size.to_string(), "86780.64");
@@ -1145,74 +1233,142 @@ mod tests {
         assert!(serde_json::from_value::<Page<Position>>(value).is_err());
     }
 
-    /// Field names and types from `components/schemas/ComboPosition`, `ComboLeg`,
-    /// `ComboLegMarket` and `ComboLegEvent` in `docs/specs/data-v2-openapi.json`.
+    /// Amounts are JSON numbers on the wire ("All amounts are JSON numbers", overview) and
+    /// serialize back as numbers; the sentinels `last_event_at: 0` and
+    /// `end_date: 1970-01-01` are kept as served.
+    #[test]
+    fn position_round_trips_wire_types() {
+        let original: serde_json::Value = serde_json::from_str(POSITION_PAGE).unwrap();
+        let page: Page<Position> = serde_json::from_value(original.clone()).unwrap();
+        let reserialized = serde_json::to_value(&page).unwrap();
+        let row = &reserialized["data"][0];
+        assert_eq!(row["current_size"], serde_json::json!(86780.64));
+        assert_eq!(row["percent_pnl"], serde_json::json!(-100));
+        assert_eq!(row["last_event_at"], serde_json::json!(1_787_097_600));
+        assert_eq!(row["end_date"], serde_json::json!("2026-08-19"));
+        assert_eq!(
+            serde_json::from_value::<Page<Position>>(reserialized).unwrap(),
+            page
+        );
+
+        let mut value = original;
+        value["data"][0]["last_event_at"] = serde_json::json!(0);
+        value["data"][0]["end_date"] = serde_json::json!("1970-01-01");
+        let page: Page<Position> = serde_json::from_value(value).unwrap();
+        let row = page.items().first().unwrap();
+        assert_eq!(row.last_event_at, DateTime::UNIX_EPOCH);
+        assert_eq!(row.end_date, NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+    }
+
+    /// A combo position row from `components/schemas/ComboPosition`, `ComboLeg`,
+    /// `ComboLegMarket` and `ComboLegEvent` in `docs/specs/data-v2-openapi.json`, with a
+    /// populated `first_entry_at` / `first_entry_at_micros` pair.
+    const COMBO_POSITION: &str = r#"{
+      "combo_condition_id": "0x03aa000000000000000000000000000000000000000000000000000000000001",
+      "outcome_index": 1,
+      "outcome_label": "Yes",
+      "combo_position_id": "123",
+      "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
+      "current_size": 10.5,
+      "entry_avg_price_usdc": 0.25,
+      "entry_cost_usdc": 2.625,
+      "gross_entry_cost_usdc": 2.65,
+      "entry_fees_usdc": 0.025,
+      "realized_payout_usdc": 0,
+      "status": "OPEN",
+      "redeemable": false,
+      "first_entry_at": "2026-08-19T10:00:00Z",
+      "first_entry_at_micros": 1787133600000000,
+      "legs_total": 1,
+      "legs_resolved": 0,
+      "legs_pending": 1,
+      "legs": [{
+        "leg_index": 0,
+        "leg_position_id": "456",
+        "leg_condition_id": "0xd9b06e2fd9ddb7ab61c9e3d5d8e074c555802478bbf75145804ff709a4246f79",
+        "leg_outcome_index": 999,
+        "leg_outcome_label": "Over",
+        "leg_status": "OPEN",
+        "leg_current_price": 0.5,
+        "leg_resolved_at": null,
+        "market": {
+          "market_id": "789",
+          "slug": "m",
+          "title": "Over 2.5",
+          "outcome": "Over",
+          "image_url": "",
+          "icon_url": "",
+          "category": "sports",
+          "subcategory": "soccer",
+          "tags": [],
+          "end_date": "",
+          "event": {
+            "event_id": "42",
+            "event_slug": "e",
+            "event_title": "E",
+            "event_image": ""
+          },
+          "line": 2.5,
+          "outcomes": ["Over", "Under"],
+          "sports_market_type": "totals"
+        }
+      }],
+      "resolved_at": null,
+      "updated_at": "2026-08-19T10:00:01.5Z",
+      "updated_at_micros": 1787133601500000
+    }"#;
+
     #[test]
     fn deserializes_combo_position() {
-        let json = r#"{
-          "combo_condition_id": "0x03aa",
-          "outcome_index": 1,
-          "outcome_label": "Yes",
-          "combo_position_id": "123",
-          "proxy_wallet": "0xabc",
-          "current_size": 10.5,
-          "entry_avg_price_usdc": 0.25,
-          "entry_cost_usdc": 2.625,
-          "gross_entry_cost_usdc": 2.65,
-          "entry_fees_usdc": 0.025,
-          "realized_payout_usdc": 0,
-          "status": "OPEN",
-          "redeemable": false,
-          "first_entry_at": "2026-08-19T10:00:00Z",
-          "first_entry_at_micros": null,
-          "legs_total": 1,
-          "legs_resolved": 0,
-          "legs_pending": 1,
-          "legs": [{
-            "leg_index": 0,
-            "leg_position_id": "456",
-            "leg_condition_id": "0xdef",
-            "leg_outcome_index": 999,
-            "leg_outcome_label": "Over",
-            "leg_status": "OPEN",
-            "leg_current_price": 0.5,
-            "leg_resolved_at": null,
-            "market": {
-              "market_id": "789",
-              "slug": "m",
-              "title": "Over 2.5",
-              "outcome": "Over",
-              "image_url": "",
-              "icon_url": "",
-              "category": "sports",
-              "subcategory": "soccer",
-              "tags": [],
-              "end_date": "",
-              "event": {
-                "event_id": "42",
-                "event_slug": "e",
-                "event_title": "E",
-                "event_image": ""
-              },
-              "line": 2.5,
-              "outcomes": ["Over", "Under"],
-              "sports_market_type": "totals"
-            }
-          }],
-          "resolved_at": null,
-          "updated_at": "2026-08-19T10:00:01.5Z",
-          "updated_at_micros": 1787133601500000
-        }"#;
-        let combo: ComboPosition = serde_json::from_str(json).unwrap();
+        let combo: ComboPosition = serde_json::from_str(COMBO_POSITION).unwrap();
         assert_eq!(combo.status, ComboPositionStatus::Open);
-        assert_eq!(combo.first_entry_at_micros, None);
+        assert!(combo.first_entry_at.is_some());
+        assert_eq!(combo.first_entry_at_micros, combo.first_entry_at);
         assert_eq!(combo.updated_at, combo.updated_at_micros);
         let leg = combo.legs.first().unwrap();
         assert_eq!(leg.leg_outcome_index, crate::data::UNLABELED_OUTCOME_INDEX);
         assert_eq!(leg.market.end_date, None);
         assert_eq!(leg.market.line, Some(Decimal::new(25, 1)));
+        // Absent display metadata (an older cached payload) is `None`.
         assert_eq!(leg.market.question, None);
         assert_eq!(leg.market.event.event_id, EventId::from("42"));
+
+        // Re-serialization keeps the wire shape: numbers, `""` sentinels, absent keys.
+        let value = serde_json::to_value(&combo).unwrap();
+        assert_eq!(value["current_size"], serde_json::json!(10.5));
+        assert_eq!(value["realized_payout_usdc"], serde_json::json!(0));
+        assert_eq!(
+            value["legs"][0]["market"]["end_date"],
+            serde_json::json!("")
+        );
+        assert_eq!(value["legs"][0]["market"]["line"], serde_json::json!(2.5));
+        assert!(value["legs"][0]["market"].get("question").is_none());
+        assert_eq!(
+            serde_json::from_value::<ComboPosition>(value).unwrap(),
+            combo
+        );
+    }
+
+    /// The NULL tail: `first_entry_at_micros` is `null`/absent, and `first_entry_at` has
+    /// no time to carry (see finding A1 in the review: `""` or `null` decode as `None`).
+    #[test]
+    fn deserializes_combo_position_null_tail() {
+        for first_entry_at in [r#""""#, "null"] {
+            let json = COMBO_POSITION
+                .replace(
+                    r#""first_entry_at": "2026-08-19T10:00:00Z""#,
+                    &format!(r#""first_entry_at": {first_entry_at}"#),
+                )
+                .replace(r#""first_entry_at_micros": 1787133600000000,"#, "");
+            let combo: ComboPosition = serde_json::from_str(&json).unwrap();
+            assert_eq!(combo.first_entry_at, None, "{first_entry_at}");
+            assert_eq!(combo.first_entry_at_micros, None);
+            let value = serde_json::to_value(&combo).unwrap();
+            assert_eq!(value["first_entry_at"], serde_json::json!(""));
+        }
+        // The key itself is required by the schema.
+        let missing = COMBO_POSITION.replace(r#""first_entry_at": "2026-08-19T10:00:00Z","#, "");
+        assert!(serde_json::from_str::<ComboPosition>(&missing).is_err());
     }
 
     /// `/v2/user-stats` documents `data: null` for an unknown wallet
@@ -1223,7 +1379,7 @@ mod tests {
         assert_eq!(none.data, None);
 
         let json = r#"{"data":{
-            "proxy_wallet": "0xabc",
+            "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "trades": 12,
             "biggest_win": 0,
             "views": 3,
@@ -1253,19 +1409,27 @@ mod tests {
         assert_eq!(pnl.unrealized_pnl, None);
         assert_eq!(pnl.fees, Some(Decimal::new(-1, 1)));
         assert_eq!(pnl.deposits, None);
+        let value = serde_json::to_value(&pnl).unwrap();
+        assert_eq!(value["fees"], serde_json::json!(-0.1));
+        assert_eq!(value["realized_pnl"], serde_json::json!(1.5));
+        assert_eq!(value["deposits"], serde_json::Value::Null);
     }
 
     /// Field names and types from `components/schemas/Approvals` and `ApprovalContract`.
     #[test]
     fn deserializes_approvals() {
         let json = r#"{
-            "address": "0xabc",
+            "address": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "chain_id": 137,
             "checked_at": "2026-10-01T12:00:00Z",
             "contracts": [
-              {"id": "usdc-exchange", "feature": "trading", "token": "0x1", "spender": "0x2",
+              {"id": "usdc-exchange", "feature": "trading",
+               "token": "0x0000000000000000000000000000000000000001",
+               "spender": "0x0000000000000000000000000000000000000002",
                "standard": "ERC20", "approved": true, "amount": "max"},
-              {"id": "ctf-exchange", "feature": "trading", "token": "0x3", "spender": "0x2",
+              {"id": "ctf-exchange", "feature": "trading",
+               "token": "0x0000000000000000000000000000000000000003",
+               "spender": "0x0000000000000000000000000000000000000002",
                "standard": "ERC1155", "approved": false}
             ]
         }"#;
@@ -1280,79 +1444,169 @@ mod tests {
         assert!(!erc1155.is_unlimited());
     }
 
+    fn validation_parameter(result: Result<Query>) -> String {
+        match result {
+            Err(Error::Validation(v)) => v.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+    }
+
     #[test]
     fn positions_query_validation() {
         let client = DataClient::new().unwrap();
-        let err = client.list_positions().query(None).unwrap_err();
-        assert!(matches!(err, polyoxide_core::Error::Validation(_)), "{err}");
-        assert!(
-            client
-                .list_positions()
-                .conditions(["0x1", "0x2"])
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(client.list_positions().query(None)),
+            "user"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .conditions([CONDITION, CONDITION_2])
+                    .query(None)
+            ),
+            "condition"
+        );
+        // Duplicates count once: a market anchor with the same id twice is one id.
+        let q = client
+            .list_positions()
+            .conditions([CONDITION, CONDITION])
+            .query(None)
+            .unwrap();
+        assert_eq!(q.get("condition"), Some(CONDITION));
+        assert_eq!(
+            validation_parameter(client.list_positions().conditions(["0x1"]).query(None)),
+            "condition"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .conditions([format!("{CONDITION},{CONDITION_2}")])
+                    .user(WALLET)
+                    .query(None)
+            ),
+            "condition"
+        );
+        assert_eq!(
+            validation_parameter(client.list_positions().user(" ").query(None)),
+            "user"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .conditions([CONDITION])
+                    .event_ids(["1"])
+                    .query(None)
+            ),
+            "event_id"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .conditions([CONDITION])
+                    .status(PositionStatus::RedeemableLost)
+                    .query(None)
+            ),
+            "status"
         );
         assert!(
             client
                 .list_positions()
-                .user("0xabc")
-                .conditions(["0x1", "0x2"])
+                .user(WALLET)
+                .conditions([CONDITION, CONDITION_2])
                 .query(None)
                 .is_ok()
         );
-        assert!(
-            client
-                .list_positions()
-                .user("0xabc")
-                .title("x".repeat(201))
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .user(WALLET)
+                    .title("x".repeat(201))
+                    .query(None)
+            ),
+            "title"
         );
-        assert!(
-            client
-                .list_positions()
-                .user("0xabc")
-                .status(PositionStatus::Closed)
-                .include_archived(true)
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .user(WALLET)
+                    .status(PositionStatus::Closed)
+                    .include_archived(true)
+                    .query(None)
+            ),
+            "include_archived"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_positions()
+                    .user(WALLET)
+                    .end(DateTime::from_timestamp(-5, 0).unwrap())
+                    .query(None)
+            ),
+            "end"
         );
         let q = client
             .list_positions()
-            .user("0xabc")
-            .conditions(["0x1", "0x2"])
+            .user(WALLET)
+            .conditions([CONDITION, CONDITION_2, CONDITION])
             .filter_amount(Decimal::new(5, 1))
             .start(DateTime::from_timestamp(1_700_000_000, 0).unwrap())
             .query(Some("c"))
             .unwrap();
         assert_eq!(
             q.to_string(),
-            "user=0xabc&condition=0x1%2C0x2&cursor=c&filter_amount=0.5&start=1700000000"
+            format!(
+                "user={WALLET}&condition={CONDITION}%2C{CONDITION_2}&cursor=c&filter_amount=0.5&start=1700000000"
+            )
         );
     }
 
     #[test]
     fn combo_positions_query_validation() {
         let client = DataClient::new().unwrap();
-        assert!(
-            client
-                .list_combo_positions("0xabc")
-                .statuses([ComboPositionStatus::Redeemable, ComboPositionStatus::Open])
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_combo_positions(WALLET)
+                    .statuses([ComboPositionStatus::Redeemable, ComboPositionStatus::Open])
+                    .query(None)
+            ),
+            "status"
         );
         let after = DateTime::from_timestamp(200, 0).unwrap();
         let before = DateTime::from_timestamp(100, 0).unwrap();
-        assert!(
-            client
-                .list_combo_positions("0xabc")
-                .updated_after(after)
-                .updated_before(before)
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_combo_positions(WALLET)
+                    .updated_after(after)
+                    .updated_before(before)
+                    .query(None)
+            ),
+            "updated_before"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_combo_positions(WALLET)
+                    .updated_after(DateTime::from_timestamp(-1, 0).unwrap())
+                    .query(None)
+            ),
+            "updated_after"
+        );
+        assert_eq!(
+            validation_parameter(client.list_combo_positions("").query(None)),
+            "user"
         );
         let q = client
-            .list_combo_positions("0xabc")
+            .list_combo_positions(WALLET)
+            .conditions([COMBO_CONDITION])
             .statuses([
                 ComboPositionStatus::ResolvedWin,
                 ComboPositionStatus::ResolvedLoss,
@@ -1360,5 +1614,6 @@ mod tests {
             .query(None)
             .unwrap();
         assert_eq!(q.get("status"), Some("RESOLVED_WIN,RESOLVED_LOSS"));
+        assert_eq!(q.get("condition"), Some(COMBO_CONDITION));
     }
 }

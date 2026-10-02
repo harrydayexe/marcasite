@@ -5,7 +5,7 @@ use chrono::NaiveDate;
 use futures_util::TryStreamExt as _;
 use polyoxide::{
     Error,
-    data::{BuilderCode, LeaderboardSortBy, TimePeriod, WinKind},
+    data::{BuilderCode, EventId, LeaderboardSortBy, TimePeriod, WinKind},
 };
 use serde_json::json;
 use wiremock::{
@@ -14,13 +14,13 @@ use wiremock::{
 };
 
 use super::{
-    fixtures::{self, CONDITION, WALLET},
+    fixtures::{self, COMBO_CONDITION, WALLET, WALLET_2},
     received_queries,
 };
 use crate::common;
 
 #[tokio::test]
-async fn get_leaderboard_walks_pages_with_pinned_board() {
+async fn list_leaderboard_walks_pages_with_pinned_board() {
     let server = common::server().await;
     Mock::given(method("GET"))
         .and(path("/v2/leaderboard"))
@@ -49,7 +49,7 @@ async fn get_leaderboard_walks_pages_with_pinned_board() {
 
     let ranks: Vec<u32> = common::polymarket(&server)
         .data()
-        .get_leaderboard()
+        .list_leaderboard()
         .time_period(TimePeriod::Week)
         .category("sports")
         .sort_by(LeaderboardSortBy::Volume)
@@ -95,10 +95,7 @@ async fn get_leaderboard_standing_reads_user_arm() {
         .await;
     Mock::given(method("GET"))
         .and(path("/v2/leaderboard"))
-        .and(query_param(
-            "user",
-            "0x0000000000000000000000000000000000000001",
-        ))
+        .and(query_param("user", WALLET_2))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": null})))
         .expect(1)
         .mount(&server)
@@ -115,41 +112,29 @@ async fn get_leaderboard_standing_reads_user_arm() {
     assert_eq!(standing.rank_pnl, Some(7));
     assert_eq!(standing.rank_volume, None);
     assert_eq!(
-        data.get_leaderboard_standing("0x0000000000000000000000000000000000000001")
+        data.get_leaderboard_standing(WALLET_2)
             .send()
             .await
             .unwrap(),
         None
     );
+    // An empty wallet would select the board arm: rejected before sending.
+    let err = data.get_leaderboard_standing("").send().await.unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "user"));
 }
 
 #[tokio::test]
 async fn list_biggest_winners_decodes_market_and_combo_rows() {
     let server = common::server().await;
-    let row = |rank: u32, kind: &str, event_id: i32| {
-        json!({
-            "win_rank": rank,
-            "kind": kind,
-            "user_id": WALLET,
-            "pnl": 900,
-            "initial_value": 100,
-            "final_value": 1000,
-            "resolved_at": 1787133600,
-            "condition_id": CONDITION,
-            "position_id": "123",
-            "event_id": event_id,
-            "event_slug": if event_id == 0 { "" } else { "e" },
-            "event_title": "E",
-            "user_name": "",
-            "profile_image": ""
-        })
-    };
     Mock::given(method("GET"))
         .and(path("/v2/biggest-winners"))
         .and(query_param("time_period", "month"))
         .and(query_param("category", "combos"))
         .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
-            vec![row(1, "market", 42), row(2, "combo", 0)],
+            vec![
+                fixtures::biggest_winner(1, "market"),
+                fixtures::biggest_winner(2, "combo"),
+            ],
             None,
         )))
         .expect(1)
@@ -164,29 +149,23 @@ async fn list_biggest_winners_decodes_market_and_combo_rows() {
         .send()
         .await
         .unwrap();
-    assert_eq!(page.items[0].kind, WinKind::Market);
-    assert_eq!(page.items[0].event_id, 42);
-    assert_eq!(page.items[1].kind, WinKind::Combo);
-    assert_eq!(page.items[1].event_id, 0);
+    assert_eq!(page.items()[0].kind, WinKind::Market);
+    assert_eq!(page.items()[0].event_id, EventId::from("42"));
+    assert_eq!(page.items()[1].kind, WinKind::Combo);
+    assert_eq!(page.items()[1].event_id, EventId::from("0"));
+    assert_eq!(page.items()[1].condition_id, COMBO_CONDITION);
+    assert!(page.items()[1].event_title.contains(" / "));
 }
 
 #[tokio::test]
-async fn get_builders_leaderboard_decodes_standings() {
+async fn list_builders_leaderboard_decodes_standings() {
     let server = common::server().await;
     Mock::given(method("GET"))
         .and(path("/v2/builders/leaderboard"))
         .and(query_param("time_period", "day"))
         .and(query_param("limit", "1"))
         .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
-            vec![json!({
-                "rank": 1,
-                "builder_name": "acme",
-                "builder_code": "acme",
-                "profile_image": "",
-                "verified": true,
-                "volume": 123456.5,
-                "active_users": 42
-            })],
+            vec![fixtures::builder_standing(1, "acme")],
             Some("b-2"),
         )))
         .expect(1)
@@ -195,14 +174,14 @@ async fn get_builders_leaderboard_decodes_standings() {
 
     let page = common::polymarket(&server)
         .data()
-        .get_builders_leaderboard()
+        .list_builders_leaderboard()
         .time_period(TimePeriod::Day)
         .limit(1)
         .send()
         .await
         .unwrap();
-    assert_eq!(page.items[0].builder_code, BuilderCode::from("acme"));
-    assert_eq!(page.items[0].active_users, 42);
+    assert_eq!(page.items()[0].builder_code, BuilderCode::from("acme"));
+    assert_eq!(page.items()[0].active_users, 42);
     assert_eq!(page.next_cursor(), Some("b-2"));
 }
 
@@ -249,4 +228,95 @@ async fn get_builders_volume_decodes_series_and_validates_limit() {
         .await
         .unwrap_err();
     assert!(matches!(&err, Error::Validation(v) if v.parameter() == "limit"));
+}
+
+#[tokio::test]
+async fn list_biggest_winners_stream_restates_window_and_category() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/biggest-winners"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![fixtures::biggest_winner(1, "market")],
+            Some("wins-2"),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/biggest-winners"))
+        .and(query_param("cursor", "wins-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![fixtures::biggest_winner(2, "combo")],
+            None,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ranks: Vec<u32> = common::polymarket(&server)
+        .data()
+        .list_biggest_winners()
+        .time_period(TimePeriod::Week)
+        .category("sports")
+        .into_stream()
+        .map_ok(|w| w.win_rank)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(ranks, vec![1, 2]);
+    assert_eq!(
+        received_queries(&server).await,
+        vec![
+            "time_period=week&category=sports",
+            "time_period=week&category=sports&cursor=wins-2",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn list_builders_leaderboard_stream_restates_window() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/builders/leaderboard"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![fixtures::builder_standing(1, "acme")],
+            Some("b-2"),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/builders/leaderboard"))
+        .and(query_param("cursor", "b-2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![fixtures::builder_standing(2, "globex")],
+            None,
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let codes: Vec<BuilderCode> = common::polymarket(&server)
+        .data()
+        .list_builders_leaderboard()
+        .time_period(TimePeriod::Month)
+        .limit(1)
+        .into_stream()
+        .map_ok(|b| b.builder_code)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        codes,
+        vec![BuilderCode::from("acme"), BuilderCode::from("globex")]
+    );
+    assert_eq!(
+        received_queries(&server).await,
+        vec![
+            "time_period=month&limit=1",
+            "time_period=month&limit=1&cursor=b-2"
+        ]
+    );
 }

@@ -16,7 +16,7 @@ use wiremock::{
 };
 
 use super::{
-    fixtures::{self, CONDITION, WALLET},
+    fixtures::{self, COMBO_CONDITION, CONDITION, WALLET},
     received_queries,
 };
 use crate::common;
@@ -54,7 +54,7 @@ async fn list_trades_sends_filters_and_decodes() {
         .send()
         .await
         .unwrap();
-    let trade = &page.items[0];
+    let trade = &page.items()[0];
     assert_eq!(trade.side, Side::Buy);
     assert_eq!(trade.price.to_string(), "0.5203");
     assert_eq!(trade.size, Decimal::from(100));
@@ -121,7 +121,7 @@ async fn list_activity_sends_types_and_decodes_sides() {
         .and(query_param("end", "1787133600"))
         .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
             vec![
-                fixtures::activity("TRADE", "SELL"),
+                fixtures::combo_trade_activity("SELL"),
                 fixtures::activity("TIP", "IN"),
                 fixtures::activity("CONVERSION", ""),
                 fixtures::activity("SOMETHING_NEW", ""),
@@ -143,13 +143,15 @@ async fn list_activity_sends_types_and_decodes_sides() {
         .send()
         .await
         .unwrap();
-    let rows = &page.items;
+    let rows = page.items();
     assert_eq!(rows[0].activity_type, ActivityType::Trade);
     assert_eq!(rows[0].side, Some(ActivitySide::Sell));
+    assert_eq!(rows[0].is_combo, Some(true));
+    assert_eq!(rows[1].is_combo, None);
     assert_eq!(rows[1].activity_type, ActivityType::Tip);
     assert_eq!(rows[1].side, Some(ActivitySide::In));
     assert_eq!(rows[2].side, None);
-    assert_eq!(rows[2].is_combo, Some(false));
+    assert_eq!(rows[2].is_combo, None);
     assert_eq!(
         rows[3].activity_type,
         ActivityType::Unknown("SOMETHING_NEW".to_owned())
@@ -162,7 +164,7 @@ async fn list_combo_activity_decodes_legs() {
     Mock::given(method("GET"))
         .and(path("/v2/activity/combos"))
         .and(query_param("user", WALLET))
-        .and(query_param("condition", "0x03aa"))
+        .and(query_param("condition", COMBO_CONDITION))
         .and(query_param("limit", "10"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -175,12 +177,12 @@ async fn list_combo_activity_decodes_legs() {
     let page = common::polymarket(&server)
         .data()
         .list_combo_activity(WALLET)
-        .conditions(["0x03aa"])
+        .conditions([COMBO_CONDITION])
         .limit(10)
         .send()
         .await
         .unwrap();
-    let row = &page.items[0];
+    let row = &page.items()[0];
     assert_eq!(row.activity_type, ComboActivityType::Split);
     assert_eq!(row.amount_usdc, Some(Decimal::from(25)));
     assert_eq!(row.payout_usdc, None);
@@ -189,4 +191,108 @@ async fn list_combo_activity_decodes_legs() {
     assert!(leg.leg_resolved_at.is_some());
     assert_eq!(leg.market.line, None);
     assert_eq!(leg.market.question.as_deref(), Some("Will it?"));
+}
+
+#[tokio::test]
+async fn list_activity_stream_resends_filters_and_sort_direction() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/activity"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![
+                fixtures::activity("SPLIT", ""),
+                fixtures::activity("MERGE", ""),
+            ],
+            Some("act-2"),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/activity"))
+        .and(query_param("cursor", "act-2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixtures::page(vec![fixtures::activity("REDEEM", "")], None)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let kinds: Vec<ActivityType> = common::polymarket(&server)
+        .data()
+        .list_activity(WALLET)
+        .types([
+            ActivityType::Split,
+            ActivityType::Merge,
+            ActivityType::Redeem,
+        ])
+        .conditions([CONDITION, CONDITION])
+        .sort_direction(SortDirection::Asc)
+        .full_history()
+        .limit(2)
+        .into_stream()
+        .map_ok(|a| a.activity_type)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        kinds,
+        vec![
+            ActivityType::Split,
+            ActivityType::Merge,
+            ActivityType::Redeem
+        ]
+    );
+    let common = format!("type=SPLIT%2CMERGE%2CREDEEM&condition={CONDITION}");
+    assert_eq!(
+        received_queries(&server).await,
+        vec![
+            format!("user={WALLET}&limit=2&{common}&start=1&sort_direction=ASC"),
+            format!("user={WALLET}&limit=2&cursor=act-2&{common}&start=1&sort_direction=ASC"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn list_combo_activity_stream_resends_user_and_conditions() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/activity/combos"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
+            vec![fixtures::combo_activity()],
+            Some("combo-2"),
+        )))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/activity/combos"))
+        .and(query_param("cursor", "combo-2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixtures::page(vec![fixtures::combo_activity()], None)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let rows: Vec<_> = common::polymarket(&server)
+        .data()
+        .list_combo_activity(WALLET)
+        .conditions([COMBO_CONDITION])
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        received_queries(&server).await,
+        vec![
+            format!("user={WALLET}&condition={COMBO_CONDITION}"),
+            format!("user={WALLET}&cursor=combo-2&condition={COMBO_CONDITION}"),
+        ]
+    );
 }
