@@ -5,7 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/harrydayexe/marcasite"
 description = "Unofficial Rust SDK for the Polymarket Predictions APIs"
 keywords = ["polymarket", "prediction-markets", "sdk", "api", "trading"]
