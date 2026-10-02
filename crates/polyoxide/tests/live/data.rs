@@ -291,7 +291,30 @@ async fn list_positions_filters() {
         &[("user", &s.user), ("status", "CLOSED"), ("limit", "50")],
     )
     .await;
-    check::<Page<Position>>("GET /v2/positions?status=CLOSED", &closed);
+    let closed_page = check::<Page<Position>>("GET /v2/positions?status=CLOSED", &closed);
+    // Pins SPEC_DEVIATIONS.md "Position.first_entry_at": an undocumented integer on every
+    // row (epoch seconds, `0` where the position has no native state).
+    assert!(!closed_page.items().is_empty());
+    for (position, row) in closed_page
+        .items()
+        .iter()
+        .zip(closed.json["data"].as_array().unwrap())
+    {
+        let seconds = row["first_entry_at"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("first_entry_at is an integer: {row}"));
+        assert_eq!(
+            position.first_entry_at.map(|t| t.timestamp()),
+            Some(seconds).filter(|s| *s != 0)
+        );
+        if let Some(first) = position.first_entry_at {
+            assert!(is_unix_seconds(first), "{first}");
+            assert!(
+                first <= position.last_event_at,
+                "entry precedes the last event"
+            );
+        }
+    }
     let redeemable = raw(
         "/positions",
         &[("user", &s.user), ("status", "REDEEMABLE"), ("limit", "50")],
@@ -985,6 +1008,12 @@ async fn list_activity_type_filters() {
         ActivityType::Reward,
         ActivityType::Conversion,
         ActivityType::Tip,
+        ActivityType::MakerRebate,
+        ActivityType::TakerRebate,
+        ActivityType::Yield,
+        ActivityType::ReferralReward,
+        ActivityType::Deposit,
+        ActivityType::Withdrawal,
     ] {
         let page = data
             .list_activity(s.user.as_str())
@@ -1045,6 +1074,174 @@ async fn list_activity_type_filters() {
         .send()
         .await
         .unwrap();
+}
+
+/// For each activity type, a board wallet that has rows of it (found with
+/// `exclude_deposits_withdrawals=false`), plus every row of the scanned pages.
+struct ActivityScan {
+    wallet_by_type: std::collections::BTreeMap<String, String>,
+    rows: Vec<Activity>,
+}
+
+static ACTIVITY_SCAN: OnceCell<ActivityScan> = OnceCell::const_new();
+
+async fn activity_scan() -> &'static ActivityScan {
+    ACTIVITY_SCAN
+        .get_or_init(|| async {
+            let client = pm();
+            let data = client.data();
+            let wanted = [
+                "MAKER_REBATE",
+                "TAKER_REBATE",
+                "YIELD",
+                "DEPOSIT",
+                "WITHDRAWAL",
+            ];
+            let mut scan = ActivityScan {
+                wallet_by_type: Default::default(),
+                rows: Vec::new(),
+            };
+            for wallet in candidates().await {
+                let page = data
+                    .list_activity(wallet.as_str())
+                    .exclude_deposits_withdrawals(false)
+                    .limit(500)
+                    .send()
+                    .await
+                    .unwrap();
+                for row in page.into_items() {
+                    scan.wallet_by_type
+                        .entry(row.activity_type.as_str().to_owned())
+                        .or_insert_with(|| wallet.clone());
+                    scan.rows.push(row);
+                }
+                if wanted.iter().all(|t| scan.wallet_by_type.contains_key(*t)) {
+                    break;
+                }
+            }
+            scan
+        })
+        .await
+}
+
+/// Pins SPEC_DEVIATIONS.md "Activity types missing from the docs": rebate, yield,
+/// referral, deposit and withdrawal rows decode to named types (never `Unknown`), and the
+/// non-trade rows send `condition_id`, `token_id` and `side` as `""`.
+#[tokio::test]
+#[ignore = "live network"]
+async fn activity_live_only_types_decode() {
+    let scan = activity_scan().await;
+    for wire in [
+        "MAKER_REBATE",
+        "TAKER_REBATE",
+        "YIELD",
+        "DEPOSIT",
+        "WITHDRAWAL",
+    ] {
+        assert!(
+            scan.wallet_by_type.contains_key(wire),
+            "no board wallet has a {wire} row any more; found {:?}",
+            scan.wallet_by_type.keys()
+        );
+    }
+    assert!(
+        scan.rows.iter().all(|a| !a.activity_type.is_unknown()),
+        "unknown activity types: {:?}",
+        scan.rows
+            .iter()
+            .filter(|a| a.activity_type.is_unknown())
+            .map(|a| a.activity_type.as_str())
+            .collect::<HashSet<_>>()
+    );
+    for row in &scan.rows {
+        if matches!(
+            row.activity_type,
+            ActivityType::MakerRebate
+                | ActivityType::TakerRebate
+                | ActivityType::Yield
+                | ActivityType::ReferralReward
+                | ActivityType::Deposit
+                | ActivityType::Withdrawal
+                | ActivityType::Reward
+        ) {
+            assert_eq!(row.condition_id, None, "{row:?}");
+            assert_eq!(row.token_id, None, "{row:?}");
+            assert_eq!(row.side, None, "{row:?}");
+            assert_eq!(row.usdc_size, row.size, "{row:?}");
+        }
+        if matches!(row.activity_type, ActivityType::Trade) {
+            assert!(
+                row.condition_id.is_some() && row.token_id.is_some(),
+                "{row:?}"
+            );
+        }
+    }
+}
+
+/// Pins SPEC_DEVIATIONS.md "Activity types missing from the docs" (the filter part):
+/// `type=DEPOSIT|WITHDRAWAL` is an empty page under the default
+/// `exclude_deposits_withdrawals=true`, but returns rows with `false`; `type=YIELD` works
+/// either way; an unknown type is a `400` naming `type`.
+#[tokio::test]
+#[ignore = "live network"]
+async fn activity_type_filters_and_the_deposit_flag() {
+    let scan = activity_scan().await;
+    let client = pm();
+    let data = client.data();
+    for (ty, wire) in [
+        (ActivityType::Deposit, "DEPOSIT"),
+        (ActivityType::Withdrawal, "WITHDRAWAL"),
+    ] {
+        let wallet = &scan.wallet_by_type[wire];
+        let default = data
+            .list_activity(wallet.as_str())
+            .types([ty.clone()])
+            .send()
+            .await
+            .unwrap();
+        assert!(default.items().is_empty(), "{wire} with the default flag");
+        let opted_in = data
+            .list_activity(wallet.as_str())
+            .types([ty.clone()])
+            .exclude_deposits_withdrawals(false)
+            .send()
+            .await
+            .unwrap();
+        assert!(!opted_in.items().is_empty(), "{wire} with the flag off");
+        assert!(opted_in.items().iter().all(|a| a.activity_type == ty));
+    }
+    for (ty, wire) in [
+        (ActivityType::Yield, "YIELD"),
+        (ActivityType::MakerRebate, "MAKER_REBATE"),
+        (ActivityType::TakerRebate, "TAKER_REBATE"),
+    ] {
+        let wallet = &scan.wallet_by_type[wire];
+        for exclude in [true, false] {
+            let page = data
+                .list_activity(wallet.as_str())
+                .types([ty.clone()])
+                .exclude_deposits_withdrawals(exclude)
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                !page.items().is_empty(),
+                "{wire} filter, exclude_deposits_withdrawals={exclude}"
+            );
+            assert!(page.items().iter().all(|a| a.activity_type == ty));
+        }
+    }
+    let e = raw_error(
+        "/activity",
+        &[
+            ("user", scan.wallet_by_type["YIELD"].as_str()),
+            ("type", "NOT_A_TYPE"),
+        ],
+    )
+    .await;
+    assert_eq!(e.status, 400);
+    assert_eq!(e.body["parameter"], "type");
+    assert_eq!(e.body["code"], "invalid_request");
 }
 
 #[tokio::test]
