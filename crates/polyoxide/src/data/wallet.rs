@@ -652,10 +652,11 @@ impl DataClient {
     ///
     /// Returns `Ok(None)` when the server has no stats for the wallet (`data: null`).
     ///
-    /// Live this is not "unknown wallet": an unknown wallet (e.g.
-    /// `0x0000000000000000000000000000000000000001`) gets a row of zeros with no join date
-    /// and no `all_time_pnl`, while some active, known users (e.g. the day leaderboard's
-    /// first place) get `null`. Treat `None` as "no stats available", not as "no such
+    /// The docs say `null` means "not a known user". Live, an arbitrary unknown wallet does
+    /// get `null`, but so do some active, ranked users (several top places of the day
+    /// leaderboard on 2026-10-02), and the wallet
+    /// `0x0000000000000000000000000000000000000001` gets a row of zeros instead (no join
+    /// date, no `all_time_pnl`). Treat `None` as "no stats available", not as "no such
     /// user".
     ///
     /// See <https://docs.polymarket.com/api-reference/wallet/get-a-users-profile-stats>.

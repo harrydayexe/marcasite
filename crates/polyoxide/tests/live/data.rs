@@ -100,6 +100,38 @@ struct Extra {
 }
 
 static EXTRA: OnceCell<Extra> = OnceCell::const_new();
+static CANDIDATES: OnceCell<Vec<String>> = OnceCell::const_new();
+
+/// Active wallets: the distinct top-50 by volume of the day, week and all-time boards.
+async fn candidates() -> &'static [String] {
+    CANDIDATES
+        .get_or_init(|| async {
+            let mut wallets: Vec<String> = Vec::new();
+            for period in ["day", "week", "all"] {
+                let board = raw(
+                    "/leaderboard",
+                    &[
+                        ("time_period", period),
+                        ("sort_by", "VOLUME"),
+                        ("limit", "50"),
+                    ],
+                )
+                .await
+                .json;
+                wallets.extend(
+                    board["data"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|r| r["user_id"].as_str().map(str::to_owned)),
+                );
+            }
+            let mut seen = HashSet::new();
+            wallets.retain(|w| seen.insert(w.clone()));
+            wallets
+        })
+        .await
+}
 
 async fn extra() -> &'static Extra {
     EXTRA
@@ -131,37 +163,11 @@ async fn extra() -> &'static Extra {
                 .to_owned();
 
             // Combo users are rare: scan wallets from the boards for one.
-            let mut candidates: Vec<String> = Vec::new();
-            for period in ["day", "week", "all"] {
-                let board = raw(
-                    "/leaderboard",
-                    &[
-                        ("time_period", period),
-                        ("sort_by", "VOLUME"),
-                        ("limit", "50"),
-                    ],
-                )
-                .await
-                .json;
-                candidates.extend(
-                    board["data"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|r| text(&r["user_id"])),
-                );
-            }
-            let candidates: Vec<String> = {
-                let mut seen = HashSet::new();
-                candidates
-                    .into_iter()
-                    .filter(|u| seen.insert(u.clone()))
-                    .collect()
-            };
+            let candidates = candidates().await;
             let mut combo_position_user = None;
             let mut combo_activity_user = None;
             let mut combo_condition = None;
-            for user in &candidates {
+            for user in candidates {
                 if combo_position_user.is_none() {
                     let page = raw("/positions/combos", &[("user", user), ("limit", "1")]).await;
                     if let Some(first) = page.json["data"].get(0) {
@@ -462,15 +468,17 @@ async fn list_combo_positions_filters_and_stream() {
     assert_eq!(rows.len(), 5, "this wallet has more than 5 combo positions");
 }
 
-/// Live combo condition ids are `0x` + 62 hex digits (31 bytes); the SDK documents and
-/// enforces 64 digits client-side, so this filter cannot be used with a real combo id.
+/// Pins SPEC_DEVIATIONS.md "Combo condition ids are 62 hex digits": live combo condition
+/// ids are `0x` + 62 hex digits (31 bytes), the filter accepts exactly those, and the SDK
+/// lets them through client-side.
 #[tokio::test]
 #[ignore = "live network"]
 async fn combo_condition_filter_accepts_live_ids() {
     let x = extra().await;
     let (Some(user), Some(condition)) = (&x.combo_position_user, &x.combo_condition) else {
-        return;
+        panic!("no wallet with combo positions among the board wallets");
     };
+    assert_eq!(condition.len(), 2 + 62, "combo condition id {condition}");
     let page = pm()
         .data()
         .list_combo_positions(user.as_str())
@@ -489,6 +497,100 @@ async fn combo_condition_filter_accepts_live_ids() {
             .iter()
             .all(|p| p.combo_condition_id.as_str() == condition)
     );
+    // Within a combo position, the leg ids on this route are 62 digits too (and are not the
+    // legs' market condition ids: see the activity route below).
+    for leg in page.items().iter().flat_map(|p| &p.legs) {
+        assert_eq!(leg.leg_condition_id.as_str().len(), 2 + 62, "{leg:?}");
+    }
+
+    // The same filter on `/v2/activity/combos`.
+    let activity = pm()
+        .data()
+        .list_combo_activity(user.as_str())
+        .conditions([condition.as_str()])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        activity
+            .items()
+            .iter()
+            .all(|a| a.combo_condition_id.as_str() == condition)
+    );
+
+    // The server accepts exactly 62 digits: a bytes32 (64 digits), a short id and a
+    // non-hex id are `400 invalid combo condition id` naming `condition`.
+    let digits = &condition[2..];
+    let too_long = format!("0x{digits}00");
+    let too_short = format!("0x{}", &digits[..61]);
+    for (what, bad) in [
+        ("64 digits", too_long.as_str()),
+        ("61 digits", too_short.as_str()),
+        ("0x03", "0x03"),
+        ("no prefix", digits),
+    ] {
+        let e = raw_error(
+            "/positions/combos",
+            &[("user", user.as_str()), ("condition", bad)],
+        )
+        .await;
+        assert_eq!(e.status, 400, "{what}");
+        assert_eq!(e.body["parameter"], "condition", "{what}");
+        assert!(
+            e.body["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid combo condition id"),
+            "{what}: {}",
+            e.body
+        );
+    }
+    // Case does not matter.
+    let upper = format!("0x{}", digits.to_uppercase());
+    let ok = raw(
+        "/positions/combos",
+        &[("user", user.as_str()), ("condition", &upper)],
+    )
+    .await;
+    assert!(!ok.json["data"].as_array().unwrap().is_empty());
+}
+
+/// Pins SPEC_DEVIATIONS.md "Combo `leg_condition_id` differs between routes": the same
+/// leg has a 62-digit `0x01`/`0x02`-prefixed id on `/positions/combos` and the market's
+/// bytes32 condition id on `/activity/combos`, with the same `leg_position_id`.
+#[tokio::test]
+#[ignore = "live network"]
+async fn combo_leg_condition_ids_differ_between_routes() {
+    let x = extra().await;
+    let (Some(user), Some(_)) = (&x.combo_position_user, &x.combo_condition) else {
+        panic!("no wallet with combo positions among the board wallets");
+    };
+    let positions = pm()
+        .data()
+        .list_combo_positions(user.as_str())
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    for leg in positions.items().iter().flat_map(|p| &p.legs) {
+        let id = leg.leg_condition_id.as_str();
+        assert_eq!(id.len(), 2 + 62, "{id}");
+        assert!(id.starts_with("0x01") || id.starts_with("0x02"), "{id}");
+    }
+    let Some(activity_user) = &x.combo_activity_user else {
+        return;
+    };
+    let activity = pm()
+        .data()
+        .list_combo_activity(activity_user.as_str())
+        .limit(100)
+        .send()
+        .await
+        .unwrap();
+    assert!(!activity.items().is_empty());
+    for leg in activity.items().iter().flat_map(|a| &a.legs) {
+        assert_eq!(leg.leg_condition_id.as_str().len(), 2 + 64, "{leg:?}");
+    }
 }
 
 #[tokio::test]
