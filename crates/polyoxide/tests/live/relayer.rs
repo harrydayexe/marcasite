@@ -105,6 +105,51 @@ async fn check_deployed() {
     );
 }
 
+/// SPEC_DEVIATIONS.md, Relayer: `/nonce` and `/deployed` answer `200` for a malformed
+/// address where the spec says `400`. The SDK validates the address client-side, so this
+/// only pins the live behaviour. (`/relay-payload` shows the same.)
+#[tokio::test]
+#[ignore = "live network"]
+async fn malformed_addresses_are_accepted_by_live() {
+    for (path, query) in [
+        ("/nonce", [("address", "not-an-address"), ("type", "PROXY")]),
+        (
+            "/relay-payload",
+            [("address", "not-an-address"), ("type", "SAFE")],
+        ),
+        (
+            "/deployed",
+            [("address", "not-an-address"), ("type", "SAFE")],
+        ),
+    ] {
+        let response = reqwest::Client::new()
+            .get(format!("{RELAYER}{path}"))
+            .query(&query)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            200,
+            "GET {path} with a malformed address is no longer a 200: update SPEC_DEVIATIONS.md"
+        );
+    }
+    // The SDK refuses before sending.
+    let err = pm()
+        .relayer()
+        .get_nonce("not-an-address", NonceType::Proxy)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+    let err = pm()
+        .relayer()
+        .check_deployed("not-an-address")
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+}
+
 /// The documented 404 (`{"error":"transaction not found"}`) for an unknown id.
 #[tokio::test]
 #[ignore = "live network"]

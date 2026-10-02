@@ -44,7 +44,9 @@ pub struct RelayPayload {
 impl RelayerClient {
     /// Gets the current Proxy or Safe nonce for a user (`GET /nonce`).
     ///
-    /// `address` is the user's **signer** address.
+    /// `address` is the user's **signer** address. The address is validated client-side
+    /// (the live server accepts a malformed address with `200` where the spec says `400`;
+    /// see `SPEC_DEVIATIONS.md`).
     ///
     /// See <https://docs.polymarket.com/api-reference/relayer/get-current-nonce-for-a-user>.
     ///
@@ -79,7 +81,8 @@ impl RelayerClient {
 
     /// Gets the relayer address and the current nonce for a user (`GET /relay-payload`).
     ///
-    /// `address` is the user's **signer** address.
+    /// `address` is the user's **signer** address. The address is validated client-side
+    /// (the live server accepts a malformed address with `200`; see `SPEC_DEVIATIONS.md`).
     ///
     /// See <https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce>.
     ///
