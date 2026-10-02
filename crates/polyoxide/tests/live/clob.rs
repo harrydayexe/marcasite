@@ -28,6 +28,44 @@ fn clob() -> ClobClient {
     pm().clob().clone()
 }
 
+/// A raw response of any status (the shared `get` / `post` helpers panic on non-2xx).
+struct Response {
+    status: u16,
+    text: String,
+}
+
+async fn raw_get(path: &str, query: &[(&str, &str)]) -> Response {
+    let response = reqwest::Client::builder()
+        .user_agent("polyoxide-live-tests")
+        .build()
+        .expect("reqwest client builds")
+        .get(format!("{CLOB}{path}"))
+        .query(query)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("GET {path}: {e}"));
+    Response {
+        status: response.status().as_u16(),
+        text: response.text().await.expect("body reads"),
+    }
+}
+
+async fn raw_post(path: &str, body: &Value) -> Response {
+    let response = reqwest::Client::builder()
+        .user_agent("polyoxide-live-tests")
+        .build()
+        .expect("reqwest client builds")
+        .post(format!("{CLOB}{path}"))
+        .json(body)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("POST {path}: {e}"));
+    Response {
+        status: response.status().as_u16(),
+        text: response.text().await.expect("body reads"),
+    }
+}
+
 /// The sample market's two token ids, as raw strings.
 async fn tokens() -> (String, String) {
     let s = sample().await;
@@ -54,7 +92,13 @@ fn book_requests(a: &str, b: &str) -> Vec<BookRequest> {
 fn assert_book(book: &OrderBookSummary, token: &str, condition_id: &str) {
     assert_eq!(book.asset_id.as_str(), token);
     assert_eq!(book.market.as_str(), condition_id);
-    assert!(!book.timestamp.is_empty());
+    // The timestamp is Unix milliseconds: read as seconds or microseconds it would be far
+    // from now.
+    assert!(
+        (Utc::now() - book.timestamp).num_hours().abs() < 24,
+        "book timestamp {}",
+        book.timestamp
+    );
     assert!(!book.hash.is_empty());
     assert!(book.tick_size > Decimal::ZERO);
 }
@@ -82,37 +126,33 @@ async fn get_server_time() {
 async fn get_midpoint() {
     let (a, _) = tokens().await;
     let midpoint = clob().get_midpoint(a.as_str()).await.unwrap();
-    assert!(midpoint.mid_price >= Decimal::ZERO && midpoint.mid_price <= Decimal::ONE);
+    assert!(midpoint.mid >= Decimal::ZERO && midpoint.mid <= Decimal::ONE);
     check::<Midpoint>(
         "GET /midpoint",
         &get(CLOB, "/midpoint", &[("token_id", &a)]).await,
     );
 }
 
-/// `GET /midpoints?token_ids=a,b` (spec operation `getMidpointsGet`).
+/// Pins SPEC_DEVIATIONS.md "GET /midpoint field name": the body has `mid`, not the
+/// documented `mid_price`.
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_midpoints_query() {
-    let (a, b) = tokens().await;
-    let midpoints = clob()
-        .get_midpoints([a.as_str(), b.as_str()])
-        .await
-        .unwrap();
-    assert_eq!(midpoints.len(), 2);
-    let joined = format!("{a},{b}");
-    check::<HashMap<TokenId, Decimal>>(
-        "GET /midpoints",
-        &get(CLOB, "/midpoints", &[("token_ids", &joined)]).await,
-    );
+async fn pin_midpoint_field_is_mid() {
+    let (a, _) = tokens().await;
+    let raw = get(CLOB, "/midpoint", &[("token_id", &a)]).await;
+    let object = raw.json.as_object().expect("an object");
+    assert!(object.contains_key("mid"), "{}", raw.text);
+    assert!(!object.contains_key("mid_price"), "{}", raw.text);
+    assert!(raw.json["mid"].is_string(), "{}", raw.text);
 }
 
 /// `POST /midpoints` (spec operation `getMidpointsPost`).
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_midpoints_by_body() {
+async fn get_midpoints() {
     let (a, b) = tokens().await;
     let midpoints = clob()
-        .get_midpoints_by_body([a.as_str(), b.as_str()])
+        .get_midpoints([a.as_str(), b.as_str()])
         .await
         .unwrap();
     assert_eq!(midpoints.len(), 2);
@@ -155,30 +195,13 @@ async fn get_last_trade_price() {
     );
 }
 
-/// `GET /last-trades-prices?token_ids=a,b`.
-#[tokio::test]
-#[ignore = "live network"]
-async fn get_last_trade_prices_query() {
-    let (a, b) = tokens().await;
-    let prices = clob()
-        .get_last_trade_prices([a.as_str(), b.as_str()])
-        .await
-        .unwrap();
-    assert_eq!(prices.len(), 2);
-    let joined = format!("{a},{b}");
-    check::<Vec<TokenLastTradePrice>>(
-        "GET /last-trades-prices",
-        &get(CLOB, "/last-trades-prices", &[("token_ids", &joined)]).await,
-    );
-}
-
 /// `POST /last-trades-prices`.
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_last_trade_prices_by_body() {
+async fn get_last_trade_prices() {
     let (a, b) = tokens().await;
     let prices = clob()
-        .get_last_trade_prices_by_body([a.as_str(), b.as_str()])
+        .get_last_trade_prices([a.as_str(), b.as_str()])
         .await
         .unwrap();
     assert_eq!(prices.len(), 2);
@@ -203,39 +226,83 @@ async fn get_price() {
     );
 }
 
-/// `GET /prices?token_ids=a,b&sides=BUY,SELL`.
-#[tokio::test]
-#[ignore = "live network"]
-async fn get_prices_query() {
-    let (a, b) = tokens().await;
-    let prices = clob().get_prices(book_requests(&a, &b)).await.unwrap();
-    assert_eq!(prices.len(), 2);
-    let joined = format!("{a},{b}");
-    check::<HashMap<TokenId, HashMap<Side, Decimal>>>(
-        "GET /prices",
-        &get(
-            CLOB,
-            "/prices",
-            &[("token_ids", &joined), ("sides", "BUY,SELL")],
-        )
-        .await,
-    );
-}
-
 /// `POST /prices`.
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_prices_by_body() {
+async fn get_prices() {
     let (a, b) = tokens().await;
-    let prices = clob()
-        .get_prices_by_body(book_requests(&a, &b))
-        .await
-        .unwrap();
+    let prices = clob().get_prices(book_requests(&a, &b)).await.unwrap();
     assert_eq!(prices.len(), 2);
+    assert!(prices[&TokenId::from(a.as_str())].contains_key(&Side::Buy));
+    assert!(prices[&TokenId::from(b.as_str())].contains_key(&Side::Sell));
     check::<HashMap<TokenId, HashMap<Side, Decimal>>>(
         "POST /prices",
         &post(CLOB, "/prices", &book_requests_body().await).await,
     );
+}
+
+/// Pins SPEC_DEVIATIONS.md "Plural GET query forms": `GET /midpoints`, `/last-trades-prices`,
+/// `/prices` and `/books` with `token_ids` answer `400 Invalid payload` for every encoding
+/// (comma-separated, repeated keys, a single id), while the POST forms work.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_plural_get_forms_are_rejected() {
+    let (a, b) = tokens().await;
+    let joined = format!("{a},{b}");
+    let mut unexpected = Vec::new();
+    for path in ["/midpoints", "/last-trades-prices", "/prices", "/books"] {
+        let sides = path == "/prices";
+        let mut variants: Vec<(&str, Vec<(&str, &str)>)> = vec![
+            ("csv", vec![("token_ids", joined.as_str())]),
+            (
+                "repeated",
+                vec![("token_ids", a.as_str()), ("token_ids", b.as_str())],
+            ),
+            ("single", vec![("token_ids", a.as_str())]),
+        ];
+        if sides {
+            for (_, query) in &mut variants {
+                query.push(("sides", "BUY,SELL"));
+            }
+        }
+        for (name, query) in variants {
+            let response = raw_get(path, &query).await;
+            if response.status != 400 || !response.text.contains("Invalid payload") {
+                unexpected.push(format!(
+                    "GET {path} ({name}): HTTP {} {}",
+                    response.status, response.text
+                ));
+            }
+        }
+    }
+    assert!(
+        unexpected.is_empty(),
+        "a plural GET form works now; implement it: {unexpected:#?}"
+    );
+}
+
+/// Pins SPEC_DEVIATIONS.md "POST /prices without a side": an item without `side` is accepted
+/// and priced as SELL only.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_post_prices_without_side_is_sell_only() {
+    let (a, _) = tokens().await;
+    let response = raw_post("/prices", &json!([{ "token_id": a }])).await;
+    assert_eq!(response.status, 200, "{}", response.text);
+    let body: Value = serde_json::from_str(&response.text).unwrap();
+    let sides = body[&a].as_object().expect("prices of the token");
+    assert_eq!(sides.keys().collect::<Vec<_>>(), ["SELL"], "{body}");
+    assert!(body[&a]["SELL"].is_string(), "{body}");
+}
+
+/// Pins SPEC_DEVIATIONS.md "Price values are strings": `GET /price` sends a string, the spec
+/// documents a number.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_price_is_a_string() {
+    let (a, _) = tokens().await;
+    let raw = get(CLOB, "/price", &[("token_id", &a), ("side", "BUY")]).await;
+    assert!(raw.json["price"].is_string(), "{}", raw.text);
 }
 
 // ---- market parameters -----------------------------------------------------------------------
@@ -317,38 +384,36 @@ async fn get_order_book() {
     let book = clob().get_order_book(a.as_str()).await.unwrap();
     assert_book(&book, &a, &s.condition_id);
     let raw = get(CLOB, "/book", &[("token_id", &a)]).await;
-    // Open question 14: the unit of the `timestamp` string.
-    eprintln!("INFO GET /book timestamp = {}", raw.json["timestamp"]);
     check::<OrderBookSummary>("GET /book", &raw);
 }
 
-/// `GET /books?token_ids=a,b`.
+/// Pins SPEC_DEVIATIONS.md "GET /book timestamp and hash formats": `timestamp` is a string of
+/// Unix milliseconds (13 digits), `hash` is 40 hex characters without `0x`, `market` is 64 hex
+/// with `0x`.
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_order_books_query() {
-    let s = sample().await;
-    let (a, b) = tokens().await;
-    let books = clob()
-        .get_order_books([a.as_str(), b.as_str()])
-        .await
-        .unwrap();
-    assert_eq!(books.len(), 2);
-    assert_book(&books[0], &a, &s.condition_id);
-    let joined = format!("{a},{b}");
-    check::<Vec<OrderBookSummary>>(
-        "GET /books",
-        &get(CLOB, "/books", &[("token_ids", &joined)]).await,
-    );
+async fn pin_book_formats() {
+    let (a, _) = tokens().await;
+    let raw = get(CLOB, "/book", &[("token_id", &a)]).await;
+    let timestamp = raw.json["timestamp"].as_str().expect("a string timestamp");
+    assert_eq!(timestamp.len(), 13, "{timestamp}");
+    assert!(timestamp.bytes().all(|b| b.is_ascii_digit()));
+    let hash = raw.json["hash"].as_str().expect("a hash");
+    assert_eq!(hash.len(), 40, "{hash}");
+    assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()), "{hash}");
+    let market = raw.json["market"].as_str().expect("a market");
+    assert_eq!(market.len(), 66, "{market}");
+    assert!(market.starts_with("0x"));
 }
 
 /// `POST /books`.
 #[tokio::test]
 #[ignore = "live network"]
-async fn get_order_books_by_body() {
+async fn get_order_books() {
     let s = sample().await;
     let (a, b) = tokens().await;
     let books = clob()
-        .get_order_books_by_body([a.as_str(), b.as_str()])
+        .get_order_books([a.as_str(), b.as_str()])
         .await
         .unwrap();
     assert_eq!(books.len(), 2);
@@ -478,6 +543,58 @@ async fn get_clob_market_info() {
     );
 }
 
+/// Pins SPEC_DEVIATIONS.md "ClobMarketDetails undocumented keys": `c`, `cbos` and `v` are on
+/// every market, `ao`/`aot` on opened ones, `nr` on neg-risk ones, `sd` on sports ones; and
+/// the SDK models them.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_clob_market_details_undocumented_keys() {
+    let s = sample().await;
+    let raw = get(CLOB, &format!("/clob-markets/{}", s.condition_id), &[]).await;
+    let object = raw.json.as_object().expect("an object");
+    for key in ["c", "cbos", "v"] {
+        assert!(object.contains_key(key), "missing `{key}`: {}", raw.text);
+    }
+    let info = clob()
+        .get_clob_market_info(s.condition_id.as_str())
+        .await
+        .unwrap();
+    assert_eq!(info.condition_id.as_ref().unwrap().as_str(), s.condition_id);
+    assert_eq!(info.version.as_deref(), Some("v1"));
+    assert!(info.cbos.is_some());
+
+    // Markets that carry the conditional keys, found from the sampling listing: an accepting
+    // market (`ao`, `aot`), a neg-risk one (`nr`) and one with a game start time (`sd`).
+    let listing = get(CLOB, "/sampling-markets", &[]).await;
+    let markets = listing.json["data"].as_array().unwrap();
+    let find = |predicate: &dyn Fn(&Value) -> bool| {
+        markets
+            .iter()
+            .find(|m| predicate(m))
+            .map(|m| m["condition_id"].as_str().unwrap().to_owned())
+    };
+    if let Some(id) = find(&|m| m["accepting_orders"] == true) {
+        let info = clob().get_clob_market_info(id.as_str()).await.unwrap();
+        assert_eq!(info.accepting_orders, Some(true), "{id}");
+        assert!(info.accepting_order_timestamp.is_some(), "{id}");
+    }
+    if let Some(id) = find(&|m| m["neg_risk"] == true) {
+        let info = clob().get_clob_market_info(id.as_str()).await.unwrap();
+        assert_eq!(info.neg_risk, Some(true), "{id}");
+    }
+    match find(&|m| !m["game_start_time"].is_null()) {
+        Some(id) => {
+            let info = clob().get_clob_market_info(id.as_str()).await.unwrap();
+            assert!(info.game_start_time.is_some(), "{id}");
+            assert!(
+                info.seconds_delay.is_some(),
+                "no `sd` on sports market {id}"
+            );
+        }
+        None => eprintln!("INFO no sports market in the sampling page; `sd` not checked"),
+    }
+}
+
 /// Decodes the clob-market info of several different markets (closed, neg-risk, with and
 /// without rewards) taken from the simplified listing, to cover optional/nullable fields.
 #[tokio::test]
@@ -540,6 +657,49 @@ async fn get_market_by_token() {
     check::<MarketByToken>(
         "GET /markets-by-token/{token_id}",
         &get(CLOB, &format!("/markets-by-token/{a}"), &[]).await,
+    );
+}
+
+/// Pins SPEC_DEVIATIONS.md "markets-by-token primary token": `primary_token_id` and
+/// `secondary_token_id` are the market's two tokens, but `primary_token_id` is not always the
+/// first ("Yes") token, as the docs say.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_market_by_token_primary_is_not_always_yes() {
+    let listing = get(CLOB, "/sampling-markets", &[]).await;
+    let (mut first, mut second) = (0, 0);
+    for market in listing.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["tokens"].as_array().is_some_and(|t| t.len() == 2))
+        .step_by(37)
+        .take(20)
+    {
+        let tokens = [
+            market["tokens"][0]["token_id"].as_str().unwrap(),
+            market["tokens"][1]["token_id"].as_str().unwrap(),
+        ];
+        let found = clob().get_market_by_token(tokens[0]).await.unwrap();
+        let primary = found.primary_token_id.as_str();
+        let secondary = found.secondary_token_id.as_str();
+        assert!(
+            (primary == tokens[0] && secondary == tokens[1])
+                || (primary == tokens[1] && secondary == tokens[0]),
+            "{market}: {found:?}"
+        );
+        // The same answer from either token of the market.
+        let other = clob().get_market_by_token(tokens[1]).await.unwrap();
+        assert_eq!(found, other);
+        if primary == tokens[0] {
+            first += 1;
+        } else {
+            second += 1;
+        }
+    }
+    assert!(
+        first > 0 && second > 0,
+        "primary is now always the same token ({first} first, {second} second): the docs may be true"
     );
 }
 
@@ -659,6 +819,84 @@ async fn get_prices_history_every_interval() {
         }
     }
     assert!(failures.is_empty(), "failures: {failures:#?}");
+}
+
+/// Pins SPEC_DEVIATIONS.md "prices-history interval and fidelity": `1m` is a month and needs
+/// `fidelity >= 10`, `1w` needs `fidelity >= 5`, and `max` behaves as `all`.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_prices_history_interval_rules() {
+    let (a, _) = tokens().await;
+    let status = |interval: &'static str, fidelity: &'static str| {
+        let a = a.clone();
+        async move {
+            raw_get(
+                "/prices-history",
+                &[
+                    ("market", &a),
+                    ("interval", interval),
+                    ("fidelity", fidelity),
+                ],
+            )
+            .await
+        }
+    };
+    for (interval, fidelity, minimum) in [("1m", "9", "10"), ("1w", "4", "5")] {
+        let response = status(interval, fidelity).await;
+        assert_eq!(response.status, 400, "{interval}: {}", response.text);
+        assert!(
+            response.text.contains(&format!("is {minimum}")),
+            "{interval}: {}",
+            response.text
+        );
+    }
+    assert_eq!(status("1m", "10").await.status, 200);
+    assert_eq!(status("1w", "5").await.status, 200);
+
+    // `1m` spans about a month; `max` and `all` return the same series.
+    let month = clob()
+        .get_prices_history(a.as_str())
+        .interval(PriceHistoryInterval::OneMonth)
+        .fidelity(60)
+        .send()
+        .await
+        .unwrap()
+        .history
+        .unwrap_or_default();
+    let span_days = match (month.first(), month.last()) {
+        (Some(first), Some(last)) => {
+            (last.timestamp.unwrap() - first.timestamp.unwrap()).num_days()
+        }
+        _ => 0,
+    };
+    assert!(
+        (25..=31).contains(&span_days) || month.len() < 24 * 25,
+        "1m spans {span_days} days"
+    );
+    let max = clob()
+        .get_prices_history(a.as_str())
+        .interval(PriceHistoryInterval::Max)
+        .fidelity(60)
+        .send()
+        .await
+        .unwrap()
+        .history
+        .unwrap_or_default();
+    let all = clob()
+        .get_prices_history(a.as_str())
+        .interval(PriceHistoryInterval::All)
+        .fidelity(60)
+        .send()
+        .await
+        .unwrap()
+        .history
+        .unwrap_or_default();
+    assert!(
+        max.len().abs_diff(all.len()) <= 2,
+        "{} vs {}",
+        max.len(),
+        all.len()
+    );
 }
 
 #[tokio::test]
@@ -951,7 +1189,50 @@ async fn get_current_rebated_fees() {
         .await
         .unwrap();
     assert!(!fees.is_empty());
+    assert!(fees.iter().all(|f| f.date == date));
     check::<Vec<RebatedFees>>("GET /rebates/current", &raw);
+}
+
+/// Pins SPEC_DEVIATIONS.md "GET /rebates/current": `date` is an RFC 3339 date-time (not a
+/// plain date) and a maker without rebates gets the body `null` (not `[]`).
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_rebates_shape() {
+    let none = get(
+        CLOB,
+        "/rebates/current",
+        &[
+            ("date", "2026-01-01"),
+            (
+                "maker_address",
+                "0x0000000000000000000000000000000000000001",
+            ),
+        ],
+    )
+    .await;
+    assert_eq!(none.text.trim(), "null");
+
+    for (maker, date) in rebate_candidates().await.into_iter().take(8) {
+        let raw = get(
+            CLOB,
+            "/rebates/current",
+            &[("date", &date.to_string()), ("maker_address", &maker)],
+        )
+        .await;
+        let Some(items) = raw.json.as_array().filter(|a| !a.is_empty()) else {
+            continue;
+        };
+        for item in items {
+            let wire = item["date"].as_str().unwrap();
+            assert!(
+                wire.len() > 10 && wire.contains('T'),
+                "date is no longer a date-time: {wire}"
+            );
+            assert!(wire.starts_with(&date.to_string()), "{wire} vs {date}");
+        }
+        return;
+    }
+    panic!("no maker with rebates among recent builder trades");
 }
 
 /// A maker without rebates on the date: the live API answers `null` (not `[]`).
@@ -988,6 +1269,40 @@ async fn list_builder_trades() {
         raw.json["next_cursor"], raw.json["limit"], raw.json["count"]
     );
     check::<Page<BuilderTrade>>("GET /builder/trades", &raw);
+}
+
+/// Pins SPEC_DEVIATIONS.md "BuilderTrade fields": `builder` is empty and the code is in
+/// `builderCode`; `builderFee` is sent; amounts are decimal units (`sizeUsdc = size * price`),
+/// not micro-units.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_builder_trade_fields() {
+    let raw = get(CLOB, "/builder/trades", &[("builder_code", BUILDER_CODE)]).await;
+    let trades = raw.json["data"].as_array().unwrap();
+    assert!(!trades.is_empty());
+    for trade in trades {
+        assert_eq!(trade["builder"], "", "{trade}");
+        assert_eq!(trade["builderCode"], BUILDER_CODE, "{trade}");
+        assert!(trade["builderFee"].is_string(), "{trade}");
+    }
+    let page = clob()
+        .list_builder_trades(BUILDER_CODE)
+        .send()
+        .await
+        .unwrap();
+    for trade in page.items() {
+        assert!(trade.builder_fee.is_some());
+        assert_eq!(
+            trade.builder_code.as_ref().map(|c| c.as_str()),
+            Some(BUILDER_CODE)
+        );
+        // Decimal units: the USDC size is the share size times the price (to 6 places).
+        let expected = (trade.size * trade.price).round_dp(6);
+        assert!(
+            (trade.size_usdc - expected).abs() <= Decimal::new(1, 5),
+            "{trade:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1034,6 +1349,35 @@ async fn list_builder_trades_stream_pages() {
     if has_more {
         assert_eq!(items.len(), wanted);
     }
+}
+
+/// Pins SPEC_DEVIATIONS.md "`LTE=` end cursor": every cursor-paged route ends with
+/// `next_cursor: "LTE="` (a past-the-end cursor gives an empty page ending with it), and `LTE=`
+/// itself is rejected as a request cursor.
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_end_cursor_is_lte() {
+    // base64 of "100000000" (an offset cursor) and of "id:999999999" (a market-id cursor).
+    let offset = "MTAwMDAwMDAw";
+    let id = "aWQ6OTk5OTk5OTk5";
+    let cases: [(&str, Vec<(&str, &str)>); 6] = [
+        ("/rewards/markets/current", vec![("next_cursor", offset)]),
+        ("/rewards/markets/multi", vec![("next_cursor", offset)]),
+        (
+            "/builder/trades",
+            vec![("builder_code", BUILDER_CODE), ("next_cursor", offset)],
+        ),
+        ("/simplified-markets", vec![("next_cursor", id)]),
+        ("/sampling-markets", vec![("next_cursor", id)]),
+        ("/sampling-simplified-markets", vec![("next_cursor", id)]),
+    ];
+    for (path, query) in cases {
+        let raw = get(CLOB, path, &query).await;
+        assert_eq!(raw.json["next_cursor"], "LTE=", "{path}: {}", raw.text);
+        assert_eq!(raw.json["count"], 0, "{path}: {}", raw.text);
+    }
+    let response = raw_get("/simplified-markets", &[("next_cursor", "LTE=")]).await;
+    assert_eq!(response.status, 400, "{}", response.text);
 }
 
 // ---- error shapes ----------------------------------------------------------------------------

@@ -116,8 +116,9 @@ pub struct Market {
     pub condition_id: Option<ConditionId>,
     /// Question id, exactly as sent.
     ///
-    /// Kept as a string: the spec types it as a plain string without describing it, so it
-    /// is not known to be the same id as [`QuestionId`](crate::types::QuestionId).
+    /// This is the same id as the Gamma market's `questionID` (live check, 2026-10-02), i.e.
+    /// a [`QuestionId`](crate::types::QuestionId) value; it stays a plain string because the
+    /// spec types it as one.
     pub question_id: Option<String>,
     /// The market question.
     pub question: Option<String>,
@@ -196,7 +197,10 @@ pub struct FeeDetails {
 /// tick size, base fees, rewards, RFQ status and fee details.
 ///
 /// The wire format uses abbreviated field names (noted on each field). The spec marks no
-/// field as required.
+/// field as required. Fields marked "undocumented" are sent by the live API (observed
+/// 2026-10-02) but are not in the spec; see `SPEC_DEVIATIONS.md`. Any field may be absent:
+/// which ones appear depends on the market (e.g. `mbf`, `tbf` and `fd` only on markets with
+/// fees, `gst`/`sd` on sports markets, `ao`/`aot` on markets that have been opened).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ClobMarketDetails {
@@ -244,6 +248,33 @@ pub struct ClobMarketDetails {
     /// Minimum order age in seconds (wire name `oas`).
     #[serde(rename = "oas")]
     pub min_order_age_seconds: Option<i64>,
+    /// Condition id of the market (wire name `c`). Undocumented; observed live.
+    #[serde(rename = "c")]
+    pub condition_id: Option<ConditionId>,
+    /// Delay in seconds applied to marketable orders (wire name `sd`). Undocumented; observed
+    /// live as `3` on sports markets and absent elsewhere. The name follows the
+    /// [`Market::seconds_delay`] field of the market listings; the meaning of `sd` itself is
+    /// inferred, not documented.
+    #[serde(rename = "sd")]
+    pub seconds_delay: Option<u64>,
+    /// Whether the market accepts orders (wire name `ao`). Undocumented; observed live.
+    #[serde(rename = "ao")]
+    pub accepting_orders: Option<bool>,
+    /// Since when the market accepts orders (wire name `aot`, an RFC 3339 date-time).
+    /// Undocumented; observed live.
+    #[serde(rename = "aot", default, with = "serde_util::datetime_option")]
+    pub accepting_order_timestamp: Option<DateTime<Utc>>,
+    /// Whether negative risk is enabled for this market (wire name `nr`). Undocumented;
+    /// observed live, and sent only for neg-risk markets.
+    #[serde(rename = "nr")]
+    pub neg_risk: Option<bool>,
+    /// The `cbos` flag (wire name `cbos`). Undocumented; observed live as a boolean on every
+    /// market. Its meaning is unknown, so the field keeps the wire name.
+    pub cbos: Option<bool>,
+    /// Version tag of the market (wire name `v`). Undocumented; observed live as `"v1"` on
+    /// every market.
+    #[serde(rename = "v")]
+    pub version: Option<String>,
 }
 
 /// The parent market of a token (`components/schemas/MarketByTokenResponse`).
@@ -252,9 +283,15 @@ pub struct ClobMarketDetails {
 pub struct MarketByToken {
     /// Condition id of the market containing the token.
     pub condition_id: ConditionId,
-    /// The primary (Yes) token id.
+    /// The primary token id.
+    ///
+    /// The spec calls it "the primary (Yes) token", but live it is not reliably the first or
+    /// "Yes" token of the market: it is one of the market's two tokens, chosen independently
+    /// of outcome order (see `SPEC_DEVIATIONS.md`). Look the outcome up with
+    /// [`ClobClient::get_clob_market_info`] if it matters.
     pub primary_token_id: TokenId,
-    /// The secondary (No) token id.
+    /// The secondary token id (the market's other token; see
+    /// [`primary_token_id`](Self::primary_token_id)).
     pub secondary_token_id: TokenId,
 }
 
@@ -267,10 +304,11 @@ pub struct MarketByToken {
 pub struct LiveActivityMarket {
     /// Condition id of the market.
     pub condition_id: Option<ConditionId>,
-    /// Internal market id (a JSON integer).
+    /// Market id (a JSON integer).
     ///
-    /// Kept as a plain integer: the spec only calls it "Internal market ID", so it is not
-    /// known to be the same id as [`MarketId`](crate::types::MarketId).
+    /// This is the same id as the Gamma market's `id` (live check, 2026-10-02), i.e. the
+    /// integer behind a [`MarketId`](crate::types::MarketId); it stays an integer because
+    /// the CLOB sends a JSON number (Gamma sends it as a string).
     pub id: Option<i64>,
     /// The market question.
     pub question: Option<String>,
@@ -291,7 +329,9 @@ pub struct LiveActivityMarket {
 impl ClobClient {
     /// Lists markets in simplified form (`GET /simplified-markets`, cursor pagination).
     ///
-    /// See <https://docs.polymarket.com/api-reference/markets/get-simplified-markets>.
+    /// Live pages hold up to 1000 markets (all states, including closed ones, whose
+    /// `rewards.rates` is `null`), and the cursors are opaque base64 strings. See
+    /// <https://docs.polymarket.com/api-reference/markets/get-simplified-markets>.
     ///
     /// ```no_run
     /// # async fn run() -> polyoxide::Result<()> {
@@ -401,7 +441,6 @@ impl ClobClient {
         require_list_values(
             "condition_ids",
             condition_ids.iter().map(ConditionId::as_str),
-            false,
         )?;
         self.transport
             .post(&["markets", "live-activity"])

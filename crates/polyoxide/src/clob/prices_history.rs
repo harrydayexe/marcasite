@@ -290,7 +290,7 @@ impl GetBatchPricesHistory {
     pub async fn send(self) -> Result<BatchPricesHistory> {
         require_non_empty("markets", &self.markets)?;
         require_at_most("markets", &self.markets, MAX_BATCH_PRICES_HISTORY_MARKETS)?;
-        require_list_values("markets", self.markets.iter().map(TokenId::as_str), false)?;
+        require_list_values("markets", self.markets.iter().map(TokenId::as_str))?;
         let body = BatchPricesHistoryRequest {
             markets: &self.markets,
             start_ts: self.start_ts,
