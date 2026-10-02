@@ -10,7 +10,8 @@ use super::{
     DataClient,
     types::{
         ComboLeg, FilterType, Page, SortDirection, any_value, check_limit, check_user, collect_ids,
-        condition_id, distinct_values, empty_string_or, epoch_seconds, page_stream,
+        combo_condition_id, condition_id, distinct_values, empty_string_or, epoch_seconds,
+        page_stream,
     },
 };
 use crate::types::{Address, ConditionId, EventId, Side, TokenId};
@@ -93,6 +94,26 @@ polyoxide_core::string_enum! {
         /// A user-to-user transfer that is not a trade-settlement leg. Opt-in: only
         /// returned when requested through [`ListActivity::types`].
         Tip => "TIP",
+        /// A maker-side fee rebate credit. **Undocumented** (not in the docs' `type`
+        /// list); served live. A non-trade row: `condition_id`, `token_id` and `side` are
+        /// empty.
+        MakerRebate => "MAKER_REBATE",
+        /// A taker-side fee rebate credit. **Undocumented**; served live, like
+        /// [`MakerRebate`](Self::MakerRebate).
+        TakerRebate => "TAKER_REBATE",
+        /// A yield income credit. **Undocumented**; served live, like
+        /// [`MakerRebate`](Self::MakerRebate).
+        Yield => "YIELD",
+        /// A referral-program reward credit. **Undocumented**; served live, like
+        /// [`MakerRebate`](Self::MakerRebate).
+        ReferralReward => "REFERRAL_REWARD",
+        /// A collateral deposit. **Undocumented**; served live only with
+        /// [`exclude_deposits_withdrawals(false)`](ListActivity::exclude_deposits_withdrawals).
+        /// Filtering by it without that flag returns an empty page (the default
+        /// excludes deposits and withdrawals).
+        Deposit => "DEPOSIT",
+        /// A collateral withdrawal. **Undocumented**; see [`Deposit`](Self::Deposit).
+        Withdrawal => "WITHDRAWAL",
     }
 }
 
@@ -128,8 +149,11 @@ pub struct Activity {
     /// Block timestamp of the action.
     #[serde(with = "serde_util::timestamp_seconds")]
     pub timestamp: DateTime<Utc>,
-    /// On-chain condition id of the market.
-    pub condition_id: ConditionId,
+    /// On-chain condition id of the market; `None` on rows that touch no market (rebates,
+    /// yield, rewards, deposits, withdrawals, ...), which the API serves as `""` (and which
+    /// is serialized back as `""`).
+    #[serde(with = "empty_string_or")]
+    pub condition_id: Option<ConditionId>,
     /// Kind of event (`type`).
     #[serde(rename = "type")]
     pub activity_type: ActivityType,
@@ -144,8 +168,11 @@ pub struct Activity {
     /// Price per share in USDC (trades; `0` where no price applies).
     #[serde(with = "serde_util::decimal_number")]
     pub price: Decimal,
-    /// CLOB asset id of the outcome token the action touched.
-    pub token_id: TokenId,
+    /// CLOB asset id of the outcome token the action touched; `None` on rows that touch no
+    /// single token (merges, splits and conversions included; served as `""`, and
+    /// serialized back as `""`).
+    #[serde(with = "empty_string_or")]
+    pub token_id: Option<TokenId>,
     /// Direction: `BUY`/`SELL` on trade rows, `IN`/`OUT` on tips; `None` where a side does
     /// not apply (served as `""`, and serialized back as `""`).
     #[serde(with = "empty_string_or")]
@@ -214,7 +241,9 @@ pub struct ComboActivity {
     pub activity_type: ComboActivityType,
     /// Proxy wallet the action belongs to.
     pub proxy_wallet: Address,
-    /// On-chain combo condition id (`0x03`-prefixed).
+    /// On-chain combo condition id: `0x` plus 62 hex digits live (not a bytes32), e.g.
+    /// `0x037cb523f88f4c6ef6a31c33f8a2e72be70000000000000000000000000000`. The docs only
+    /// say `0x03`-prefixed.
     pub combo_condition_id: ConditionId,
     /// Token id of the combo position the action touched.
     pub combo_position_id: TokenId,
@@ -408,7 +437,10 @@ impl ListTrades {
         self
     }
 
-    /// Gamma event ids (`event_id`, at most 20 distinct values). Duplicates are sent once.
+    /// Gamma event ids (`event_id`, at most 20 distinct values). Mutually exclusive with
+    /// [`conditions`](Self::conditions) (the docs do not say so, but the server answers
+    /// `400` "must provide either eventId or condition, not both"). Duplicates are sent
+    /// once.
     pub fn event_ids<I>(mut self, event_ids: I) -> Self
     where
         I: IntoIterator,
@@ -431,6 +463,13 @@ impl ListTrades {
         check_limit(self.limit, MAX_FEED_LIMIT)?;
         let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         let event_ids = distinct_values("event_id", &self.event_ids, any_value)?;
+        if !conditions.is_empty() && !event_ids.is_empty() {
+            return Err(ValidationError::new(
+                "event_id",
+                "`event_id` and `condition` are mutually exclusive",
+            )
+            .into());
+        }
         let start = epoch_seconds("start", self.start)?;
         let end = epoch_seconds("end", self.end)?;
         let mut q = Query::new();
@@ -454,8 +493,8 @@ impl ListTrades {
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is set but empty,
     /// `limit` is above 1000, a condition id is not `0x` followed by 64 hex digits, more
-    /// than 20 distinct condition or event ids are given, or a bound is before the Unix
-    /// epoch; otherwise see [`Error`](crate::Error).
+    /// than 20 distinct condition or event ids are given, both are given, or a bound is
+    /// before the Unix epoch; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<Trade>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(TRADES, query).await
@@ -509,6 +548,11 @@ impl ListActivity {
 
     /// Activity types (`type`, comma-separated). [`ActivityType::Tip`] is never in the
     /// default set and is only returned when named here.
+    ///
+    /// [`ActivityType::Deposit`] and [`ActivityType::Withdrawal`] are excluded by default,
+    /// so filtering by them alone returns an empty page unless
+    /// [`exclude_deposits_withdrawals(false)`](Self::exclude_deposits_withdrawals) is set
+    /// too. An unknown type is a `400` naming the `type` parameter.
     pub fn types(mut self, types: impl IntoIterator<Item = ActivityType>) -> Self {
         self.types = types.into_iter().collect();
         self
@@ -580,6 +624,8 @@ impl ListActivity {
     }
 
     /// Exclude deposits and withdrawals (`exclude_deposits_withdrawals`, default `true`).
+    /// Set `false` to see [`ActivityType::Deposit`] and [`ActivityType::Withdrawal`] rows,
+    /// including when filtering by those types.
     pub fn exclude_deposits_withdrawals(mut self, exclude: bool) -> Self {
         self.exclude_deposits_withdrawals = Some(exclude);
         self
@@ -672,6 +718,11 @@ impl ListComboActivity {
 
     /// Combo condition ids (`condition`, at most 20 distinct values). Duplicates are sent
     /// once.
+    ///
+    /// A combo condition id is `0x` plus **62** hex digits live (not the 64 of a regular
+    /// condition id): copy it from a [`ComboActivity::combo_condition_id`] or a
+    /// combo position. The server answers `400` to any other length; the client only
+    /// checks for `0x` plus 1 to 64 hex digits.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -684,7 +735,7 @@ impl ListComboActivity {
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
         check_user(&self.user)?;
         check_limit(self.limit, MAX_FEED_LIMIT)?;
-        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
+        let conditions = distinct_values("condition", &self.conditions, combo_condition_id)?;
         let mut q = Query::new();
         q.push("user", &self.user)
             .push_opt("limit", self.limit)
@@ -698,8 +749,8 @@ impl ListComboActivity {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
-    /// is above 1000, a condition id is not `0x` followed by 64 hex digits, or more than
-    /// 20 distinct condition ids are given; otherwise see [`Error`](crate::Error).
+    /// is above 1000, a condition id is not `0x` followed by 1 to 64 hex digits, or more
+    /// than 20 distinct condition ids are given; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<ComboActivity>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(COMBO_ACTIVITY, query).await
@@ -792,6 +843,7 @@ mod tests {
         }"#;
         let activity: Activity = serde_json::from_str(json).unwrap();
         assert_eq!(activity.activity_type, ActivityType::Redeem);
+        assert_eq!(activity.token_id.as_ref().map(TokenId::as_str), Some("1"));
         assert_eq!(activity.side, None);
         assert_eq!(activity.is_combo, None);
         assert_eq!(activity.outcome_index, crate::data::UNLABELED_OUTCOME_INDEX);
@@ -823,12 +875,82 @@ mod tests {
         let missing = json.replace(r#""side": "","#, "");
         assert!(serde_json::from_str::<Activity>(&missing).is_err());
 
-        let unknown = json.replace(r#""type": "REDEEM""#, r#""type": "YIELD""#);
+        let unknown = json.replace(r#""type": "REDEEM""#, r#""type": "BRAND_NEW""#);
         let unknown: Activity = serde_json::from_str(&unknown).unwrap();
         assert_eq!(
             unknown.activity_type,
-            ActivityType::Unknown("YIELD".to_owned())
+            ActivityType::Unknown("BRAND_NEW".to_owned())
         );
+    }
+
+    /// Types served live but missing from the docs' `type` list (observed 2026-10-02).
+    #[test]
+    fn activity_types_served_live() {
+        for (wire, expected) in [
+            ("MAKER_REBATE", ActivityType::MakerRebate),
+            ("TAKER_REBATE", ActivityType::TakerRebate),
+            ("YIELD", ActivityType::Yield),
+            ("REFERRAL_REWARD", ActivityType::ReferralReward),
+            ("DEPOSIT", ActivityType::Deposit),
+            ("WITHDRAWAL", ActivityType::Withdrawal),
+        ] {
+            let parsed: ActivityType = serde_json::from_str(&format!("\"{wire}\"")).unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(expected.as_str(), wire);
+            assert!(!parsed.is_unknown());
+        }
+    }
+
+    /// A non-trade row captured from the live API (`GET /v2/activity?user=0x1250846658e2a118930edb02e31f7a7e82258f99&exclude_deposits_withdrawals=false`,
+    /// 2026-10-02, trimmed): rebate rows send `condition_id`, `token_id` and `side` as `""`.
+    #[test]
+    fn deserializes_live_non_trade_rows_with_empty_ids() {
+        let json = r#"{
+            "proxy_wallet": "0x1250846658e2a118930edb02e31f7a7e82258f99",
+            "timestamp": 1790899200,
+            "condition_id": "",
+            "type": "TAKER_REBATE",
+            "size": 558.1579,
+            "usdc_size": 558.1579,
+            "transaction_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "price": 0,
+            "token_id": "",
+            "side": "",
+            "outcome_index": 999,
+            "title": "",
+            "slug": "",
+            "icon": "",
+            "event_slug": "",
+            "outcome": "",
+            "name": "",
+            "pseudonym": "",
+            "bio": "",
+            "profile_image": "",
+            "profile_image_optimized": ""
+        }"#;
+        let row: Activity = serde_json::from_str(json).unwrap();
+        assert_eq!(row.activity_type, ActivityType::TakerRebate);
+        assert_eq!(row.condition_id, None);
+        assert_eq!(row.token_id, None);
+        assert_eq!(row.side, None);
+        assert_eq!(row.usdc_size.to_string(), "558.1579");
+        // Serialized back as on the wire.
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["condition_id"], "");
+        assert_eq!(value["token_id"], "");
+        assert_eq!(value["side"], "");
+        assert_eq!(serde_json::from_value::<Activity>(value).unwrap(), row);
+
+        // A merge row has a condition id but no single token.
+        let merge = json
+            .replace(r#""type": "TAKER_REBATE""#, r#""type": "MERGE""#)
+            .replace(
+                r#""condition_id": """#,
+                r#""condition_id": "0xec367611fbfbc42f7a8dd4b25901cd8926f46d79d11ea08bea78d7bf0c5bc33d""#,
+            );
+        let merge: Activity = serde_json::from_str(&merge).unwrap();
+        assert!(merge.condition_id.is_some());
+        assert_eq!(merge.token_id, None);
     }
 
     /// Field names and types from `components/schemas/ComboActivity`.
@@ -838,7 +960,7 @@ mod tests {
             "id": "0xfeed-3",
             "type": "REDEEM",
             "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
-            "combo_condition_id": "0x03aa000000000000000000000000000000000000000000000000000000000001",
+            "combo_condition_id": "0x033c72a79df1dfd46683b15b5c0ce78ef50000000000000000000000000000",
             "combo_position_id": "123",
             "block_number": 75000000,
             "timestamp": 1787133600,
@@ -932,21 +1054,61 @@ mod tests {
             validation_parameter(client.list_trades().event_ids(["1,2"]).query(None)),
             "event_id"
         );
+        // A condition id together with an event id is a 400 live ("must provide either
+        // eventId or condition, not both").
         assert_eq!(
             validation_parameter(
                 client
-                    .list_combo_activity(WALLET)
-                    .conditions(["0x03aa"])
+                    .list_trades()
+                    .conditions([CONDITION])
+                    .event_ids(["1"])
+                    .query(None)
+            ),
+            "event_id"
+        );
+        // Regular condition ids are bytes32.
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_trades()
+                    .conditions([COMBO_CONDITION])
                     .query(None)
             ),
             "condition"
         );
-        assert!(
-            client
+    }
+
+    /// Combo condition ids are `0x` plus 62 hex digits live: accepted by the combo
+    /// filter, while the client only rejects what cannot be one.
+    #[test]
+    fn combo_activity_condition_ids() {
+        let client = DataClient::new().unwrap();
+        for bad in [
+            "0x",
+            "03aa",
+            "0xzz",
+            "0x03 aa",
+            "",
+            &format!("0x{:065x}", 1),
+        ] {
+            assert_eq!(
+                validation_parameter(
+                    client
+                        .list_combo_activity(WALLET)
+                        .conditions([bad])
+                        .query(None)
+                ),
+                "condition",
+                "{bad:?}"
+            );
+        }
+        for ok in [COMBO_CONDITION, "0x03", CONDITION] {
+            let q = client
                 .list_combo_activity(WALLET)
-                .conditions([COMBO_CONDITION])
+                .conditions([ok])
                 .query(None)
-                .is_ok()
-        );
+                .unwrap();
+            assert_eq!(q.get("condition"), Some(ok));
+        }
     }
 }

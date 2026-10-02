@@ -108,6 +108,8 @@ Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](do
 
 Base URL `https://data-api.polymarket.com`, spec [`docs/specs/data-v2-openapi.json`](docs/specs/data-v2-openapi.json), feature `data`, module `polyoxide::data`.
 
+Where live differs from these pages (combo ids, activity types, `first_entry_at`, window rules, ...), the SDK follows live: see [`SPEC_DEVIATIONS.md`](SPEC_DEVIATIONS.md#data-api-v2).
+
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
 | [x] | `GET` | `/v2/activity` | [local](docs/api-reference/feeds/list-account-activity.md) / [online](https://docs.polymarket.com/api-reference/feeds/list-account-activity) | `DataClient::list_activity` |

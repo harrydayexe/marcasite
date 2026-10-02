@@ -14,9 +14,10 @@ pub const WALLET_2: &str = "0x0000000000000000000000000000000000000001";
 pub const CONDITION: &str = "0xd9b06e2fd9ddb7ab61c9e3d5d8e074c555802478bbf75145804ff709a4246f79";
 /// A second condition id (`0x` + 64 hex digits, as the overview documents).
 pub const CONDITION_2: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
-/// A combo condition id (`0x03`-prefixed, 64 hex digits).
+/// A combo condition id as served live: `0x` plus 62 hex digits (captured from
+/// `GET /v2/positions/combos`, 2026-10-02).
 pub const COMBO_CONDITION: &str =
-    "0x03aa000000000000000000000000000000000000000000000000000000000001";
+    "0x033c72a79df1dfd46683b15b5c0ce78ef50000000000000000000000000000";
 pub const TOKEN: &str =
     "31974447302330162086995746309500877260929998201718217388109724292047967921664";
 
@@ -79,6 +80,7 @@ pub fn position(token_id: &str) -> Value {
         "opposite_token_id": "1",
         "end_date": "2026-08-19",
         "last_event_at": 1787097600,
+        "first_entry_at": 1787011200,
         "name": "",
         "profile_image": "",
         "verified": false
@@ -145,7 +147,9 @@ pub fn combo_position(id: &str) -> Value {
     })
 }
 
-/// `components/schemas/UserPnlPoint`.
+/// `components/schemas/UserPnlPoint`, in the live null pattern: `unrealized_pnl` and
+/// `position_pnl` present, `deposits`, `withdrawals` and `cashflow_net` `null` (see the
+/// capture in `live.rs`).
 pub fn pnl_point() -> Value {
     json!({
         "timestamp": 1787133600,
@@ -157,10 +161,12 @@ pub fn pnl_point() -> Value {
         "volume": 100,
         "volume_usdc": 52.03,
         "trade_count": 3,
-        "unrealized_pnl": null,
-        "position_pnl": null,
+        "unrealized_pnl": -88.5,
+        "position_pnl": -2271,
         "fees": -0.25,
-        "deposits": 100
+        "deposits": null,
+        "withdrawals": null,
+        "cashflow_net": null
     })
 }
 

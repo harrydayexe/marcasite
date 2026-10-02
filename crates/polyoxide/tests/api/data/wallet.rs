@@ -188,6 +188,18 @@ async fn list_positions_validates_before_sending() {
         .unwrap_err();
     assert!(matches!(&err, Error::Validation(v) if v.parameter() == "status"));
 
+    // The server rejects `condition` together with `event_id` ("must provide either
+    // eventId or condition, not both"), user-anchored or not.
+    let err = data
+        .list_positions()
+        .user(WALLET)
+        .conditions([CONDITION])
+        .event_ids(["12345"])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "event_id"));
+
     // Malformed ids and an empty wallet never reach the server.
     let err = data
         .list_positions()
@@ -427,9 +439,11 @@ async fn list_combo_positions_validates_before_sending() {
         .await
         .unwrap_err();
     assert!(matches!(&err, Error::Validation(v) if v.parameter() == "status"));
+    // Combo condition ids are `0x` plus 62 hex digits live: only what cannot be one is
+    // rejected client-side.
     let err = data
         .list_combo_positions(WALLET)
-        .conditions(["0x03aa"])
+        .conditions(["0xzz"])
         .send()
         .await
         .unwrap_err();
@@ -524,10 +538,17 @@ async fn wallet_routes_documenting_an_evm_address_validate_it() {
             "{user:?}: {err}"
         );
     }
+    // `/v2/user-pnl` answers `400 invalid user address` as well.
+    for user in ["", "0x1234", "983eedfbd75803602e4a6e6ea9aab6dc6b9c6748"] {
+        let err = data.get_user_pnl(user).send().await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Validation(v) if v.parameter() == "user"),
+            "{user:?}: {err}"
+        );
+    }
     // Elsewhere only an empty wallet is rejected.
     for err in [
         data.get_portfolio_value(" ").send().await.unwrap_err(),
-        data.get_user_pnl("").send().await.unwrap_err(),
         data.get_user_volume("").send().await.unwrap_err(),
     ] {
         assert!(matches!(&err, Error::Validation(v) if v.parameter() == "user"));
@@ -574,10 +595,13 @@ async fn get_user_pnl_sends_interval_and_fidelity() {
     assert_eq!(series.source_fidelity, PnlFidelity::OneDay);
     let point = &series.points[0];
     assert_eq!(point.realized_pnl, Decimal::from(10));
-    // `null` and missing amounts are "unavailable", never zero.
-    assert_eq!(point.unrealized_pnl, None);
+    // `null` and missing amounts are "unavailable", never zero. Live, only the three
+    // cash-flow amounts are `null`.
+    assert_eq!(point.unrealized_pnl, Some(Decimal::new(-885, 1)));
+    assert_eq!(point.position_pnl, Some(Decimal::new(-2271, 0)));
     assert_eq!(point.withdrawals, None);
-    assert_eq!(point.deposits, Some(Decimal::from(100)));
+    assert_eq!(point.deposits, None);
+    assert_eq!(point.cashflow_net, None);
 }
 
 #[tokio::test]

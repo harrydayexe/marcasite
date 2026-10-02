@@ -27,6 +27,8 @@ const MAX_HOLDERS_PNL_LIMIT: u32 = 100;
 const MAX_PRICES_HISTORY_LIMIT: u32 = 10_000;
 /// Accepted range of `bucket_seconds` on `/v2/prices-history`.
 const BUCKET_SECONDS: std::ops::RangeInclusive<u32> = 60..=86_400;
+/// Longest explicit `start`..`end` window of `/v2/prices-history`, in seconds (15 days).
+const MAX_WINDOW_SECONDS: i64 = 15 * 86_400;
 
 /// One outcome token's holder group (`components/schemas/MetaHolder`).
 ///
@@ -667,17 +669,26 @@ pub struct ListPricesHistory {
 }
 
 impl ListPricesHistory {
-    /// Inclusive window start (`start`, epoch seconds). Alone it means "up to the
-    /// present" and is capped at 15 days back from now; set [`end`](Self::end) too when
-    /// paging, because the cap is re-checked on every page. Explicit `start`/`end`
-    /// windows cap at 15 days; the [`interval`](Self::interval) presets are the
-    /// long-range path.
+    /// Inclusive window start (`start`, epoch seconds; must be after the Unix epoch).
+    /// Alone it means "up to the present".
+    ///
+    /// An explicit window spans **at most 15 days** (`end - start`, or now `- start`
+    /// without an `end`); the docs say a longer one is capped, but live it is a `400`
+    /// (`'start' to 'end' must span at most 15 days`, not clamped). With both `start` and
+    /// [`end`](Self::end) set the client rejects a longer span itself; with `start` alone
+    /// it cannot (it would depend on the clock), so the server answers. Set `end` too when
+    /// paging, because the span is re-checked on every page. The
+    /// [`interval`](Self::interval) presets are the long-range path.
+    ///
+    /// Points are bucket-aligned: the first one can precede `start` by less than one
+    /// bucket.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Exclusive window end (`end`, epoch seconds). Requires [`start`](Self::start).
+    /// Exclusive window end (`end`, epoch seconds). Requires [`start`](Self::start), and
+    /// must not precede it.
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
@@ -690,8 +701,9 @@ impl ListPricesHistory {
     }
 
     /// Bucket width in seconds (`bucket_seconds`, 60 to 86400). Omit to let the server
-    /// pick the densest width that covers the window; when set, it is served exactly
-    /// (possibly as an empty page where that resolution has expired).
+    /// pick the densest width that covers the window (a 15-day window, for instance, is
+    /// served in 30-minute buckets); when set, it is served exactly (possibly as an empty
+    /// page where that resolution has expired).
     pub fn bucket_seconds(mut self, bucket_seconds: u32) -> Self {
         self.bucket_seconds = Some(bucket_seconds);
         self
@@ -713,9 +725,9 @@ impl ListPricesHistory {
 
     /// Resumes from a previous page's [`next_cursor`](Page::next_cursor) (`cursor`).
     ///
-    /// The docs do not say whether a cursor page must restate the window; a request with
-    /// a cursor and no window form is sent as is. [`into_stream`](Self::into_stream)
-    /// always restates the window.
+    /// A cursor page must restate the window (`start`/`end`, `interval` or `as_of`): live,
+    /// a cursor with only the token is a `400` ("provide a time component"), so the client
+    /// rejects it too. [`into_stream`](Self::into_stream) always restates the window.
     pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
         self.cursor = Some(cursor.into());
         self
@@ -743,12 +755,13 @@ impl ListPricesHistory {
             )
             .into());
         }
-        // Exactly one window form per request. Whether a cursor page needs it restated is
-        // not documented, so a cursor without a window form is passed through.
-        if forms == 0 && cursor.is_none() {
+        // Exactly one window form per request, restated on every cursor page (live: a
+        // cursor with only the token is a 400).
+        if forms == 0 {
             return Err(ValidationError::new(
                 "start",
-                "one window is required: `start` (with optional `end`), `interval` or `as_of`",
+                "one window is required, also with a cursor: `start` (with optional `end`), \
+                 `interval` or `as_of`",
             )
             .into());
         }
@@ -760,6 +773,19 @@ impl ListPricesHistory {
         ] {
             if bound.is_some_and(|t| t.timestamp() <= 0) {
                 return Err(ValidationError::new(name, "must be after the Unix epoch").into());
+            }
+        }
+        if let (Some(start), Some(end)) = (self.start, self.end) {
+            if end < start {
+                return Err(ValidationError::new("end", "must not precede `start`").into());
+            }
+            if (end - start).num_seconds() > MAX_WINDOW_SECONDS {
+                return Err(ValidationError::new(
+                    "end",
+                    "an explicit `start`..`end` window spans at most 15 days; use `interval` \
+                     for longer ranges",
+                )
+                .into());
             }
         }
         if let Some(bucket) = self.bucket_seconds
@@ -794,10 +820,11 @@ impl ListPricesHistory {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if the token id is empty,
-    /// the window is missing (without a cursor) or ambiguous, `end` is set without
-    /// `start`, a bound is not after the Unix epoch, `bucket_seconds` is outside
-    /// 60..=86400, or `limit` is above 10 000; otherwise see [`Error`](crate::Error). The
-    /// 15-day cap of explicit windows is enforced by the server only.
+    /// the window is missing (also with a cursor) or ambiguous, `end` is set without
+    /// `start` or before it, a bound is not after the Unix epoch, `start` and `end` span
+    /// more than 15 days, `bucket_seconds` is outside 60..=86400, or `limit` is above
+    /// 10 000; otherwise see [`Error`](crate::Error). A `start` alone more than 15 days
+    /// back is rejected by the server only.
     pub async fn send(self) -> Result<Page<PricePoint>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(PRICES_HISTORY, query).await
@@ -1001,9 +1028,19 @@ mod tests {
             validation_parameter(client.list_prices_history("1").query(None)),
             "start"
         );
-        // With a cursor and no window form, the request is passed through (undocumented
-        // whether the cursor carries the window).
-        assert!(client.list_prices_history("1").query(Some("c")).is_ok());
+        // A cursor page must restate the window too: live, a cursor with only the token is
+        // a 400 ("provide a time component").
+        assert_eq!(
+            validation_parameter(client.list_prices_history("1").query(Some("c"))),
+            "start"
+        );
+        assert!(
+            client
+                .list_prices_history("1")
+                .interval(PriceHistoryInterval::OneDay)
+                .query(Some("c"))
+                .is_ok()
+        );
         // Two windows.
         assert_eq!(
             validation_parameter(
@@ -1018,6 +1055,38 @@ mod tests {
         // `end` without `start`.
         assert_eq!(
             validation_parameter(client.list_prices_history("1").end(at).query(Some("c"))),
+            "end"
+        );
+        // `end` before `start`.
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_prices_history("1")
+                    .start(at)
+                    .end(at - chrono::Duration::seconds(1))
+                    .query(None)
+            ),
+            "end"
+        );
+        // An explicit window spans at most 15 days (live: a longer one is a 400, not
+        // clamped); exactly 15 days is fine.
+        let fifteen_days = chrono::Duration::days(15);
+        assert!(
+            client
+                .list_prices_history("1")
+                .start(at)
+                .end(at + fifteen_days)
+                .query(None)
+                .is_ok()
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_prices_history("1")
+                    .start(at)
+                    .end(at + fifteen_days + chrono::Duration::seconds(1))
+                    .query(None)
+            ),
             "end"
         );
         // Bucket width out of range.

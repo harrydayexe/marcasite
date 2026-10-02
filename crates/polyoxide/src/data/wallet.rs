@@ -11,8 +11,8 @@ use super::{
     DataClient,
     types::{
         ComboLeg, FilterType, Page, SortDirection, any_value, check_limit, check_user,
-        check_wallet, collect_ids, condition_id, datetime_or_empty, distinct_values, epoch_seconds,
-        page_stream,
+        check_wallet, collect_ids, combo_condition_id, condition_id, datetime_or_empty,
+        distinct_values, epoch_seconds, page_stream, seconds_or_zero,
     },
 };
 use crate::types::{Address, ConditionId, EventId, TokenId};
@@ -157,6 +157,15 @@ pub struct Position {
     /// bound.
     #[serde(with = "serde_util::timestamp_seconds")]
     pub last_event_at: DateTime<Utc>,
+    /// When the wallet first entered the position (epoch seconds on the wire); `None` when
+    /// the position has no native state (served as `0`, like the sentinel
+    /// [`last_event_at`](Self::last_event_at); it also decodes from a missing or `null`
+    /// key).
+    ///
+    /// **Undocumented**: the docs' `Position` schema does not list this field, but every
+    /// `/v2/positions` row carries it live.
+    #[serde(default, with = "seconds_or_zero")]
+    pub first_entry_at: Option<DateTime<Utc>>,
     /// Profile display name of the wallet.
     pub name: String,
     /// Profile image URL.
@@ -204,7 +213,9 @@ polyoxide_core::string_enum! {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComboPosition {
-    /// On-chain combo condition id (`0x03`-prefixed).
+    /// On-chain combo condition id: `0x` plus 62 hex digits live (not a bytes32), e.g.
+    /// `0x037cb523f88f4c6ef6a31c33f8a2e72be70000000000000000000000000000`. The docs only
+    /// say `0x03`-prefixed.
     pub combo_condition_id: ConditionId,
     /// Index of the combo outcome held;
     /// [`UNLABELED_OUTCOME_INDEX`](super::UNLABELED_OUTCOME_INDEX) means unlabelable.
@@ -388,7 +399,8 @@ pub struct UserPnlSeries {
     ///
     /// The docs do not list the values of this field. It is decoded as a [`PnlFidelity`]
     /// (the vocabulary of [`fidelity`](Self::fidelity)); any other value is kept as
-    /// [`PnlFidelity::Unknown`].
+    /// [`PnlFidelity::Unknown`]. Live it was `1d` for every interval and fidelity tried
+    /// (`fidelity` itself echoes the request, `1h` by default).
     pub source_fidelity: PnlFidelity,
     /// Dense cumulative points on the requested grid, oldest first.
     pub points: Vec<UserPnlPoint>,
@@ -398,6 +410,12 @@ pub struct UserPnlSeries {
 ///
 /// Every amount is cumulative through [`timestamp`](Self::timestamp). An optional amount
 /// is `None` when its source was unavailable; it never means zero.
+///
+/// Live (checked 2026-10-02 over ~188k points of 25 wallets) only
+/// [`deposits`](Self::deposits), [`withdrawals`](Self::withdrawals) and
+/// [`cashflow_net`](Self::cashflow_net) are ever `None`, on every point; every other
+/// optional amount, [`unrealized_pnl`](Self::unrealized_pnl) and
+/// [`position_pnl`](Self::position_pnl) included, is always present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct UserPnlPoint {
@@ -472,13 +490,16 @@ pub struct UserPnlPoint {
     /// All income credited to the wallet: rebates plus reward, yield and referral income.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub wallet_income: Option<Decimal>,
-    /// Collateral moved into the wallet.
+    /// Collateral moved into the wallet. **Always `None` live** (served as `null` on every
+    /// point observed), although the docs list it as an amount.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub deposits: Option<Decimal>,
-    /// Collateral moved out of the wallet.
+    /// Collateral moved out of the wallet. **Always `None` live** (see
+    /// [`deposits`](Self::deposits)).
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub withdrawals: Option<Decimal>,
-    /// `deposits - withdrawals`.
+    /// `deposits - withdrawals`. **Always `None` live** (see
+    /// [`deposits`](Self::deposits)).
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub cashflow_net: Option<Decimal>,
 }
@@ -630,8 +651,14 @@ impl DataClient {
 
     /// Gets a wallet's profile stats (`GET /v2/user-stats`).
     ///
-    /// Returns `Ok(None)` when the wallet is not a known user (`data: null`). A known user
-    /// that never traded returns a row of zeros instead.
+    /// Returns `Ok(None)` when the server has no stats for the wallet (`data: null`).
+    ///
+    /// The docs say `null` means "not a known user". Live, an arbitrary unknown wallet does
+    /// get `null`, but so do some active, ranked users (several top places of the day
+    /// leaderboard on 2026-10-02), and the wallet
+    /// `0x0000000000000000000000000000000000000001` gets a row of zeros instead (no join
+    /// date, no `all_time_pnl`). Treat `None` as "no stats available", not as "no such
+    /// user".
     ///
     /// See <https://docs.polymarket.com/api-reference/wallet/get-a-users-profile-stats>.
     ///
@@ -722,7 +749,10 @@ impl ListPositions {
     }
 
     /// Gamma event ids (`event_id`, at most 20 distinct values). Requires
-    /// [`user`](Self::user). Duplicates are sent once.
+    /// [`user`](Self::user), and is mutually exclusive with
+    /// [`conditions`](Self::conditions) (the docs do not say so, but the server answers
+    /// `400` "must provide either eventId or condition, not both"). Duplicates are sent
+    /// once.
     pub fn event_ids<I>(mut self, event_ids: I) -> Self
     where
         I: IntoIterator,
@@ -793,6 +823,13 @@ impl ListPositions {
         }
         let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         let event_ids = distinct_values("event_id", &self.event_ids, any_value)?;
+        if !conditions.is_empty() && !event_ids.is_empty() {
+            return Err(ValidationError::new(
+                "event_id",
+                "`event_id` and `condition` are mutually exclusive",
+            )
+            .into());
+        }
         if self.user.is_none() {
             if conditions.is_empty() {
                 return Err(ValidationError::new(
@@ -863,8 +900,8 @@ impl ListPositions {
     /// Returns [`Error::Validation`](crate::Error::Validation) if a documented constraint is
     /// violated (no `user`/`condition` anchor, an empty `user`, a condition id that is not
     /// `0x` followed by 64 hex digits, more than 20 distinct condition or event ids,
-    /// several condition ids without `user`, `event_id` or `REDEEMABLE_LOST` without
-    /// `user`, `limit` above 1000, `title` over 200 characters, `include_archived` with
+    /// condition ids and event ids together, several condition ids without `user`,
+    /// `event_id` or `REDEEMABLE_LOST` without `user`, `limit` above 1000, `title` over 200 characters, `include_archived` with
     /// `CLOSED`, or a `start`/`end` before the Unix epoch); otherwise see
     /// [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<Position>> {
@@ -917,6 +954,12 @@ impl ListComboPositions {
 
     /// Combo condition ids (`condition`, at most 20 distinct values). Duplicates are sent
     /// once.
+    ///
+    /// A combo condition id is `0x` plus **62** hex digits live (not the 64 of a regular
+    /// condition id): copy it from a [`ComboPosition::combo_condition_id`] or
+    /// [`ComboActivity::combo_condition_id`](super::ComboActivity::combo_condition_id). The
+    /// server answers `400` to any other length; the client only checks for `0x` plus 1 to
+    /// 64 hex digits.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -964,7 +1007,7 @@ impl ListComboPositions {
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
         check_user(&self.user)?;
         check_limit(self.limit, MAX_POSITIONS_LIMIT)?;
-        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
+        let conditions = distinct_values("condition", &self.conditions, combo_condition_id)?;
         if self.statuses.contains(&ComboPositionStatus::Redeemable)
             && self
                 .statuses
@@ -1003,8 +1046,8 @@ impl ListComboPositions {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
-    /// is above 1000, a condition id is not `0x` followed by 64 hex digits, more than 20
-    /// distinct condition ids are given, `REDEEMABLE` is combined with other statuses, or
+    /// is above 1000, a condition id is not `0x` followed by 1 to 64 hex digits, more than
+    /// 20 distinct condition ids are given, `REDEEMABLE` is combined with other statuses, or
     /// the sync watermarks are negative or inverted; otherwise see
     /// [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<ComboPosition>> {
@@ -1093,11 +1136,12 @@ impl GetUserPnl {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty; an
-    /// invalid wallet, interval or fidelity is an [`Error::Api`](crate::Error::Api) with
-    /// status `400`; otherwise see [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is not `0x`
+    /// followed by 40 hex digits (live, the route answers `400` `invalid user address`
+    /// otherwise); an unknown interval or fidelity is an [`Error::Api`](crate::Error::Api)
+    /// with status `400`; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<UserPnlSeries> {
-        check_user(&self.user)?;
+        check_wallet(&self.user)?;
         let mut query = Query::new();
         query
             .push("user", &self.user)
