@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents working on **polyoxide**, an unofficial Rust SDK for the
+Guidance for AI coding agents working on **marcasite**, an unofficial Rust SDK for the
 Polymarket Predictions APIs.
 
 ## Project goals
@@ -25,7 +25,7 @@ follows the live API.
   These files are large; `grep -n` for the `operationId` or schema name instead of reading them whole.
 - `docs/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
 - **Verify against the live API** (`just test-live`, or `curl` for a quick look) before relying on a
-  documented shape. Live tests live in `crates/polyoxide/tests/live/`; they are `#[ignore]`d and
+  documented shape. Live tests live in `crates/marcasite/tests/live/`; they are `#[ignore]`d and
   read-only, and report keys the models drop and enum values that fall into `Unknown(..)`.
 - **Every place the SDK departs from the docs is recorded in `SPEC_DEVIATIONS.md`** (what the docs
   say, what live does, what the SDK does, the live test that pins it). Add an entry whenever you
@@ -83,13 +83,13 @@ Decisions confirmed with the user (2026-10-01):
 
 - Async runtime **tokio**; HTTP via **reqwest** (rustls); WebSockets via **tokio-tungstenite**
   (rustls, explicit aws-lc-rs provider, native roots).
-- Layout: services are **modules of the `polyoxide` crate**, each behind a Cargo feature
+- Layout: services are **modules of the `marcasite` crate**, each behind a Cargo feature
   (`gamma`, `clob`, `data`, `relayer`, `bridge`, `combos`, `ws`; all default). Shared transport,
-  config, errors, pagination, serde helpers and id newtypes live in `polyoxide-core`.
+  config, errors, pagination, serde helpers and id newtypes live in `marcasite-core`.
 - String enums: `#[non_exhaustive]` with an `Unknown(String)` catch-all
-  (use `polyoxide_core::string_enum!`). Id newtypes: `polyoxide_core::string_id!`.
+  (use `marcasite_core::string_enum!`). Id newtypes: `marcasite_core::string_id!`.
 - Money/price/size: `rust_decimal::Decimal`. Timestamps: `chrono::DateTime<Utc>` (helpers in
-  `polyoxide_core::serde_util`).
+  `marcasite_core::serde_util`).
 - Scope so far: **unauthenticated endpoints only**. `ENDPOINTS.md` (repo root) is the checklist of
   every endpoint with doc links and implementation status. **Update it with every endpoint change.**
 
@@ -130,7 +130,7 @@ Principles once decided:
   context), rate limit (with `Retry-After` if present), auth/signing, client-side validation.
 - Parse each service's documented error shape (e.g. Data API v2 `error`/`code`/`retryable`/
   `trace_id`) into typed fields. Preserve `x-trace-id` where available.
-- Return `Result<T, polyoxide::Error>`. No `unwrap`/`expect`/`panic!` in library code
+- Return `Result<T, marcasite::Error>`. No `unwrap`/`expect`/`panic!` in library code
   (tests and examples excepted). No `anyhow` in the public API.
 
 ## Code standards
@@ -157,19 +157,19 @@ Principles once decided:
 
 ## Implementation patterns (follow the existing code)
 
-- Each service client (`crates/polyoxide/src/<service>/client.rs`) wraps a
-  `polyoxide_core::Transport`; endpoints are methods added in `impl <Service>Client` blocks in the
+- Each service client (`crates/marcasite/src/<service>/client.rs`) wraps a
+  `marcasite_core::Transport`; endpoints are methods added in `impl <Service>Client` blocks in the
   topic module (e.g. `gamma/tags.rs`). `gamma/tags.rs` is the reference implementation.
 - Only required params → `async fn`. Optional params → method returns a `#[must_use]` request
   builder (owns a client clone) with setters and `async fn send(self)`. Paginated endpoints also
-  get `into_stream()` via `polyoxide_core::pagination::{cursor_stream, offset_stream}`.
+  get `into_stream()` via `marcasite_core::pagination::{cursor_stream, offset_stream}`.
 - Paths are built from segments (`transport.get(&["tags", id.as_str()])`), which percent-encodes
-  user input. Query strings via `polyoxide_core::Query` (`push_all` = repeated keys, `push_csv` =
+  user input. Query strings via `marcasite_core::Query` (`push_all` = repeated keys, `push_csv` =
   comma-separated).
 - Enforce documented limits (batch sizes, ranges) client-side with `ValidationError` before
   sending.
 - Unit tests for (de)serialization next to the types; mock-server tests in
-  `crates/polyoxide/tests/api/<service>/` (one test binary).
+  `crates/marcasite/tests/api/<service>/` (one test binary).
 
 ## Commands
 
@@ -185,8 +185,8 @@ Principles once decided:
 
 Run `just --list --list-submodules` for everything. `just deny` needs `cargo install cargo-deny`.
 
-Layout: Cargo workspace. `crates/polyoxide-core` holds shared transport/config/errors;
-`crates/polyoxide` is the user-facing facade. Logging is via `tracing` (never install a
+Layout: Cargo workspace. `crates/marcasite-core` holds shared transport/config/errors;
+`crates/marcasite` is the user-facing facade. Logging is via `tracing` (never install a
 subscriber in library code). Toolchain is pinned in `rust-toolchain.toml`.
 
 ## Workflow for agents

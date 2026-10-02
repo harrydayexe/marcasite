@@ -1,4 +1,4 @@
-# polyoxide
+# marcasite
 
 An unofficial, idiomatic and fully typed Rust SDK for the Polymarket Predictions APIs.
 Not affiliated with or endorsed by Polymarket.
@@ -11,19 +11,19 @@ Not affiliated with or endorsed by Polymarket.
 
 | Service | Client | Cargo feature |
 |---|---|---|
-| Gamma API: events, markets, tags, series, comments, sports, search, profiles | `polyoxide::gamma::GammaClient` | `gamma` |
-| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates | `polyoxide::clob::ClobClient` | `clob` |
-| Data API v2: positions, PnL, trades, activity, leaderboards, holders | `polyoxide::data::DataClient` | `data` |
-| Relayer API: transaction status, nonces, wallet deployment | `polyoxide::relayer::RelayerClient` | `relayer` |
-| Bridge API: supported assets, quotes, deposit/withdrawal addresses, status | `polyoxide::bridge::BridgeClient` | `bridge` |
-| Combos / RFQ: combo-eligible markets | `polyoxide::combos::CombosClient` | `combos` |
-| WebSockets: market channel, sports results, PolyBolt public prices | `polyoxide::ws` | `ws` |
+| Gamma API: events, markets, tags, series, comments, sports, search, profiles | `marcasite::gamma::GammaClient` | `gamma` |
+| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates | `marcasite::clob::ClobClient` | `clob` |
+| Data API v2: positions, PnL, trades, activity, leaderboards, holders | `marcasite::data::DataClient` | `data` |
+| Relayer API: transaction status, nonces, wallet deployment | `marcasite::relayer::RelayerClient` | `relayer` |
+| Bridge API: supported assets, quotes, deposit/withdrawal addresses, status | `marcasite::bridge::BridgeClient` | `bridge` |
+| Combos / RFQ: combo-eligible markets | `marcasite::combos::CombosClient` | `combos` |
+| WebSockets: market channel, sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
 
 All features are on by default. To compile only what you use:
 
 ```toml
 [dependencies]
-polyoxide = { version = "0.1", default-features = false, features = ["gamma", "clob"] }
+marcasite = { version = "0.1", default-features = false, features = ["gamma", "clob"] }
 ```
 
 ## Quick start
@@ -33,17 +33,17 @@ features) and [`futures-util`](https://docs.rs/futures-util) for stream combinat
 
 ```toml
 [dependencies]
-polyoxide = "0.1"
+marcasite = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 futures-util = "0.3"
 ```
 
 ```rust,no_run
 use futures_util::TryStreamExt as _;
-use polyoxide::Polymarket;
+use marcasite::Polymarket;
 
 #[tokio::main]
-async fn main() -> polyoxide::Result<()> {
+async fn main() -> marcasite::Result<()> {
     // One handle for every service, sharing a connection pool.
     let pm = Polymarket::new()?;
 
@@ -69,7 +69,7 @@ async fn main() -> polyoxide::Result<()> {
   setters on a request builder finished with `.send().await`.
 - **Pagination as streams.** Cursor- and offset-paginated endpoints expose `.send()` for one page
   and `.into_stream()` for every item.
-- **Precise errors.** One `polyoxide::Error` enum distinguishes API errors (status, parsed error body,
+- **Precise errors.** One `marcasite::Error` enum distinguishes API errors (status, parsed error body,
   trace id), rate limiting (`Retry-After`), timeouts, transport failures, decode failures (with the
   JSON path of the offending field), client-side validation (e.g. batch limits) and configuration
   errors. No panics on network input.

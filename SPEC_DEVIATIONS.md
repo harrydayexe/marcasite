@@ -1,11 +1,11 @@
 # Spec deviations
 
 Places where the live Polymarket API disagrees with its documentation (`docs/`, fetched
-2026-10-01), and what polyoxide does about it. **The SDK follows the live API** (see `AGENTS.md`);
+2026-10-01), and what marcasite does about it. **The SDK follows the live API** (see `AGENTS.md`);
 this file records each departure so it can be revisited if Polymarket changes the API or fixes the
 docs.
 
-Each entry names a **pinning live test** in `crates/polyoxide/tests/live/`. The test asserts the
+Each entry names a **pinning live test** in `crates/marcasite/tests/live/`. The test asserts the
 live behaviour described here, so if Polymarket changes it the test fails and points back to this
 entry. Run them with `just test-live`.
 
@@ -22,8 +22,8 @@ Observed: 2026-10-02 unless stated.
 ## Gamma API
 
 Spec lines refer to `docs/specs/gamma-openapi.yaml`. Pinning tests are in
-`crates/polyoxide/tests/live/gamma.rs`; responses captured from the live API for offline tests are
-in `crates/polyoxide/tests/api/gamma/fixtures/live/` (decoded by `tests/api/gamma/live.rs`).
+`crates/marcasite/tests/live/gamma.rs`; responses captured from the live API for offline tests are
+in `crates/marcasite/tests/api/gamma/fixtures/live/` (decoded by `tests/api/gamma/live.rs`).
 
 ### Gamma: JSON lists inside strings (Mismatch)
 
@@ -207,7 +207,7 @@ in `crates/polyoxide/tests/api/gamma/fixtures/live/` (decoded by `tests/api/gamm
 
 ## CLOB API
 
-All CLOB pinning tests are in `crates/polyoxide/tests/live/clob.rs`. Spec paths below are in
+All CLOB pinning tests are in `crates/marcasite/tests/live/clob.rs`. Spec paths below are in
 `docs/specs/clob-openapi.yaml`.
 
 ### `GET /midpoint` response field is `mid`, not `mid_price`
@@ -426,9 +426,9 @@ All CLOB pinning tests are in `crates/polyoxide/tests/live/clob.rs`. Spec paths 
 
 ## Data API v2
 
-Pinning tests are in `crates/polyoxide/tests/live/data.rs` (`just test-live data`) unless a path is
+Pinning tests are in `crates/marcasite/tests/live/data.rs` (`just test-live data`) unless a path is
 given; the offline decode tests of captured rows are in
-`crates/polyoxide/tests/api/data/live_fixtures.rs`. Spec = `docs/specs/data-v2-openapi.json`.
+`crates/marcasite/tests/api/data/live_fixtures.rs`. Spec = `docs/specs/data-v2-openapi.json`.
 
 ### Combo condition ids are `0x` + 62 hex digits
 

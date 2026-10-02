@@ -1,6 +1,6 @@
 # Endpoint checklist
 
-Implementation status of every Polymarket Predictions API endpoint in polyoxide. **Keep this file
+Implementation status of every Polymarket Predictions API endpoint in marcasite. **Keep this file
 up to date** whenever an endpoint is added or changed. It is the single place to check coverage.
 
 - Scope (current): **unauthenticated** endpoints only. Endpoints requiring CLOB L1/L2 auth, Builder
@@ -13,7 +13,7 @@ up to date** whenever an endpoint is added or changed. It is the single place to
 
 ## Gamma API
 
-Base URL `https://gamma-api.polymarket.com`, spec [`docs/specs/gamma-openapi.yaml`](docs/specs/gamma-openapi.yaml), feature `gamma`, module `polyoxide::gamma`.
+Base URL `https://gamma-api.polymarket.com`, spec [`docs/specs/gamma-openapi.yaml`](docs/specs/gamma-openapi.yaml), feature `gamma`, module `marcasite::gamma`.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
@@ -64,7 +64,7 @@ Live-only Gamma route, not in the docs or specs and not implemented: `GET /comme
 
 ## CLOB API (public market data)
 
-Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](docs/specs/clob-openapi.yaml), feature `clob`, module `polyoxide::clob`.
+Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](docs/specs/clob-openapi.yaml), feature `clob`, module `marcasite::clob`.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
@@ -106,7 +106,7 @@ Base URL `https://clob.polymarket.com`, spec [`docs/specs/clob-openapi.yaml`](do
 
 ## Data API v2
 
-Base URL `https://data-api.polymarket.com`, spec [`docs/specs/data-v2-openapi.json`](docs/specs/data-v2-openapi.json), feature `data`, module `polyoxide::data`.
+Base URL `https://data-api.polymarket.com`, spec [`docs/specs/data-v2-openapi.json`](docs/specs/data-v2-openapi.json), feature `data`, module `marcasite::data`.
 
 Where live differs from these pages (combo ids, activity types, `first_entry_at`, window rules, ...), the SDK follows live: see [`SPEC_DEVIATIONS.md`](SPEC_DEVIATIONS.md#data-api-v2).
 
@@ -135,7 +135,7 @@ Where live differs from these pages (combo ids, activity types, `first_entry_at`
 
 ## Relayer API (public endpoints)
 
-Base URL `https://relayer-v2.polymarket.com`, spec [`docs/specs/relayer-openapi.yaml`](docs/specs/relayer-openapi.yaml), feature `relayer`, module `polyoxide::relayer`.
+Base URL `https://relayer-v2.polymarket.com`, spec [`docs/specs/relayer-openapi.yaml`](docs/specs/relayer-openapi.yaml), feature `relayer`, module `marcasite::relayer`.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
@@ -146,7 +146,7 @@ Base URL `https://relayer-v2.polymarket.com`, spec [`docs/specs/relayer-openapi.
 
 ## Bridge API
 
-Base URL `https://bridge.polymarket.com`, spec [`docs/specs/bridge-openapi.yaml`](docs/specs/bridge-openapi.yaml), feature `bridge`, module `polyoxide::bridge`.
+Base URL `https://bridge.polymarket.com`, spec [`docs/specs/bridge-openapi.yaml`](docs/specs/bridge-openapi.yaml), feature `bridge`, module `marcasite::bridge`.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
@@ -158,7 +158,7 @@ Base URL `https://bridge.polymarket.com`, spec [`docs/specs/bridge-openapi.yaml`
 
 ## Combos / RFQ REST (public endpoints)
 
-Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-openapi.yaml`](docs/specs/combos-rfq-openapi.yaml), feature `combos`, module `polyoxide::combos`.
+Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-openapi.yaml`](docs/specs/combos-rfq-openapi.yaml), feature `combos`, module `marcasite::combos`.
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
@@ -166,7 +166,7 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/specs/combos-rfq-o
 
 ## WebSocket channels (public)
 
-Feature `ws`, module `polyoxide::ws`. Each channel type is a `Stream` of typed events; URLs are
+Feature `ws`, module `marcasite::ws`. Each channel type is a `Stream` of typed events; URLs are
 defaults (override with `*ChannelBuilder::url`).
 
 | Status | Channel | URL | Docs | Rust |
