@@ -1,0 +1,8 @@
+{
+  "sport": "sport-value",
+  "image": "https://example.com/image",
+  "resolution": "https://example.com/resolution",
+  "ordering": "ordering-value",
+  "tags": "tags-value",
+  "series": "series-value"
+}

@@ -1,0 +1,19 @@
+{
+  "_captured": {
+    "route": "GET /sports (first element)",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "id": 630,
+    "sport": "ufl",
+    "name": "UFL",
+    "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/league-icons/ufl.png",
+    "resolution": "https://www.theufl.com/",
+    "ordering": "away",
+    "tags": "1,100639,1186,105925",
+    "primaryTagId": 105925,
+    "series": "12553",
+    "createdAt": "2026-08-07T21:41:19.879539Z"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "_captured": {
+    "route": "GET /comments?parent_entity_type=PerpsAsset&parent_entity_id=1&limit=1",
+    "date": "2026-10-02",
+    "note": "live response, trimmed (arrays shortened, long text cut)"
+  },
+  "body": {
+    "id": "3278785",
+    "body": "short all",
+    "parentEntityType": "PerpsAsset",
+    "parentEntityID": 1,
+    "userAddress": "0xdb6ba935551c4d39b7a7907cd639642106f942e5",
+    "createdAt": "2026-10-02T03:05:34.88704Z",
+    "updatedAt": "2026-10-02T03:05:42.719543Z",
+    "profile": {
+      "name": "ImCA",
+      "pseudonym": "Exemplary-Heifer-Expectation",
+      "displayUsernamePublic": true,
+      "bio": "Web3 enthusiastic ",
+      "proxyWallet": "0x7fb9070b6a67f7cc9fba233717873c45ff0bbe15",
+      "baseAddress": "0xdb6ba935551c4d39b7a7907cd639642106f942e5"
+    },
+    "reportCount": 0,
+    "reactionCount": 0
+  }
+}

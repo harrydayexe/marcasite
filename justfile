@@ -25,6 +25,11 @@ clippy:
 test *args:
     cargo test --all-features {{ args }}
 
+# Run the live tests against the production APIs (read-only; needs network)
+[group("test")]
+test-live *args:
+    cargo test --all-features --test live -- --ignored --nocapture {{ args }}
+
 # Build docs with warnings as errors
 [group("docs")]
 doc:

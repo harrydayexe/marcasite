@@ -13,20 +13,30 @@ Polymarket Predictions APIs.
 
 ## Source of truth for the API
 
-**Every statement about the Polymarket API (endpoints, methods, parameters, request bodies,
-response types, enums, auth headers, rate limits, error shapes) must be grounded in the local
-docs in `docs/` or in `https://docs.polymarket.com/api-reference/predictions/overview.md`
-and the pages it links to.** Do not rely on memory, other SDKs, or blog posts.
+**The live API is the source of truth.** The docs in `docs/` (and
+`https://docs.polymarket.com/api-reference/predictions/overview.md`) are the starting point for every
+statement about the Polymarket API (endpoints, methods, parameters, request bodies, response types,
+enums, auth headers, rate limits, error shapes), but where the live API behaves differently, the SDK
+follows the live API.
 
 - Read `docs/AGENTS.md` first; it explains how to navigate the docs cheaply.
 - `docs/INDEX.md` lists every page. Endpoint pages live in `docs/api-reference/<group>/`.
-- Use `docs/specs/` (OpenAPI/AsyncAPI) for exact schemas, enums, required/optional fields and types.
+- Use `docs/specs/` (OpenAPI/AsyncAPI) for schemas, enums, required/optional fields and types.
   These files are large; `grep -n` for the `operationId` or schema name instead of reading them whole.
 - `docs/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
-- If the docs are ambiguous, contradictory, or silent, **stop and ask the user**. Do not guess a
-  field type, nullability or enum variant. Record unresolved questions in the PR / task summary.
+- **Verify against the live API** (`just test-live`, or `curl` for a quick look) before relying on a
+  documented shape. Live tests live in `crates/polyoxide/tests/live/`; they are `#[ignore]`d and
+  read-only, and report keys the models drop and enum values that fall into `Unknown(..)`.
+- **Every place the SDK departs from the docs is recorded in `SPEC_DEVIATIONS.md`** (what the docs
+  say, what live does, what the SDK does, the live test that pins it). Add an entry whenever you
+  follow live over the docs, and keep the pinning test current so a change on Polymarket's side
+  shows up as a failing live test pointing back to the entry.
+- If the docs and live are both silent or ambiguous (e.g. a field never observed live), **stop and
+  ask the user**. Do not guess a field type, nullability or enum variant. Record unresolved
+  questions in `OPEN_QUESTIONS.md`.
 - When adding an endpoint, cite the doc page in the item's rustdoc (e.g.
-  `/// See <https://docs.polymarket.com/api-reference/markets/get-market-by-id>`).
+  `/// See <https://docs.polymarket.com/api-reference/markets/get-market-by-id>`), and note any
+  deviation from it.
 
 ### Services (from `docs/api-reference/predictions/overview.md` and the specs)
 
@@ -69,9 +79,21 @@ Base URLs must be configurable (e.g. for tests against a mock server), with thes
 
 ## Architecture
 
-Decisions not yet made (async runtime, HTTP/WS client crates, signing/crypto crates, crate
-vs. workspace layout, MSRV, feature-flag split per service) **must be confirmed with the user
-before implementing**. Propose options with trade-offs; do not pick silently.
+Decisions confirmed with the user (2026-10-01):
+
+- Async runtime **tokio**; HTTP via **reqwest** (rustls); WebSockets via **tokio-tungstenite**
+  (rustls, explicit aws-lc-rs provider, native roots).
+- Layout: services are **modules of the `polyoxide` crate**, each behind a Cargo feature
+  (`gamma`, `clob`, `data`, `relayer`, `bridge`, `combos`, `ws`; all default). Shared transport,
+  config, errors, pagination, serde helpers and id newtypes live in `polyoxide-core`.
+- String enums: `#[non_exhaustive]` with an `Unknown(String)` catch-all
+  (use `polyoxide_core::string_enum!`). Id newtypes: `polyoxide_core::string_id!`.
+- Money/price/size: `rust_decimal::Decimal`. Timestamps: `chrono::DateTime<Utc>` (helpers in
+  `polyoxide_core::serde_util`).
+- Scope so far: **unauthenticated endpoints only**. `ENDPOINTS.md` (repo root) is the checklist of
+  every endpoint with doc links and implementation status. **Update it with every endpoint change.**
+
+Still undecided (ask the user before choosing): signing/crypto crates and auth design, MSRV.
 
 Principles once decided:
 
@@ -87,7 +109,8 @@ Principles once decided:
 
 ## Types
 
-- Model every documented field. Required fields are non-`Option`; optional/nullable fields are
+- Model every field the live API sends (documented or not; record undocumented ones in
+  `SPEC_DEVIATIONS.md`). Required fields are non-`Option`; optional/nullable fields are
   `Option<T>`. Do not use `#[serde(default)]` to hide a missing required field.
 - Use enums for documented string enums. Mark public enums and non-exhaustive structs
   `#[non_exhaustive]`; consider an `Unknown(String)` / catch-all variant so new server values do
@@ -124,12 +147,29 @@ Principles once decided:
 
 ## Testing
 
-- Unit tests for serialization/deserialization using fixtures taken from documented examples in
-  `docs/` (cite the source page). Never invent response bodies that contradict the spec.
+- Unit tests for serialization/deserialization using fixtures captured from the live API (note the
+  route and capture date) or taken from documented examples in `docs/` (cite the source page).
+  Never invent response bodies that contradict the live API.
 - Integration tests against a mock HTTP/WS server (e.g. `wiremock`); no live network in default
   `cargo test`. Live tests, if any, are `#[ignore]` and read-only.
 - Test error paths: non-2xx bodies, malformed JSON, rate limiting, unknown enum values.
 - Signing/auth code needs deterministic test vectors.
+
+## Implementation patterns (follow the existing code)
+
+- Each service client (`crates/polyoxide/src/<service>/client.rs`) wraps a
+  `polyoxide_core::Transport`; endpoints are methods added in `impl <Service>Client` blocks in the
+  topic module (e.g. `gamma/tags.rs`). `gamma/tags.rs` is the reference implementation.
+- Only required params → `async fn`. Optional params → method returns a `#[must_use]` request
+  builder (owns a client clone) with setters and `async fn send(self)`. Paginated endpoints also
+  get `into_stream()` via `polyoxide_core::pagination::{cursor_stream, offset_stream}`.
+- Paths are built from segments (`transport.get(&["tags", id.as_str()])`), which percent-encodes
+  user input. Query strings via `polyoxide_core::Query` (`push_all` = repeated keys, `push_csv` =
+  comma-separated).
+- Enforce documented limits (batch sizes, ranges) client-side with `ValidationError` before
+  sending.
+- Unit tests for (de)serialization next to the types; mock-server tests in
+  `crates/polyoxide/tests/api/<service>/` (one test binary).
 
 ## Commands
 
@@ -139,6 +179,7 @@ Principles once decided:
 | `just fmt` | Format all code |
 | `just clippy` | Clippy with `-D warnings` |
 | `just test [args]` | `cargo test --all-features`, extra args forwarded |
+| `just test-live [args]` | Live, read-only tests against the production APIs (needs network) |
 | `just doc` | Build docs with `-D warnings` |
 | `just deny` | `cargo deny check` (advisories, licences, bans, sources) |
 
@@ -150,7 +191,8 @@ subscriber in library code). Toolchain is pinned in `rust-toolchain.toml`.
 
 ## Workflow for agents
 
-1. Find the endpoint in `docs/INDEX.md`, read its page, then confirm types in `docs/specs/`.
+1. Find the endpoint in `docs/INDEX.md`, read its page, confirm types in `docs/specs/`, then check
+   the live response (`curl` / `just test-live`).
 2. Ask the user about anything ambiguous or any architectural/dependency choice.
 3. Implement types, request, and error handling; add rustdoc with the doc link.
 4. Add tests from documented examples; run the commands above.

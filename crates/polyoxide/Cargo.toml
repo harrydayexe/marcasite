@@ -5,18 +5,47 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 readme = "../../README.md"
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["gamma", "clob", "data", "relayer", "bridge", "combos", "ws"]
+## Gamma API: events, markets, tags, series, comments, sports, search, profiles.
+gamma = []
+## CLOB API public market data: order books, prices, spreads, markets, rewards, rebates.
+clob = []
+## Data API v2: wallets, feeds, boards, market state.
+data = []
+## Relayer API public endpoints: transactions, nonces, deployment checks.
+relayer = []
+## Bridge API: supported assets, quotes, deposit/withdrawal addresses, status.
+bridge = []
+## Combos / RFQ REST public endpoints.
+combos = []
+## Public WebSocket channels: CLOB market channel, sports results, PolyBolt public prices.
+ws = ["polyoxide-core/ws"]
 
 [dependencies]
+chrono.workspace = true
+futures-core.workspace = true
 polyoxide-core.workspace = true
-tokio = { workspace = true, features = ["rt", "time", "sync"] }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+futures-util.workspace = true
+reqwest = { workspace = true, features = ["rustls", "query"] }
+serde_path_to_error.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
+tokio-tungstenite.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true
