@@ -119,4 +119,4 @@ just check   # fmt, clippy, tests, docs, cargo-deny — everything CI runs
 
 ## License
 
-MIT
+MIT OR Apache 2.0
