@@ -126,6 +126,17 @@
 //! failures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors
 //! that are returned to you are never logged above `DEBUG`, so they are not reported twice.
 //!
+//! Spans (all at `DEBUG`), useful with span-based subscribers such as OpenTelemetry exporters:
+//!
+//! - `polyoxide.request`: one per HTTP request, covering all retries. Fields `service`,
+//!   `method`, `path`, and on completion `status`, `attempts`, `elapsed_ms` and `trace_id`
+//!   (when the server sends one).
+//! - `polyoxide.ws`: one per WebSocket connection, covering the handshake and the background
+//!   task that drives the socket for its whole lifetime. Fields `service`, `host`, `path`.
+//!
+//! Both are children of whatever span is current when the request is sent or the connection
+//! is opened, so they nest under your application's own spans.
+//!
 //! [`ENDPOINTS.md`]: https://github.com/harrydayexe/polyoxide/blob/main/ENDPOINTS.md
 //! [`Stream`]: futures_core::Stream
 #![cfg_attr(docsrs, feature(doc_cfg))]

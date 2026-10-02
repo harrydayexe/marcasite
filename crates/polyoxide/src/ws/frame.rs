@@ -255,7 +255,7 @@ pub(crate) fn decode_frame<E: ChannelEvent>(
 fn decode_value<E: ChannelEvent>(service: Service, value: Value) -> Result<E> {
     E::from_value(value).map_err(|Rejected { value, reason }| {
         let snippet = snippet(&value);
-        tracing::debug!(service = %service, error = %reason, message = %snippet, "failed to decode message");
+        tracing::debug!(service = %service, error = %reason, frame = %snippet, "failed to decode message");
         Error::WebSocket(Box::new(WebSocketError::new(
             service,
             WebSocketErrorKind::Decode,

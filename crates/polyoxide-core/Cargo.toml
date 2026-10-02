@@ -42,6 +42,7 @@ url.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [lints]

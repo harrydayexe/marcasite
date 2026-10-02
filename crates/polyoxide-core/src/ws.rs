@@ -93,6 +93,7 @@ use tokio_tungstenite::{
         protocol::{CloseFrame, frame::coding::CloseCode},
     },
 };
+use tracing::Instrument as _;
 use url::Url;
 
 use crate::error::{ConfigError, Error, Result, Service, WebSocketError, WebSocketErrorKind};
@@ -343,6 +344,20 @@ impl WsConnection {
     /// refused with an HTTP status, see [`WebSocketError::http_status`] and
     /// [`WebSocketError::retry_after`]), or [`Error::Config`] if TLS cannot be configured.
     pub async fn connect(config: WsConfig) -> Result<Self> {
+        // One span per connection, covering the handshake and the driver task. It is created
+        // here so it is a child of the caller's span (a spawned task would otherwise lose it).
+        let span = tracing::debug_span!(
+            "polyoxide.ws",
+            service = %config.service,
+            host = config.url.host_str().unwrap_or_default(),
+            path = config.url.path(),
+        );
+        Self::connect_in(config, span.clone())
+            .instrument(span)
+            .await
+    }
+
+    async fn connect_in(config: WsConfig, span: tracing::Span) -> Result<Self> {
         let service = config.service;
         let runtime = tokio::runtime::Handle::try_current().map_err(|e| {
             ws_error_from(
@@ -409,7 +424,7 @@ impl WsConnection {
 
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (incoming_tx, incoming_rx) = mpsc::channel(config.buffer);
-        runtime.spawn(drive(socket, config, command_rx, incoming_tx));
+        runtime.spawn(drive(socket, config, command_rx, incoming_tx).instrument(span));
         Ok(Self {
             sender: WsSender {
                 service,
@@ -605,7 +620,7 @@ async fn drive(
                         if config.ignored.iter().any(|m| m == text) {
                             continue;
                         }
-                        tracing::trace!(service = %service, message = %text, "received message");
+                        tracing::trace!(service = %service, frame = %text, "received message");
                         if !deliver(&incoming, &mut pending, text.to_owned(), service) {
                             break (None, fallback);
                         }
@@ -963,6 +978,44 @@ mod tests {
             Error::WebSocket(ws) => ws.kind(),
             other => panic!("expected a websocket error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn connection_span_covers_handshake_and_driver_task() {
+        let (url, server) = serve(|mut socket| async move {
+            socket.send(Message::text("hi")).await.unwrap();
+            assert_eq!(recv_text(&mut socket).await, None);
+        })
+        .await;
+        let (captured, _guard) = crate::test_tracing::capture();
+        let outer = tracing::info_span!("app.task");
+        let mut conn = WsConnection::connect(WsConfig::new(Service::SportsChannel, url))
+            .instrument(outer)
+            .await
+            .unwrap();
+        assert_eq!(next(&mut conn).await.unwrap().unwrap(), "hi");
+        conn.close();
+        assert!(next(&mut conn).await.is_none());
+        server.await.unwrap();
+
+        let captured = captured.lock().unwrap();
+        let span = captured.span("polyoxide.ws").expect("connection span");
+        assert_eq!(
+            span.get("service").map(String::as_str),
+            Some("sports-channel")
+        );
+        assert_eq!(span.get("host").map(String::as_str), Some("127.0.0.1"));
+        let expected = ["polyoxide.ws".to_owned(), "app.task".to_owned()];
+        // Handshake events and events from the spawned driver task are both inside the
+        // connection span, which is a child of the caller's span.
+        assert_eq!(
+            captured.event_scope("websocket connected"),
+            Some(&expected[..])
+        );
+        assert_eq!(
+            captured.event_scope("received message"),
+            Some(&expected[..])
+        );
     }
 
     #[tokio::test]

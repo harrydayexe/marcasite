@@ -33,6 +33,10 @@
 //! requests, decode failures, terminated WebSocket connections) are never logged above
 //! `DEBUG`, so they are not reported twice.
 //!
+//! Spans: `polyoxide.request` (one per HTTP request including retries; records `status`,
+//! `attempts`, `elapsed_ms`, `trace_id` on completion) and `polyoxide.ws` (one per WebSocket
+//! connection, also wrapping the spawned driver task).
+//!
 //! [`polyoxide`]: https://docs.rs/polyoxide
 //! [`Stream`]: futures_core::Stream
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -48,6 +52,9 @@ pub mod validate;
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
 pub mod ws;
+
+#[cfg(test)]
+mod test_tracing;
 
 pub use config::{HttpClient, HttpClientBuilder, RetryPolicy};
 pub use error::{

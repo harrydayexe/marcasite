@@ -264,6 +264,10 @@ impl Request<'_> {
             service = %service,
             method = %method,
             path = %url.path(),
+            status = tracing::field::Empty,
+            attempts = tracing::field::Empty,
+            elapsed_ms = tracing::field::Empty,
+            trace_id = tracing::field::Empty,
         );
         execute(transport, method, url, headers, body, self.idempotent)
             .instrument(span)
@@ -369,6 +373,7 @@ async fn execute(
     let service = transport.service;
     let retry = transport.http.retry;
     let mut attempt: u32 = 0;
+    let first_started = Instant::now();
     loop {
         let started = Instant::now();
         let mut builder = transport
@@ -401,6 +406,12 @@ async fn execute(
                     "received response"
                 );
                 tracing::trace!(body = %log_body(&response.body), "response body");
+                record_outcome(
+                    first_started,
+                    attempt,
+                    Some(response.status),
+                    response.trace_id(),
+                );
                 return Ok(response);
             }
             Err(err) => err,
@@ -427,7 +438,30 @@ async fn execute(
 
         // Returned to the caller, so not logged above DEBUG.
         tracing::debug!(elapsed_ms, error = %err, "request failed");
+        record_outcome(first_started, attempt, err.status(), err.trace_id());
         return Err(err);
+    }
+}
+
+/// Records the final outcome of a request on the current `polyoxide.request` span, so span
+/// based subscribers (e.g. OpenTelemetry exporters) see it as span attributes.
+fn record_outcome(
+    started: Instant,
+    retries: u32,
+    status: Option<StatusCode>,
+    trace_id: Option<&str>,
+) {
+    let span = tracing::Span::current();
+    span.record(
+        "elapsed_ms",
+        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    );
+    span.record("attempts", u64::from(retries).saturating_add(1));
+    if let Some(status) = status {
+        span.record("status", status.as_u16());
+    }
+    if let Some(trace_id) = trace_id {
+        span.record("trace_id", trace_id);
     }
 }
 
@@ -915,6 +949,64 @@ mod tests {
     }
 
     /// A transport against `server` that retries up to `retries` times without waiting.
+    #[tokio::test]
+    async fn request_span_records_outcome() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        Mock::given(matchers::path("/flaky"))
+            .respond_with(ResponseTemplate::new(503).insert_header("retry-after", "0"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(matchers::path("/flaky"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(TRACE_ID_HEADER, "t-1")
+                    .set_body_raw("{}", "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let (captured, _guard) = crate::test_tracing::capture();
+        let transport = retrying_transport(&server, 2).unwrap();
+        transport.get(&["flaky"]).send_raw().await.unwrap();
+
+        let captured = captured.lock().unwrap();
+        let span = captured.span("polyoxide.request").expect("request span");
+        assert_eq!(span.get("service").map(String::as_str), Some("data"));
+        assert_eq!(span.get("method").map(String::as_str), Some("GET"));
+        assert_eq!(span.get("path").map(String::as_str), Some("/flaky"));
+        assert_eq!(span.get("status").map(String::as_str), Some("200"));
+        assert_eq!(span.get("attempts").map(String::as_str), Some("2"));
+        assert_eq!(span.get("trace_id").map(String::as_str), Some("t-1"));
+        assert!(span.contains_key("elapsed_ms"));
+        assert_eq!(
+            captured.event_scope("received response"),
+            Some(&["polyoxide.request".to_owned()][..])
+        );
+    }
+
+    #[tokio::test]
+    async fn request_span_records_failure_status() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
+
+        let server = MockServer::start().await;
+        Mock::given(matchers::path("/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let (captured, _guard) = crate::test_tracing::capture();
+        let transport = retrying_transport(&server, 2).unwrap();
+        transport.get(&["missing"]).send_raw().await.unwrap_err();
+
+        let captured = captured.lock().unwrap();
+        let span = captured.span("polyoxide.request").expect("request span");
+        assert_eq!(span.get("status").map(String::as_str), Some("404"));
+        assert_eq!(span.get("attempts").map(String::as_str), Some("1"));
+    }
+
     fn retrying_transport(server: &wiremock::MockServer, retries: u32) -> Result<Transport> {
         let http = HttpClient::builder()
             .retry_policy(
