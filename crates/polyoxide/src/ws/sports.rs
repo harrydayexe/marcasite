@@ -11,10 +11,12 @@ use std::{
 use chrono::{DateTime, Utc};
 use futures_core::{Stream, stream::FusedStream};
 use polyoxide_core::{Result, Service, serde_util, ws::WsConnection};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream, IdleTimeout};
+use super::frame::{
+    ChannelEvent, ConnectOptions, EventStream, IdleTimeout, Rejected, deserialize_via_from_value,
+};
 
 /// The server's heartbeat text frame.
 const PING: &str = "ping";
@@ -217,18 +219,22 @@ pub enum SportsEvent {
     Unknown(Value),
 }
 
-impl<'de> Deserialize<'de> for SportsEvent {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let value = Value::deserialize(deserializer)?;
-        if value.get("slug").is_some() {
-            SportResult::deserialize(&value)
-                .map(Self::Update)
-                .map_err(|e| serde::de::Error::custom(format!("invalid sports result: {e}")))
-        } else {
-            Ok(Self::Unknown(value))
+impl ChannelEvent for SportsEvent {
+    fn from_value(value: Value) -> std::result::Result<Self, Rejected> {
+        if value.get("slug").is_none() {
+            return Ok(Self::Unknown(value));
+        }
+        match SportResult::deserialize(&value) {
+            Ok(result) => Ok(Self::Update(result)),
+            Err(e) => Err(Rejected {
+                reason: format!("invalid sports result: {e}"),
+                value,
+            }),
         }
     }
 }
+
+deserialize_via_from_value!(SportsEvent);
 
 /// A real-time sports match update (`SportResult`).
 ///

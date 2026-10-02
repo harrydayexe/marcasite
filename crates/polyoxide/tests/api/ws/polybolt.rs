@@ -10,9 +10,13 @@ use polyoxide::{
         PolyBoltSubscription,
     },
 };
-use serde_json::json;
+use std::time::{Duration, Instant};
 
-use super::mock::{close, drain, eventually_err, next, recv_json, send, serve};
+use futures_util::SinkExt as _;
+use serde_json::json;
+use tokio_tungstenite::tungstenite::Message;
+
+use super::mock::{close, drain, eventually_err, next, recv_json, recv_message, send, serve};
 
 const ASSET: &str = "21742633143463906290569050155826241533067272736897614950488156847949938836455";
 
@@ -22,6 +26,28 @@ const LIVE: &str = r#"{"v":1,"channel":"price.polymarket","seq":2,"ts":178897300
 
 async fn connect(url: &str) -> PolyBoltChannel {
     PolyBoltChannel::builder().url(url).connect().await.unwrap()
+}
+
+/// Checks the outcome of a 21st subscribe/unsubscribe frame, the first 20 of which were
+/// queued from `start` on.
+///
+/// If less than a second has passed since `start`, all 21 frames fell within one second
+/// and the 21st must have been rejected locally. On a host slow enough that a second has
+/// passed, the first frames may have left the window, so either outcome is correct. The
+/// test therefore never depends on wall-clock timing to pass.
+fn assert_rate_limited_unless_slow(start: Instant, result: polyoxide::Result<()>) {
+    match result {
+        Err(err) => {
+            assert!(
+                matches!(err, Error::Validation(ref v) if v.parameter() == "op"),
+                "{err:?}"
+            );
+        }
+        Ok(()) => assert!(
+            start.elapsed() >= Duration::from_secs(1),
+            "a 21st frame within one second was not rate limited"
+        ),
+    }
 }
 
 #[tokio::test]
@@ -92,7 +118,10 @@ async fn subscribes_and_decodes_events() {
         panic!("expected a snapshot");
     };
     assert!(snapshot.is_snapshot());
-    assert_eq!(snapshot.payload.unwrap().best_bid, Decimal::new(51, 2));
+    assert_eq!(
+        snapshot.payload.unwrap().best_bid,
+        Some(Decimal::new(51, 2))
+    );
 
     let Some(Ok(PolyBoltEvent::PricePolymarket(cold))) = next(&mut channel).await else {
         panic!("expected a cold snapshot");
@@ -104,7 +133,7 @@ async fn subscribes_and_decodes_events() {
     };
     assert!(!live.is_snapshot());
     assert_eq!(live.seq, 2);
-    assert_eq!(live.payload.unwrap().best_bid, Decimal::new(52, 2));
+    assert_eq!(live.payload.unwrap().best_bid, Some(Decimal::new(52, 2)));
 
     let Some(Ok(PolyBoltEvent::Error(error))) = next(&mut channel).await else {
         panic!("expected an error ack");
@@ -161,6 +190,7 @@ async fn enforces_documented_limits_locally() {
     // At most 64 active subscriptions; duplicates (after leading-zero normalization) count
     // once.
     let first: Vec<String> = (1..=64).map(|i| i.to_string()).collect();
+    let start = Instant::now();
     channel
         .subscribe(PolyBoltSubscription::price_polymarket(&first))
         .unwrap();
@@ -180,16 +210,18 @@ async fn enforces_documented_limits_locally() {
         .unwrap();
     assert_eq!(channel.active_subscriptions(), 64);
 
-    // At most 20 subscribe/unsubscribe frames per second (4 sent so far).
+    // At most 20 subscribe/unsubscribe frames per second (4 sent so far). The window
+    // logic itself is unit-tested with a fake clock; here a slow host only weakens the
+    // check (see `assert_rate_limited_unless_slow`).
     for _ in 0..16 {
         channel
             .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
             .unwrap();
     }
-    let err = channel
-        .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
-        .unwrap_err();
-    assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "op"));
+    assert_rate_limited_unless_slow(
+        start,
+        channel.unsubscribe(PolyBoltSubscription::price_polymarket(["999"])),
+    );
     // Pings are not rate limited.
     channel.ping().unwrap();
 
@@ -229,6 +261,7 @@ async fn handles_share_the_documented_limits() {
     let mut channel = connect(&url).await;
     let handle = channel.handle();
     let first: Vec<String> = (1..=60).map(|i| i.to_string()).collect();
+    let start = Instant::now();
     channel
         .subscribe(PolyBoltSubscription::price_polymarket(&first))
         .unwrap();
@@ -273,15 +306,11 @@ async fn handles_share_the_documented_limits() {
             handle.unsubscribe(unsubscribe).unwrap();
         }
     }
-    for err in [
-        handle
-            .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
-            .unwrap_err(),
-        channel
-            .unsubscribe(PolyBoltSubscription::price_polymarket(["999"]))
-            .unwrap_err(),
+    for result in [
+        handle.unsubscribe(PolyBoltSubscription::price_polymarket(["999"])),
+        channel.unsubscribe(PolyBoltSubscription::price_polymarket(["999"])),
     ] {
-        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "op"));
+        assert_rate_limited_unless_slow(start, result);
     }
     handle.ping().unwrap();
 
@@ -333,5 +362,128 @@ async fn policy_close_is_reported_with_its_code() {
     assert_eq!(ws.close_reason(), Some("policy violation"));
     assert!(next(&mut channel).await.is_none());
     assert!(channel.is_terminated());
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_rejected_subscription_releases_its_slot() {
+    let (url, server) = serve("/ws", |mut socket| async move {
+        assert_eq!(recv_json(&mut socket).await["rid"], "bulk");
+        assert_eq!(recv_json(&mut socket).await["rid"], "s64");
+        send(
+            &mut socket,
+            r#"{"op":"subscribed","channel":"price.polymarket","rid":"bulk"}"#,
+        )
+        .await;
+        // The documented error ack shape, for the single subscription of frame `s64`.
+        send(
+            &mut socket,
+            r#"{"op":"error","code":"bad_filter","channel":"price.polymarket","rid":"s64"}"#,
+        )
+        .await;
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({
+                "op": "subscribe",
+                "rid": "s65",
+                "subscriptions": [{"channel": "price.polymarket", "filter": {"asset_id": "65"}}]
+            })
+        );
+        drain(&mut socket).await;
+    })
+    .await;
+
+    let mut channel = connect(&url).await;
+    let first: Vec<String> = (1..=63).map(|i| i.to_string()).collect();
+    channel
+        .subscribe(PolyBoltSubscription::price_polymarket(&first).rid("bulk"))
+        .unwrap();
+    channel
+        .subscribe(PolyBoltSubscription::price_polymarket(["64"]).rid("s64"))
+        .unwrap();
+    assert_eq!(channel.active_subscriptions(), 64);
+    let err = channel
+        .subscribe(PolyBoltSubscription::price_polymarket(["65"]))
+        .unwrap_err();
+    assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "subscriptions"));
+
+    assert!(matches!(
+        next(&mut channel).await,
+        Some(Ok(PolyBoltEvent::Subscribed(_)))
+    ));
+    assert_eq!(channel.active_subscriptions(), 64);
+    let Some(Ok(PolyBoltEvent::Error(error))) = next(&mut channel).await else {
+        panic!("expected an error ack");
+    };
+    assert_eq!(error.rid.as_deref(), Some("s64"));
+    // Reading the error ack released the rejected subscription.
+    assert_eq!(channel.active_subscriptions(), 63);
+    channel
+        .subscribe(PolyBoltSubscription::price_polymarket(["65"]).rid("s65"))
+        .unwrap();
+    assert_eq!(channel.active_subscriptions(), 64);
+
+    drop(channel);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn answers_protocol_pings() {
+    let (url, server) = serve("/ws", |mut socket| async move {
+        // The documented keepalive: a WebSocket ping, answered with a pong.
+        socket
+            .send(Message::Ping(b"keepalive".to_vec().into()))
+            .await
+            .unwrap();
+        loop {
+            match recv_message(&mut socket).await {
+                Some(Message::Pong(payload)) => {
+                    assert_eq!(&payload[..], b"keepalive");
+                    break;
+                }
+                Some(Message::Ping(_)) => {}
+                other => panic!("expected a pong, got {other:?}"),
+            }
+        }
+        send(&mut socket, r#"{"op":"pong"}"#).await;
+        drain(&mut socket).await;
+    })
+    .await;
+
+    let mut channel = connect(&url).await;
+    // The ping itself is never surfaced; the next event is the server's message.
+    let Some(Ok(PolyBoltEvent::Pong(pong))) = next(&mut channel).await else {
+        panic!("expected a pong ack");
+    };
+    assert_eq!(pong.rid, None);
+    drop(channel);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn answers_a_server_close_with_a_close_frame() {
+    let (url, server) = serve("/ws", |mut socket| async move {
+        close(&mut socket, 4003, "draining").await;
+        // The client completes the close handshake by echoing a close frame.
+        let mut echoed = false;
+        while let Some(message) = recv_message(&mut socket).await {
+            if message.is_close() {
+                echoed = true;
+                break;
+            }
+        }
+        assert!(echoed, "the client did not answer the close frame");
+    })
+    .await;
+
+    let mut channel = connect(&url).await;
+    let Some(Err(err)) = next(&mut channel).await else {
+        panic!("expected a close error");
+    };
+    assert_eq!(
+        PolyBoltCloseCode::from_error(&err),
+        Some(PolyBoltCloseCode::Draining)
+    );
+    assert!(next(&mut channel).await.is_none());
     server.await.unwrap();
 }

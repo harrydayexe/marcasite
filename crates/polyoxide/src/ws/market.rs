@@ -16,10 +16,13 @@ use polyoxide_core::{
     ws::{WsConnection, WsSender},
 };
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream, IdleTimeout, check_interval, str_field};
+use super::frame::{
+    ChannelEvent, ConnectOptions, EventStream, IdleTimeout, Rejected, check_interval,
+    deserialize_via_from_value, empty_decimal, parse_as, str_field,
+};
 
 /// The text frame the client sends as a heartbeat.
 const PING: &str = "PING";
@@ -169,6 +172,11 @@ enum Operation {
 ///
 /// Use [`MarketChannel::subscribe`] / [`MarketChannel::unsubscribe`] for the common case,
 /// or build one of these to also set `level` or `custom_feature_enabled`.
+///
+/// An update needs at least one asset id. The spec does not require any (it has no
+/// `minItems`), but an update without asset ids changes nothing, so it is rejected
+/// client-side with [`Error::Validation`] as a convenience. The initial
+/// [`MarketSubscription`] may be empty.
 ///
 /// See <https://docs.polymarket.com/api-reference/wss/market>.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -607,6 +615,21 @@ impl MarketChannelBuilder {
 /// `event_type`, or a frame that is not JSON, becomes [`MarketEvent::Unknown`] so that
 /// new server messages never break the stream.
 ///
+/// # Timestamps
+///
+/// The spec documents the `timestamp` of `book`, `price_change` and `last_trade_price` as
+/// Unix milliseconds, so those events expose it as a `DateTime<Utc>`. For
+/// `tick_size_change`, `best_bid_ask`, `new_market` and `market_resolved` it gives no unit,
+/// so their `timestamp` is kept as the string sent; each of these events has a
+/// `timestamp_millis()` helper that reads it as Unix milliseconds, as in the documented
+/// examples.
+///
+/// # Empty prices
+///
+/// The best bid and ask (and the spread) are typed as strings and the spec does not say
+/// how an empty book side is sent, so they are `Option<Decimal>` everywhere: an empty
+/// string decodes to `None` instead of failing the whole event.
+///
 /// See <https://docs.polymarket.com/api-reference/wss/market>.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "event_type", rename_all = "snake_case")]
@@ -637,29 +660,34 @@ pub enum MarketEvent {
     Unknown(Value),
 }
 
-impl<'de> Deserialize<'de> for MarketEvent {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        fn parse<T: DeserializeOwned, E: serde::de::Error>(
+impl ChannelEvent for MarketEvent {
+    fn from_value(value: Value) -> std::result::Result<Self, Rejected> {
+        fn parse<T: serde::de::DeserializeOwned>(
             kind: &str,
-            value: &Value,
-        ) -> std::result::Result<T, E> {
-            T::deserialize(value).map_err(|e| E::custom(format!("invalid `{kind}` event: {e}")))
+            value: Value,
+        ) -> std::result::Result<T, Rejected> {
+            parse_as(kind, "event", value)
         }
 
-        let value = Value::deserialize(deserializer)?;
-        let event = match str_field(&value, "event_type") {
-            Some(kind @ "book") => Self::Book(parse(kind, &value)?),
-            Some(kind @ "price_change") => Self::PriceChange(parse(kind, &value)?),
-            Some(kind @ "last_trade_price") => Self::LastTradePrice(parse(kind, &value)?),
-            Some(kind @ "tick_size_change") => Self::TickSizeChange(parse(kind, &value)?),
-            Some(kind @ "best_bid_ask") => Self::BestBidAsk(parse(kind, &value)?),
-            Some(kind @ "new_market") => Self::NewMarket(parse(kind, &value)?),
-            Some(kind @ "market_resolved") => Self::MarketResolved(parse(kind, &value)?),
+        // The tag is copied out so that the message can be moved into the variant.
+        let Some(kind) = str_field(&value, "event_type").map(str::to_owned) else {
+            return Ok(Self::Unknown(value));
+        };
+        let event = match kind.as_str() {
+            "book" => Self::Book(parse(&kind, value)?),
+            "price_change" => Self::PriceChange(parse(&kind, value)?),
+            "last_trade_price" => Self::LastTradePrice(parse(&kind, value)?),
+            "tick_size_change" => Self::TickSizeChange(parse(&kind, value)?),
+            "best_bid_ask" => Self::BestBidAsk(parse(&kind, value)?),
+            "new_market" => Self::NewMarket(parse(&kind, value)?),
+            "market_resolved" => Self::MarketResolved(parse(&kind, value)?),
             _ => Self::Unknown(value),
         };
         Ok(event)
     }
 }
+
+deserialize_via_from_value!(MarketEvent);
 
 /// Unix milliseconds sent as a decimal string (e.g. `"1757908892351"`).
 mod millis_string {
@@ -753,10 +781,11 @@ pub struct PriceChange {
     pub side: Side,
     /// Hash of the order that caused this change.
     pub hash: String,
-    /// Best bid after the change.
+    /// Best bid after the change; `None` when absent or an empty string (the spec does not
+    /// say how an empty side is sent).
     #[serde(default, with = "serde_util::string_or_number_option")]
     pub best_bid: Option<Decimal>,
-    /// Best ask after the change.
+    /// Best ask after the change; `None` when absent or an empty string.
     #[serde(default, with = "serde_util::string_or_number_option")]
     pub best_ask: Option<Decimal>,
 }
@@ -826,12 +855,17 @@ pub struct BestBidAskEvent {
     pub asset_id: TokenId,
     /// Condition id of the market.
     pub market: ConditionId,
-    /// Best bid price.
-    pub best_bid: Decimal,
-    /// Best ask price.
-    pub best_ask: Decimal,
-    /// Spread between best ask and best bid.
-    pub spread: Decimal,
+    /// Best bid price. The spec types it as a (required) string and does not say how an
+    /// empty side is sent; an empty string decodes to `None` (and re-serializes as `""`).
+    #[serde(with = "empty_decimal")]
+    pub best_bid: Option<Decimal>,
+    /// Best ask price; `None` for an empty string, as for [`best_bid`](Self::best_bid).
+    #[serde(with = "empty_decimal")]
+    pub best_ask: Option<Decimal>,
+    /// Spread between best ask and best bid; `None` for an empty string, as for
+    /// [`best_bid`](Self::best_bid).
+    #[serde(with = "empty_decimal")]
+    pub spread: Option<Decimal>,
     /// Event time, as sent. The spec gives no unit for this field (the documented example
     /// is Unix milliseconds); see [`Self::timestamp_millis`].
     pub timestamp: String,
@@ -1186,9 +1220,9 @@ mod tests {
         ) else {
             panic!("expected a best_bid_ask event");
         };
-        assert_eq!(bba.best_bid, Decimal::new(73, 2));
-        assert_eq!(bba.best_ask, Decimal::new(77, 2));
-        assert_eq!(bba.spread, Decimal::new(4, 2));
+        assert_eq!(bba.best_bid, Some(Decimal::new(73, 2)));
+        assert_eq!(bba.best_ask, Some(Decimal::new(77, 2)));
+        assert_eq!(bba.spread, Some(Decimal::new(4, 2)));
         assert_eq!(
             bba.timestamp_millis().map(|t| t.timestamp_millis()),
             Some(1_766_789_469_958)
@@ -1311,6 +1345,35 @@ mod tests {
         assert_eq!(
             event(r#"{"no_type":true}"#),
             MarketEvent::Unknown(serde_json::json!({"no_type": true}))
+        );
+    }
+
+    #[test]
+    fn best_bid_ask_tolerates_empty_sides() {
+        let raw = r#"{"event_type":"best_bid_ask","market":"0x1","asset_id":"1","best_bid":"","best_ask":"0.77","spread":"","timestamp":"1766789469958"}"#;
+        let MarketEvent::BestBidAsk(bba) = event(raw) else {
+            panic!("expected a best_bid_ask event");
+        };
+        assert_eq!(bba.best_bid, None);
+        assert_eq!(bba.best_ask, Some(Decimal::new(77, 2)));
+        assert_eq!(bba.spread, None);
+        // Empty sides re-serialize as the empty strings they were.
+        assert_eq!(
+            serde_json::to_value(MarketEvent::BestBidAsk(bba)).unwrap(),
+            serde_json::from_str::<Value>(raw).unwrap()
+        );
+        // The keys are still required, and other text is still an error.
+        assert!(
+            serde_json::from_str::<MarketEvent>(
+                r#"{"event_type":"best_bid_ask","market":"0x1","asset_id":"1","best_ask":"1","spread":"1","timestamp":"1"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<MarketEvent>(
+                r#"{"event_type":"best_bid_ask","market":"0x1","asset_id":"1","best_bid":"x","best_ask":"1","spread":"1","timestamp":"1"}"#
+            )
+            .is_err()
         );
     }
 

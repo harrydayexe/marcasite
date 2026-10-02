@@ -21,10 +21,13 @@ use polyoxide_core::{
     ws::{WsConnection, WsSender},
 };
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::frame::{ConnectOptions, EventStream, IdleTimeout, str_field};
+use super::frame::{
+    ChannelEvent, ConnectOptions, EventStream, IdleTimeout, Rejected, deserialize_via_from_value,
+    empty_decimal, parse_as, str_field,
+};
 
 /// Documented limit of active `(channel, filter)` subscriptions per connection.
 const MAX_ACTIVE_SUBSCRIPTIONS: usize = 64;
@@ -34,6 +37,11 @@ const MAX_SUBSCRIPTION_FRAMES_PER_SECOND: usize = 20;
 const MAX_FRAME_BYTES: usize = 64_000;
 /// Documented maximum number of digits of an `asset_id` filter (`^[0-9]{1,78}$`).
 const MAX_ASSET_ID_DIGITS: usize = 78;
+/// How many subscribe frames with a `rid` are remembered while their ack is awaited (see
+/// [`Limits::pending`]); older ones are forgotten, which keeps their subscriptions counted.
+const MAX_PENDING_FRAMES: usize = 256;
+/// The rate limit window.
+const RATE_WINDOW: Duration = Duration::from_secs(1);
 
 polyoxide_core::string_enum! {
     /// A PolyBolt channel name.
@@ -330,10 +338,15 @@ fn encode(value: &impl Serialize) -> Result<String> {
 ///
 /// The documented per-connection limits are enforced client-side, returning
 /// [`Error::Validation`] instead of letting the server close the connection with `4008`:
-/// at most 64 active subscriptions (counted from the requests sent on this connection), at
-/// most 20 subscribe or unsubscribe frames per second (best effort: network jitter can
-/// still bunch frames up; batch many ids into one frame instead), and at most 64 000 bytes
-/// per frame.
+/// at most 64 active subscriptions (counted from the requests sent on this connection; see
+/// [`active_subscriptions`](Self::active_subscriptions)), at most 20 subscribe or
+/// unsubscribe frames per second, and at most 64 000 bytes per frame.
+///
+/// The frame rate is counted when a frame is queued for sending, not when it reaches the
+/// socket. Queued frames are written promptly (also while the receive buffer is full),
+/// but a slow socket write or network jitter can still bunch frames that were queued in
+/// different seconds into one, so the server may count more than the client did. Stay
+/// well below the limit by batching many ids into one frame.
 ///
 /// To subscribe or unsubscribe from another task while the stream is consumed, use a
 /// [`PolyBoltChannelHandle`] from [`handle`](Self::handle); the channel and its handles
@@ -359,7 +372,7 @@ fn encode(value: &impl Serialize) -> Result<String> {
 ///     match event? {
 ///         PolyBoltEvent::PricePolymarket(envelope) => {
 ///             if let Some(quote) = envelope.payload {
-///                 println!("{} / {}", quote.best_bid, quote.best_ask);
+///                 println!("{:?} / {:?}", quote.best_bid, quote.best_ask);
 ///             }
 ///         }
 ///         PolyBoltEvent::Error(error) => eprintln!("request failed: {:?}", error.code),
@@ -500,8 +513,14 @@ impl PolyBoltChannel {
     /// connection (through the channel or any of its handles), as counted for the
     /// 64-subscription limit.
     ///
-    /// This is an upper bound of what the server holds: subscriptions it rejected (see
-    /// [`PolyBoltEvent::Error`]) are still counted until unsubscribed.
+    /// An `error` ack ([`PolyBoltEvent::Error`]) names the `rid` of the rejected request
+    /// but not its filter, so a rejected subscription stops being counted only when that
+    /// can be told exactly: the request was a [`subscribe`](Self::subscribe) of a single
+    /// new subscription with a [`rid`](PolyBoltSubscription::rid) not used by another
+    /// request still awaiting its ack, and no later request named the same asset id. The
+    /// slot is released when the error ack is read from this stream. Any other rejected
+    /// subscription stays counted until unsubscribed, so the count is an upper bound of
+    /// what the server holds. Give single subscriptions unique `rid`s to keep it exact.
     #[must_use]
     pub fn active_subscriptions(&self) -> usize {
         self.handle.active_subscriptions()
@@ -543,7 +562,9 @@ impl PolyBoltChannelHandle {
     pub fn subscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
         subscription.validate()?;
         let frame = subscription.to_json("subscribe")?;
-        lock(&self.limits).subscribe(&subscription, frame, |frame| self.sender.send_text(frame))
+        lock(&self.limits).subscribe(&subscription, frame, Instant::now(), |frame| {
+            self.sender.send_text(frame)
+        })
     }
 
     /// Removes subscriptions; see [`PolyBoltChannel::unsubscribe`].
@@ -557,7 +578,9 @@ impl PolyBoltChannelHandle {
     pub fn unsubscribe(&self, subscription: PolyBoltSubscription) -> Result<()> {
         subscription.validate()?;
         let frame = subscription.to_json("unsubscribe")?;
-        lock(&self.limits).unsubscribe(&subscription, frame, |frame| self.sender.send_text(frame))
+        lock(&self.limits).unsubscribe(&subscription, frame, Instant::now(), |frame| {
+            self.sender.send_text(frame)
+        })
     }
 
     /// Sends the optional application-level ping; see [`PolyBoltChannel::ping`].
@@ -581,12 +604,16 @@ impl PolyBoltChannelHandle {
             op: &'static str,
             rid: String,
         }
+        let rid = rid.into();
         let frame = encode(&Wire {
             op: "ping",
-            rid: rid.into(),
+            rid: rid.clone(),
         })?;
         check_frame_size(&frame)?;
-        self.sender.send_text(frame)
+        self.sender.send_text(frame)?;
+        // A pending subscribe frame with the same `rid` can no longer be told apart.
+        lock(&self.limits).touch(&[], Some(&rid));
+        Ok(())
     }
 
     /// The number of active subscriptions counted for the connection; see
@@ -607,10 +634,30 @@ impl PolyBoltChannelHandle {
 /// [`PolyBoltChannel`] and its handles.
 #[derive(Debug, Default)]
 struct Limits {
-    /// Subscription keys (see [`SubscriptionItem::key`]) requested and not unsubscribed.
-    active: HashSet<(String, String)>,
-    /// When the subscribe/unsubscribe frames of the last second were sent.
+    /// Subscription keys (see [`SubscriptionItem::key`]) requested and not unsubscribed
+    /// (nor rejected, see [`pending`](Self::pending)).
+    active: HashSet<SubscriptionKey>,
+    /// When the subscribe/unsubscribe frames of the last second were queued.
     recent_frames: VecDeque<Instant>,
+    /// Subscribe frames sent with a `rid` whose ack has not been seen yet, oldest first.
+    ///
+    /// An `error` ack carries the `rid` of the failed frame but no filter, so a rejected
+    /// subscription can only be identified exactly for a frame holding a single new
+    /// subscription, with a `rid` used by no other pending request, whose key no later
+    /// request touched. Such a frame records that key to release when an `error` ack echoes
+    /// its `rid`; any other frame records nothing (its subscriptions stay counted).
+    pending: VecDeque<PendingFrame>,
+}
+
+/// The server's identity of a subscription: channel name and normalised asset id.
+type SubscriptionKey = (String, String);
+
+/// A subscribe frame awaiting its ack (see [`Limits::pending`]).
+#[derive(Debug)]
+struct PendingFrame {
+    rid: String,
+    /// The subscription to release if the server rejects the frame.
+    release_on_error: Option<SubscriptionKey>,
 }
 
 impl Limits {
@@ -621,6 +668,7 @@ impl Limits {
         &mut self,
         subscription: &PolyBoltSubscription,
         frame: String,
+        now: Instant,
         send: impl FnOnce(String) -> Result<()>,
     ) -> Result<()> {
         let keys: Vec<_> = subscription
@@ -640,7 +688,25 @@ impl Limits {
             )
             .into());
         }
-        self.send_subscription_frame(frame, send)?;
+        self.send_subscription_frame(frame, now, send)?;
+        let rid_in_use = subscription
+            .rid
+            .as_deref()
+            .is_some_and(|rid| self.pending.iter().any(|frame| frame.rid == rid));
+        let release_on_error = match (keys.as_slice(), added.len(), rid_in_use) {
+            ([key], 1, false) => Some(key.clone()),
+            _ => None,
+        };
+        self.touch(&keys, subscription.rid.as_deref());
+        if let Some(rid) = &subscription.rid {
+            self.pending.push_back(PendingFrame {
+                rid: rid.clone(),
+                release_on_error,
+            });
+            while self.pending.len() > MAX_PENDING_FRAMES {
+                self.pending.pop_front();
+            }
+        }
         self.active.extend(keys);
         Ok(())
     }
@@ -651,29 +717,85 @@ impl Limits {
         &mut self,
         subscription: &PolyBoltSubscription,
         frame: String,
+        now: Instant,
         send: impl FnOnce(String) -> Result<()>,
     ) -> Result<()> {
-        self.send_subscription_frame(frame, send)?;
-        for key in subscription.items.iter().map(SubscriptionItem::key) {
-            self.active.remove(&key);
+        self.send_subscription_frame(frame, now, send)?;
+        let keys: Vec<_> = subscription
+            .items
+            .iter()
+            .map(SubscriptionItem::key)
+            .collect();
+        self.touch(&keys, subscription.rid.as_deref());
+        for key in &keys {
+            self.active.remove(key);
         }
         Ok(())
     }
 
+    /// A new request names `keys` and `rid`: pending frames can no longer release those
+    /// keys (the server's state of them now depends on the new request too), nor anything
+    /// at all if they share the `rid` (an ack could then belong to either request).
+    fn touch(&mut self, keys: &[SubscriptionKey], rid: Option<&str>) {
+        for frame in &mut self.pending {
+            let shares_rid = rid.is_some_and(|rid| rid == frame.rid);
+            if shares_rid
+                || frame
+                    .release_on_error
+                    .as_ref()
+                    .is_some_and(|key| keys.contains(key))
+            {
+                frame.release_on_error = None;
+            }
+        }
+    }
+
+    /// Accounts for an event received on the connection: an ack with a `rid` settles the
+    /// oldest pending subscribe frame with that `rid`, and an `error` ack releases its
+    /// subscription (see [`pending`](Self::pending)).
+    fn observe(&mut self, event: &PolyBoltEvent) {
+        let (rid, rejected) = match event {
+            PolyBoltEvent::Subscribed(ack) | PolyBoltEvent::Unsubscribed(ack) => {
+                (ack.rid.as_deref(), false)
+            }
+            PolyBoltEvent::Error(ack) => (ack.rid.as_deref(), true),
+            _ => return,
+        };
+        let Some(rid) = rid else { return };
+        let Some(index) = self.pending.iter().position(|frame| frame.rid == rid) else {
+            return;
+        };
+        if let Some(frame) = self.pending.remove(index)
+            && rejected
+            && let Some(key) = frame.release_on_error
+        {
+            self.active.remove(&key);
+        }
+    }
+
+    /// Whether `event` may change the accounting (cheap check before locking).
+    fn is_relevant(event: &PolyBoltEvent) -> bool {
+        matches!(
+            event,
+            PolyBoltEvent::Subscribed(ChannelAck { rid: Some(_), .. })
+                | PolyBoltEvent::Unsubscribed(ChannelAck { rid: Some(_), .. })
+                | PolyBoltEvent::Error(ErrorAck { rid: Some(_), .. })
+        )
+    }
+
     /// Enforces the frame size and rate limits, then sends a subscribe/unsubscribe frame
-    /// with `send` and records it for the rate limit.
+    /// with `send` and records it, as queued at `now`, for the rate limit.
     fn send_subscription_frame(
         &mut self,
         frame: String,
+        now: Instant,
         send: impl FnOnce(String) -> Result<()>,
     ) -> Result<()> {
         check_frame_size(&frame)?;
-        let now = Instant::now();
-        while self
-            .recent_frames
-            .front()
-            .is_some_and(|sent| now.duration_since(*sent) >= Duration::from_secs(1))
-        {
+        while self.recent_frames.front().is_some_and(|sent| {
+            now.checked_duration_since(*sent)
+                .is_some_and(|age| age >= RATE_WINDOW)
+        }) {
             self.recent_frames.pop_front();
         }
         if self.recent_frames.len() >= MAX_SUBSCRIPTION_FRAMES_PER_SECOND {
@@ -717,7 +839,14 @@ impl Stream for PolyBoltChannel {
     type Item = Result<PolyBoltEvent>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().events.poll_next(cx)
+        let this = self.get_mut();
+        let item = this.events.poll_next(cx);
+        if let Poll::Ready(Some(Ok(event))) = &item
+            && Limits::is_relevant(event)
+        {
+            lock(&this.handle.limits).observe(event);
+        }
+        item
     }
 }
 
@@ -844,27 +973,50 @@ pub enum PolyBoltEvent {
     Unknown(Value),
 }
 
-impl<'de> Deserialize<'de> for PolyBoltEvent {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        fn parse<T: DeserializeOwned, E: serde::de::Error>(
+/// The only envelope version the spec defines (`v`, `const: 1`).
+const ENVELOPE_VERSION: u64 = 1;
+
+impl ChannelEvent for PolyBoltEvent {
+    fn from_value(value: Value) -> std::result::Result<Self, Rejected> {
+        fn parse<T: serde::de::DeserializeOwned>(
             kind: &str,
-            value: &Value,
-        ) -> std::result::Result<T, E> {
-            T::deserialize(value).map_err(|e| E::custom(format!("invalid `{kind}` message: {e}")))
+            value: Value,
+        ) -> std::result::Result<T, Rejected> {
+            parse_as(kind, "message", value)
         }
 
-        let value = Value::deserialize(deserializer)?;
-        let event = match (str_field(&value, "op"), str_field(&value, "channel")) {
-            (Some(kind @ "subscribed"), _) => Self::Subscribed(parse(kind, &value)?),
-            (Some(kind @ "unsubscribed"), _) => Self::Unsubscribed(parse(kind, &value)?),
-            (Some(kind @ "pong"), _) => Self::Pong(parse(kind, &value)?),
-            (Some(kind @ "error"), _) => Self::Error(parse(kind, &value)?),
-            (None, Some(kind @ "price.polymarket")) => Self::PricePolymarket(parse(kind, &value)?),
-            _ => Self::Unknown(value),
+        enum Kind {
+            Subscribed,
+            Unsubscribed,
+            Pong,
+            Error,
+            PricePolymarket,
+        }
+        // An envelope of another version may have another shape: keep it as unknown
+        // rather than failing to decode it. A missing `v` is left to the decoder (it is a
+        // required field).
+        let known_version = value
+            .get("v")
+            .is_none_or(|v| v.as_u64() == Some(ENVELOPE_VERSION));
+        let kind = match (str_field(&value, "op"), str_field(&value, "channel")) {
+            (Some("subscribed"), _) => Kind::Subscribed,
+            (Some("unsubscribed"), _) => Kind::Unsubscribed,
+            (Some("pong"), _) => Kind::Pong,
+            (Some("error"), _) => Kind::Error,
+            (None, Some("price.polymarket")) if known_version => Kind::PricePolymarket,
+            _ => return Ok(Self::Unknown(value)),
         };
-        Ok(event)
+        Ok(match kind {
+            Kind::Subscribed => Self::Subscribed(parse("subscribed", value)?),
+            Kind::Unsubscribed => Self::Unsubscribed(parse("unsubscribed", value)?),
+            Kind::Pong => Self::Pong(parse("pong", value)?),
+            Kind::Error => Self::Error(parse("error", value)?),
+            Kind::PricePolymarket => Self::PricePolymarket(parse("price.polymarket", value)?),
+        })
     }
 }
+
+deserialize_via_from_value!(PolyBoltEvent);
 
 /// A `subscribed` or `unsubscribed` ack (`ChannelAck`).
 ///
@@ -875,9 +1027,11 @@ pub struct ChannelAck {
     /// The channel the request applied to.
     pub channel: PolyBoltChannelName,
     /// The request id, echoed when the request carried one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rid: Option<String>,
     /// The provider actually served. Only on `subscribed` acks for vendor channels while
     /// the server's provider selector is enabled; never for `price.polymarket`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<PriceProvider>,
 }
 
@@ -888,6 +1042,7 @@ pub struct ChannelAck {
 #[non_exhaustive]
 pub struct PongAck {
     /// The request id, echoed when the ping carried one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rid: Option<String>,
 }
 
@@ -900,9 +1055,11 @@ pub struct ErrorAck {
     /// Why the request failed.
     pub code: PolyBoltErrorCode,
     /// The channel the failed request named, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<PolyBoltChannelName>,
     /// The request id, echoed when the request carried one (absent when the frame could
     /// not be parsed).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rid: Option<String>,
 }
 
@@ -912,7 +1069,8 @@ pub struct ErrorAck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PricePolymarketEnvelope {
-    /// Envelope version (`1`).
+    /// Envelope version (`1`). An envelope of any other version is not decoded as this
+    /// type but yielded as [`PolyBoltEvent::Unknown`], since its shape may differ.
     pub v: u32,
     /// The channel (`price.polymarket`).
     pub channel: PolyBoltChannelName,
@@ -954,10 +1112,14 @@ pub struct BestBidAsk {
     pub market: ConditionId,
     /// Outcome token id.
     pub asset_id: TokenId,
-    /// Best bid price.
-    pub best_bid: Decimal,
-    /// Best ask price.
-    pub best_ask: Decimal,
+    /// Best bid price. The spec types it as a (required) decimal string and does not say
+    /// how an empty book side is sent; an empty string decodes to `None` (and
+    /// re-serializes as `""`).
+    #[serde(with = "empty_decimal")]
+    pub best_bid: Option<Decimal>,
+    /// Best ask price; `None` for an empty string, as for [`best_bid`](Self::best_bid).
+    #[serde(with = "empty_decimal")]
+    pub best_ask: Option<Decimal>,
     /// Order book hash at this change.
     pub hash: String,
     /// Order book time (sent as Unix milliseconds).
@@ -1015,30 +1177,31 @@ mod tests {
     #[test]
     fn limits_count_subscriptions_and_frames() {
         let mut limits = Limits::default();
+        let now = Instant::now();
         let mut sent = Vec::new();
         let mut send = |frame: String| {
             sent.push(frame);
             Ok(())
         };
         limits
-            .subscribe(&ids(1..=64), "a".to_owned(), &mut send)
+            .subscribe(&ids(1..=64), "a".to_owned(), now, &mut send)
             .unwrap();
         assert_eq!(limits.active.len(), 64);
         let err = limits
-            .subscribe(&ids(65..=65), "b".to_owned(), &mut send)
+            .subscribe(&ids(65..=65), "b".to_owned(), now, &mut send)
             .unwrap_err();
         assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "subscriptions"));
         limits
-            .unsubscribe(&ids(1..=1), "c".to_owned(), &mut send)
+            .unsubscribe(&ids(1..=1), "c".to_owned(), now, &mut send)
             .unwrap();
         limits
-            .subscribe(&ids(65..=65), "d".to_owned(), &mut send)
+            .subscribe(&ids(65..=65), "d".to_owned(), now, &mut send)
             .unwrap();
         assert_eq!(limits.active.len(), 64);
         // A frame that fails to send is not counted (`2` is already active, so only the send
         // can fail).
         let err = limits
-            .subscribe(&ids(2..=2), "e".to_owned(), |_| {
+            .subscribe(&ids(2..=2), "e".to_owned(), now, |_| {
                 Err(Error::Validation(ValidationError::new("x", "send failed")))
             })
             .unwrap_err();
@@ -1046,10 +1209,10 @@ mod tests {
         assert_eq!(limits.recent_frames.len(), 3);
         // Nor are the subscriptions of a frame that fails to send.
         limits
-            .unsubscribe(&ids(2..=2), "f".to_owned(), &mut send)
+            .unsubscribe(&ids(2..=2), "f".to_owned(), now, &mut send)
             .unwrap();
         let err = limits
-            .subscribe(&ids(2..=2), "g".to_owned(), |_| {
+            .subscribe(&ids(2..=2), "g".to_owned(), now, |_| {
                 Err(Error::Validation(ValidationError::new("x", "send failed")))
             })
             .unwrap_err();
@@ -1058,6 +1221,144 @@ mod tests {
         assert_eq!(limits.recent_frames.len(), 4);
         // Rejected requests are not sent.
         assert_eq!(sent, ["a", "c", "d", "f"]);
+    }
+
+    #[test]
+    fn rate_limit_uses_a_sliding_one_second_window() {
+        let mut limits = Limits::default();
+        let start = Instant::now();
+        let at = |millis: u64| start + Duration::from_millis(millis);
+        let unsubscribe = |limits: &mut Limits, now: Instant| {
+            limits.unsubscribe(&ids(1..=1), "u".to_owned(), now, |_| Ok(()))
+        };
+        // 20 frames spread over the first 950 ms are allowed; a 21st within the second is
+        // not.
+        for i in 0..20 {
+            unsubscribe(&mut limits, at(i * 50)).unwrap();
+        }
+        let err = unsubscribe(&mut limits, at(999)).unwrap_err();
+        assert!(matches!(err, Error::Validation(ref v) if v.parameter() == "op"));
+        // A rejected frame does not use up the budget.
+        assert_eq!(limits.recent_frames.len(), 20);
+        // Exactly one second after the first frame, its slot is free again (one slot only).
+        unsubscribe(&mut limits, at(1000)).unwrap();
+        assert!(unsubscribe(&mut limits, at(1000)).is_err());
+        // After a quiet second, the whole budget is back.
+        for _ in 0..20 {
+            unsubscribe(&mut limits, at(3000)).unwrap();
+        }
+        assert!(unsubscribe(&mut limits, at(3000)).is_err());
+        // An instant earlier than the recorded frames (never produced by a monotonic clock)
+        // frees nothing and does not panic.
+        assert!(unsubscribe(&mut limits, at(0)).is_err());
+    }
+
+    fn error_ack(rid: &str) -> PolyBoltEvent {
+        event(&format!(
+            r#"{{"op":"error","code":"bad_filter","channel":"price.polymarket","rid":"{rid}"}}"#
+        ))
+    }
+
+    fn subscribed_ack(rid: &str) -> PolyBoltEvent {
+        event(&format!(
+            r#"{{"op":"subscribed","channel":"price.polymarket","rid":"{rid}"}}"#
+        ))
+    }
+
+    #[test]
+    fn rejected_single_subscriptions_are_released() {
+        let mut limits = Limits::default();
+        let now = Instant::now();
+        let subscribe = |limits: &mut Limits, subscription: PolyBoltSubscription| {
+            limits
+                .subscribe(&subscription, "s".to_owned(), now, |_| Ok(()))
+                .unwrap();
+        };
+        subscribe(&mut limits, ids(1..=1).rid("a"));
+        subscribe(&mut limits, ids(2..=2).rid("b"));
+        assert_eq!(limits.active.len(), 2);
+        assert!(Limits::is_relevant(&error_ack("a")));
+        // `a` is rejected: its slot is released. `b` is accepted: it stays.
+        limits.observe(&error_ack("a"));
+        limits.observe(&subscribed_ack("b"));
+        assert_eq!(limits.active.len(), 1);
+        assert!(limits.pending.is_empty());
+        // A second error ack for the same rid (or an unknown rid) changes nothing.
+        limits.observe(&error_ack("a"));
+        limits.observe(&error_ack("zzz"));
+        assert_eq!(limits.active.len(), 1);
+
+        // Not exact, so not released: a frame with several subscriptions, a frame
+        // without a rid, a subscription that was already active.
+        subscribe(&mut limits, ids(10..=11).rid("multi"));
+        subscribe(&mut limits, ids(12..=12));
+        subscribe(&mut limits, ids(2..=2).rid("again"));
+        assert_eq!(limits.active.len(), 4);
+        for rid in ["multi", "again"] {
+            limits.observe(&error_ack(rid));
+        }
+        assert_eq!(limits.active.len(), 4);
+        assert!(limits.pending.is_empty());
+    }
+
+    #[test]
+    fn ambiguous_rejections_keep_the_count() {
+        let mut limits = Limits::default();
+        let now = Instant::now();
+        let ok = |_: String| Ok(());
+        // Two pending frames share a rid: neither can be released.
+        limits
+            .subscribe(&ids(1..=1).rid("r"), "s".to_owned(), now, ok)
+            .unwrap();
+        limits
+            .subscribe(&ids(2..=2).rid("r"), "s".to_owned(), now, ok)
+            .unwrap();
+        limits.observe(&error_ack("r"));
+        limits.observe(&error_ack("r"));
+        assert_eq!(limits.active.len(), 2);
+
+        // A later request names the same asset: the earlier frame no longer decides.
+        limits
+            .subscribe(&ids(3..=3).rid("x"), "s".to_owned(), now, ok)
+            .unwrap();
+        limits
+            .unsubscribe(&ids(3..=3), "u".to_owned(), now, ok)
+            .unwrap();
+        limits
+            .subscribe(&ids(3..=3).rid("y"), "s".to_owned(), now, ok)
+            .unwrap();
+        limits.observe(&error_ack("x"));
+        assert_eq!(
+            limits.active.len(),
+            3,
+            "the re-subscription is still counted"
+        );
+        // ... but the newest frame can still be released.
+        limits.observe(&error_ack("y"));
+        assert_eq!(limits.active.len(), 2);
+
+        // A ping with the same rid makes the frame ambiguous too.
+        limits
+            .subscribe(&ids(4..=4).rid("p"), "s".to_owned(), now, ok)
+            .unwrap();
+        limits.touch(&[], Some("p"));
+        limits.observe(&error_ack("p"));
+        assert_eq!(limits.active.len(), 3);
+    }
+
+    #[test]
+    fn pending_frames_are_bounded() {
+        let mut limits = Limits::default();
+        let start = Instant::now();
+        for i in 0..(MAX_PENDING_FRAMES + 10) {
+            let now = start + RATE_WINDOW * u32::try_from(i).unwrap();
+            limits
+                .subscribe(&ids(1..=1).rid(i.to_string()), "s".to_owned(), now, |_| {
+                    Ok(())
+                })
+                .unwrap();
+        }
+        assert_eq!(limits.pending.len(), MAX_PENDING_FRAMES);
     }
 
     #[test]
@@ -1073,7 +1374,7 @@ mod tests {
         assert!(limits.is_poisoned());
 
         lock(&limits)
-            .subscribe(&ids(1..=2), "frame".to_owned(), |_| Ok(()))
+            .subscribe(&ids(1..=2), "frame".to_owned(), Instant::now(), |_| Ok(()))
             .unwrap();
         assert_eq!(lock(&limits).active.len(), 2);
     }
@@ -1236,8 +1537,8 @@ mod tests {
             "0x9deb0baac40648821f96f01339229a422e2f5c877de55dc4dbf981f95a1e709c"
         );
         assert_eq!(quote.asset_id, ASSET);
-        assert_eq!(quote.best_bid, Decimal::new(51, 2));
-        assert_eq!(quote.best_ask, Decimal::new(53, 2));
+        assert_eq!(quote.best_bid, Some(Decimal::new(51, 2)));
+        assert_eq!(quote.best_ask, Some(Decimal::new(53, 2)));
         assert_eq!(quote.hash, "3f9c1e7a");
         assert_eq!(quote.timestamp.timestamp_millis(), 1_788_972_999_871);
 
@@ -1256,7 +1557,7 @@ mod tests {
         };
         assert!(!live.is_snapshot());
         assert_eq!(live.snapshot, None);
-        assert_eq!(live.payload.unwrap().best_bid, Decimal::new(52, 2));
+        assert_eq!(live.payload.unwrap().best_bid, Some(Decimal::new(52, 2)));
 
         let PolyBoltEvent::PricePolymarket(dropped) = event(
             r#"{"v":1,"channel":"price.polymarket","seq":9,"ts":1,"dropped":3,"payload":[]}"#,
@@ -1296,15 +1597,52 @@ mod tests {
     #[test]
     fn serializes_events_back_to_the_wire_shape() {
         for raw in [
-            r#"{"op":"subscribed","channel":"price.polymarket","rid":"s1","provider":null}"#,
-            r#"{"op":"pong","rid":null}"#,
+            r#"{"op":"subscribed","channel":"price.polymarket","rid":"s1"}"#,
+            r#"{"op":"pong"}"#,
             r#"{"op":"error","code":"bad_filter","channel":"price.polymarket","rid":"s2"}"#,
             r#"{"v":1,"channel":"price.polymarket","seq":1,"ts":1788973000123,"snapshot":true,"payload":[]}"#,
             r#"{"v":1,"channel":"price.polymarket","seq":2,"ts":1788973004501,"payload":{"market":"0x9d","asset_id":"1","best_bid":"0.52","best_ask":"0.53","hash":"a81d02c4","timestamp":1788973004498}}"#,
             r#"{"op":"authed","rid":"a1"}"#,
+            r#"{"op":"error","code":"sub_limit"}"#,
+            r#"{"v":1,"channel":"price.polymarket","seq":3,"ts":1,"payload":{"market":"0x9d","asset_id":"1","best_bid":"","best_ask":"0.53","hash":"h","timestamp":1}}"#,
         ] {
             assert_eq!(serde_json::to_string(&event(raw)).unwrap(), raw);
         }
+    }
+
+    #[test]
+    fn other_envelope_versions_are_unknown() {
+        let raw =
+            r#"{"v":2,"channel":"price.polymarket","seq":1,"ts":1,"payload":{"new":"shape"}}"#;
+        assert_eq!(
+            event(raw),
+            PolyBoltEvent::Unknown(serde_json::from_str(raw).unwrap())
+        );
+        // A missing `v` is a malformed version-1 envelope, not a new version.
+        assert!(
+            serde_json::from_str::<PolyBoltEvent>(
+                r#"{"channel":"price.polymarket","seq":1,"ts":1,"payload":[]}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn empty_book_sides_decode_to_none() {
+        let PolyBoltEvent::PricePolymarket(envelope) = event(
+            r#"{"v":1,"channel":"price.polymarket","seq":3,"ts":1,"payload":{"market":"0x9d","asset_id":"1","best_bid":"","best_ask":"0.53","hash":"h","timestamp":1}}"#,
+        ) else {
+            panic!("expected an envelope");
+        };
+        let quote = envelope.payload.unwrap();
+        assert_eq!(quote.best_bid, None);
+        assert_eq!(quote.best_ask, Some(Decimal::new(53, 2)));
+        assert!(
+            serde_json::from_str::<PolyBoltEvent>(
+                r#"{"v":1,"channel":"price.polymarket","seq":3,"ts":1,"payload":{"market":"0x9d","asset_id":"1","best_bid":"x","best_ask":"0.53","hash":"h","timestamp":1}}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
