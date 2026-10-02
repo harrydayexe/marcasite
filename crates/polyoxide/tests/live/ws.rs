@@ -321,6 +321,12 @@ async fn market_channel_sdk() {
         // Open question 26: the `timestamp` is Unix milliseconds.
         assert!(within_a_day(book.timestamp), "{:?}", book.timestamp);
     }
+    // SPEC_DEVIATIONS.md, WebSocket market: the initial snapshots carry `tick_size` (and
+    // `last_trade_price`, empty on an empty book).
+    assert!(
+        books.iter().any(|book| book.tick_size.is_some()),
+        "no book carried `tick_size`: {books:#?}"
+    );
     for event in &got.events {
         if let MarketEvent::Unknown(value) = event {
             panic!("unexpected Unknown market event: {value}");
@@ -456,12 +462,41 @@ async fn market_channel_raw_drift() {
         )
         .await;
         assert!(!raw.frames.is_empty(), "{label}: no frames");
+        // SPEC_DEVIATIONS.md, WebSocket market: the initial snapshots come as one JSON array
+        // with a `book` per token (the spec shows single objects).
         let first: Value = serde_json::from_str(&raw.frames[0]).unwrap();
-        eprintln!(
-            "NOTE {label}: first frame is a JSON {}; {} frames",
-            if first.is_array() { "array" } else { "object" },
-            raw.frames.len()
-        );
+        let books = first
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: the first frame is no longer an array: {first}"));
+        assert_eq!(books.len(), s.token_ids.len(), "{label}");
+        for book in books {
+            assert_eq!(book["event_type"], "book");
+            // Undocumented `tick_size` and `last_trade_price` (`""` on an empty book).
+            assert!(book["tick_size"].is_string(), "{label}: {book}");
+            assert!(book["last_trade_price"].is_string(), "{label}: {book}");
+            // An empty side is `[]`, never `""`; timestamps are Unix milliseconds.
+            assert!(
+                book["bids"].is_array() && book["asks"].is_array(),
+                "{label}: {book}"
+            );
+            let millis: i64 = book["timestamp"].as_str().unwrap().parse().unwrap();
+            assert!(
+                (Utc::now().timestamp_millis() - millis).abs() < 86_400_000,
+                "{label}: {book}"
+            );
+            // Bids arrive ascending (worst first).
+            let bids: Vec<f64> = book["bids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| l["price"].as_str().unwrap().parse().unwrap())
+                .collect();
+            assert!(
+                bids.windows(2).all(|w| w[0] <= w[1]),
+                "{label}: bids are no longer ascending: {bids:?}"
+            );
+        }
+        eprintln!("NOTE {label}: {} frames", raw.frames.len());
         let events = check_frames::<MarketEvent>(label, &raw.frames, |e| {
             matches!(e, MarketEvent::Unknown(_))
         });
@@ -486,11 +521,22 @@ async fn sports_channel_sdk() {
     channel.close();
     assert!(got.terminal.is_none(), "{:?}", got.terminal);
     assert!(!got.ended, "the stream ended without an error");
-    let updates = got
+    let updates: Vec<_> = got
         .events
         .iter()
-        .filter(|e| matches!(e, SportsEvent::Update(_)))
-        .count();
+        .filter_map(|e| match e {
+            SportsEvent::Update(update) => Some(update),
+            SportsEvent::Unknown(_) => None,
+            _ => None,
+        })
+        .collect();
+    eprintln!(
+        "NOTE sports: {} events in {WINDOW:?}, {} typed; decode errors: {:?}",
+        got.events.len(),
+        updates.len(),
+        got.decode_errors,
+    );
+    // SPEC_DEVIATIONS.md, WebSocket sports: every live frame decodes as the typed update.
     let unknown: Vec<_> = got
         .events
         .iter()
@@ -498,23 +544,18 @@ async fn sports_channel_sdk() {
             SportsEvent::Unknown(value) => Some(describe(value)),
             _ => None,
         })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
         .collect();
-    eprintln!(
-        "NOTE sports: {} events in {WINDOW:?}: {updates} decoded as SportResult, rest Unknown; decode errors: {:?}; unknown shapes: {unknown:#?}",
-        got.events.len(),
-        got.decode_errors,
-    );
-    if !unknown.is_empty() {
-        drift(
-            "WS sports (SDK)",
-            &format!(
-                "{} of {} events are Unknown(..), none has the documented `slug`: {unknown:?}",
-                got.events.len() - updates,
-                got.events.len()
-            ),
+    assert!(unknown.is_empty(), "events kept as Unknown: {unknown:?}");
+    assert!(got.decode_errors.is_empty(), "{:#?}", got.decode_errors);
+    for update in updates {
+        assert!(
+            update.game_id.is_some() || update.metadata_game_id.is_some(),
+            "{update:?}"
         );
+        assert!(!update.league_abbreviation.is_empty(), "{update:?}");
+        if update.ended {
+            assert!(!update.live, "{update:?}");
+        }
     }
 }
 
@@ -524,15 +565,67 @@ async fn sports_channel_sdk() {
 async fn sports_channel_raw_drift() {
     let raw = capture(SPORTS_URL, None, None, Duration::from_secs(30), 25).await;
     assert!(raw.ended.is_none(), "{:?}", raw.ended);
-    eprintln!(
-        "NOTE sports raw: {} frames, {} text heartbeats ({:?}) in 30 s (spec: server `ping` every 5 s)",
-        raw.frames.len(),
-        raw.heartbeats.len(),
-        raw.heartbeats.first()
+    // SPEC_DEVIATIONS.md, WebSocket sports: no text `ping` (the spec says every 5 s).
+    assert!(
+        raw.heartbeats.is_empty(),
+        "the sports channel now sends text heartbeats: {:?}",
+        raw.heartbeats
     );
-    check_frames::<SportsEvent>("WS sports", &raw.frames, |e| {
+    // Raw frames use the live shape: `gameId` or `metadataGameId` and camelCase keys, never the
+    // spec's `slug` / `last_update` / `finished_timestamp`.
+    assert!(!raw.frames.is_empty(), "no sports frames in 30 s");
+    for frame in &raw.frames {
+        let value: Value = serde_json::from_str(frame).unwrap();
+        let object = value.as_object().expect("a sports frame is an object");
+        for spec_only in ["slug", "last_update", "finished_timestamp"] {
+            assert!(
+                !object.contains_key(spec_only),
+                "sports frames now have `{spec_only}`: update SPEC_DEVIATIONS.md: {frame}"
+            );
+        }
+        assert!(
+            object.contains_key("gameId") || object.contains_key("metadataGameId"),
+            "{frame}"
+        );
+        assert!(object.contains_key("leagueAbbreviation"), "{frame}");
+    }
+    let events = check_frames::<SportsEvent>("WS sports", &raw.frames, |e| {
         matches!(e, SportsEvent::Unknown(_))
     });
+    assert!(
+        events.iter().all(|e| matches!(e, SportsEvent::Update(_))),
+        "frames kept as Unknown"
+    );
+}
+
+/// SPEC_DEVIATIONS.md, WebSocket sports: the server keeps the connection alive with
+/// protocol-level ping frames (every 15 s), not the documented text `ping` every 5 s, so the
+/// SDK's idle timeout defaults to three times that interval.
+#[tokio::test]
+#[ignore = "live network"]
+async fn sports_channel_sends_protocol_pings() {
+    let (mut ws, _) = timeout(CONNECT, tokio_tungstenite::connect_async(SPORTS_URL))
+        .await
+        .expect("connect timed out")
+        .unwrap();
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(25);
+    let mut ping_at = None;
+    while let Ok(Some(message)) = tokio::time::timeout_at(deadline, ws.next()).await {
+        match message.unwrap() {
+            Message::Ping(_) => {
+                ping_at = Some(start.elapsed());
+                break;
+            }
+            Message::Text(text) => assert_ne!(text.as_str(), "ping", "a text `ping` arrived"),
+            _ => {}
+        }
+    }
+    let ping_at = ping_at.expect("no protocol ping within 25 s (it used to arrive every 15 s)");
+    assert!(
+        ping_at < SportsChannel::DEFAULT_IDLE_TIMEOUT,
+        "{ping_at:?} vs the idle timeout"
+    );
 }
 
 // ---------------------------------------------------------------------------------------

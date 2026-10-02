@@ -225,8 +225,9 @@ impl SportsChannelBuilder {
 #[serde(untagged)]
 #[non_exhaustive]
 pub enum SportsEvent {
-    /// A live match update: score change, period change, match started or ended.
-    Update(SportResult),
+    /// A live match update: score change, period change, match started or ended. Boxed
+    /// because it is much larger than [`Unknown`](Self::Unknown).
+    Update(Box<SportResult>),
     /// A message this version of the library does not recognise, as raw JSON (a frame that
     /// is not JSON is kept as a JSON string).
     Unknown(Value),
@@ -238,7 +239,7 @@ impl ChannelEvent for SportsEvent {
             return Ok(Self::Unknown(value));
         }
         match SportResult::deserialize(&value) {
-            Ok(result) => Ok(Self::Update(result)),
+            Ok(result) => Ok(Self::Update(Box::new(result))),
             Err(e) => Err(Rejected {
                 reason: format!("invalid sports result: {e}"),
                 value,
@@ -374,7 +375,7 @@ mod tests {
 
     fn result(json: &str) -> SportResult {
         match serde_json::from_str(json).unwrap() {
-            SportsEvent::Update(result) => result,
+            SportsEvent::Update(result) => *result,
             other => panic!("expected a sports result, got {other:?}"),
         }
     }
