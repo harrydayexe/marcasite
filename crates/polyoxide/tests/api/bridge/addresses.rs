@@ -32,12 +32,11 @@ fn has_no_builder_code(request: &wiremock::Request) -> bool {
 }
 
 fn documented_withdrawal() -> WithdrawalRequest {
-    WithdrawalRequest::new(
-        "0x9156dd10bea4c8d7e2d591b633d1694b1d764756",
-        "1",
-        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-        "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-    )
+    WithdrawalRequest::new()
+        .address("0x9156dd10bea4c8d7e2d591b633d1694b1d764756")
+        .to_chain_id("1")
+        .to_token_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+        .recipient_address("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
 }
 
 #[tokio::test]
@@ -118,14 +117,31 @@ async fn invalid_inputs_are_rejected_before_sending() {
         "{err:?}"
     );
 
-    let mut request = documented_withdrawal();
-    request.address = "0x123".into();
     let err = bridge
-        .create_withdrawal_addresses(request)
+        .create_withdrawal_addresses(documented_withdrawal().address("0x123"))
         .send()
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "address"),
+        "{err:?}"
+    );
+
+    // Every field of the withdrawal body is required.
+    let incomplete = WithdrawalRequest::new()
+        .address("0x9156dd10bea4c8d7e2d591b633d1694b1d764756")
+        .to_chain_id("1")
+        .recipient_address("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+    let err = bridge
+        .create_withdrawal_addresses(incomplete)
+        .builder_code(BUILDER_CODE)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "toTokenAddress"),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]

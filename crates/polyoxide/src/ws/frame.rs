@@ -94,6 +94,84 @@ pub(crate) fn check_interval(interval: Duration) -> Result<()> {
     Ok(())
 }
 
+/// A message that does not match the schema of its (recognised) type: the message, handed
+/// back so that the error can quote it, and why it did not decode.
+#[derive(Debug)]
+pub(crate) struct Rejected {
+    pub(crate) value: Value,
+    pub(crate) reason: String,
+}
+
+/// The event type of a channel, decoded from one JSON message.
+///
+/// Decoding takes the message by value: the event types dispatch on a tag, decode the
+/// matching variant from a borrow of the message and move the message itself into their
+/// catch-all variant, so a message is never copied as a whole on the way.
+pub(crate) trait ChannelEvent: Sized {
+    /// Decodes one message, or hands it back with the reason it does not decode.
+    fn from_value(value: Value) -> std::result::Result<Self, Rejected>;
+}
+
+/// Decodes the `kind` message `value` as a `T`; on failure, the reason reads
+/// "invalid `kind` noun: ...".
+pub(crate) fn parse_as<T: DeserializeOwned>(
+    kind: &str,
+    noun: &str,
+    value: Value,
+) -> std::result::Result<T, Rejected> {
+    match T::deserialize(&value) {
+        Ok(event) => Ok(event),
+        Err(e) => Err(Rejected {
+            reason: format!("invalid `{kind}` {noun}: {e}"),
+            value,
+        }),
+    }
+}
+
+/// Implements [`serde::Deserialize`] for a [`ChannelEvent`] through
+/// [`ChannelEvent::from_value`].
+macro_rules! deserialize_via_from_value {
+    ($event:ty) => {
+        impl<'de> ::serde::Deserialize<'de> for $event {
+            fn deserialize<D: ::serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> ::std::result::Result<Self, D::Error> {
+                let value =
+                    <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+                <Self as $crate::ws::frame::ChannelEvent>::from_value(value)
+                    .map_err(|rejected| ::serde::de::Error::custom(rejected.reason))
+            }
+        }
+    };
+}
+pub(crate) use deserialize_via_from_value;
+
+/// A JSON string decimal that may be empty, for required fields typed `string` that hold a
+/// price (such as a best bid or ask): `""` (or `null`) decodes to `None`, a missing key is
+/// an error. Serializes `Some` as a decimal string and `None` as `""`, which keeps the
+/// re-serialized field a string, as the spec types it.
+pub(crate) mod empty_decimal {
+    use polyoxide_core::serde_util;
+    use rust_decimal::Decimal;
+    use serde::{Deserializer, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Option<Decimal>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(decimal) => serde::Serialize::serialize(decimal, serializer),
+            None => serializer.serialize_str(""),
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Decimal>, D::Error> {
+        serde_util::string_or_number_option::deserialize(deserializer)
+    }
+}
+
 /// A connection plus a queue of decoded events not yet handed out.
 ///
 /// A text frame may decode to several events (a JSON array), so decoded events are queued
@@ -105,7 +183,7 @@ pub(crate) struct EventStream<E> {
     terminated: bool,
 }
 
-impl<E: DeserializeOwned> EventStream<E> {
+impl<E: ChannelEvent> EventStream<E> {
     pub(crate) fn new(conn: WsConnection) -> Self {
         Self {
             conn,
@@ -155,7 +233,7 @@ impl<E: DeserializeOwned> EventStream<E> {
 ///   [`WebSocketErrorKind::Decode`] whose message quotes the element and the deserializer's
 ///   message (like [`DecodeError`](polyoxide_core::DecodeError), it has no `source`); the
 ///   other elements are unaffected.
-pub(crate) fn decode_frame<E: DeserializeOwned>(
+pub(crate) fn decode_frame<E: ChannelEvent>(
     service: Service,
     text: &str,
     out: &mut VecDeque<Result<E>>,
@@ -174,17 +252,14 @@ pub(crate) fn decode_frame<E: DeserializeOwned>(
     }
 }
 
-fn decode_value<E: DeserializeOwned>(service: Service, value: Value) -> Result<E> {
-    E::deserialize(&value).map_err(|source| {
+fn decode_value<E: ChannelEvent>(service: Service, value: Value) -> Result<E> {
+    E::from_value(value).map_err(|Rejected { value, reason }| {
         let snippet = snippet(&value);
-        tracing::debug!(service = %service, error = %source, message = %snippet, "failed to decode message");
+        tracing::debug!(service = %service, error = %reason, message = %snippet, "failed to decode message");
         Error::WebSocket(Box::new(WebSocketError::new(
             service,
             WebSocketErrorKind::Decode,
-            format!(
-                "failed to decode message `{snippet}`: {}",
-                shorten(source.to_string())
-            ),
+            format!("failed to decode message `{snippet}`: {}", shorten(reason)),
         )))
     })
 }
@@ -225,13 +300,26 @@ mod tests {
         Other(Value),
     }
 
+    /// Decodes any `T` directly, with the deserializer's message as the reason.
+    #[derive(Debug, PartialEq)]
+    struct Plain<T>(T);
+
+    impl<T: DeserializeOwned> ChannelEvent for Plain<T> {
+        fn from_value(value: Value) -> std::result::Result<Self, Rejected> {
+            T::deserialize(&value).map(Plain).map_err(|e| Rejected {
+                reason: e.to_string(),
+                value,
+            })
+        }
+    }
+
     #[test]
     fn flattens_arrays_and_wraps_plain_text() {
         let mut out = VecDeque::new();
-        decode_frame::<Probe>(Service::MarketChannel, r#"[{"n":1},{"n":2}]"#, &mut out);
-        decode_frame::<Probe>(Service::MarketChannel, "hello", &mut out);
-        decode_frame::<Probe>(Service::MarketChannel, "[]", &mut out);
-        let decoded: Vec<_> = out.into_iter().map(Result::unwrap).collect();
+        decode_frame::<Plain<Probe>>(Service::MarketChannel, r#"[{"n":1},{"n":2}]"#, &mut out);
+        decode_frame::<Plain<Probe>>(Service::MarketChannel, "hello", &mut out);
+        decode_frame::<Plain<Probe>>(Service::MarketChannel, "[]", &mut out);
+        let decoded: Vec<_> = out.into_iter().map(|e| e.unwrap().0).collect();
         assert_eq!(
             decoded,
             vec![
@@ -243,9 +331,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_as_names_the_message_kind() {
+        let rejected = parse_as::<u32>("book", "event", serde_json::json!("x")).unwrap_err();
+        assert_eq!(rejected.value, serde_json::json!("x"));
+        assert!(
+            rejected
+                .reason
+                .starts_with("invalid `book` event: invalid type"),
+            "{}",
+            rejected.reason
+        );
+        assert_eq!(
+            parse_as::<u32>("book", "event", serde_json::json!(7)).unwrap(),
+            7
+        );
+    }
+
+    #[test]
+    fn empty_decimals() {
+        #[derive(Debug, PartialEq, Deserialize, serde::Serialize)]
+        struct Quote {
+            #[serde(with = "empty_decimal")]
+            bid: Option<rust_decimal::Decimal>,
+        }
+        let quote: Quote = serde_json::from_str(r#"{"bid":"0.5"}"#).unwrap();
+        assert_eq!(quote.bid, Some(rust_decimal::Decimal::new(5, 1)));
+        assert_eq!(serde_json::to_string(&quote).unwrap(), r#"{"bid":"0.5"}"#);
+        let empty: Quote = serde_json::from_str(r#"{"bid":""}"#).unwrap();
+        assert_eq!(empty.bid, None);
+        assert_eq!(serde_json::to_string(&empty).unwrap(), r#"{"bid":""}"#);
+        // The key itself is required, and other text is still an error.
+        assert!(serde_json::from_str::<Quote>("{}").is_err());
+        assert!(serde_json::from_str::<Quote>(r#"{"bid":"abc"}"#).is_err());
+    }
+
+    #[test]
     fn decode_errors_carry_a_snippet_and_the_reason() {
         let mut out = VecDeque::new();
-        decode_frame::<u32>(
+        decode_frame::<Plain<u32>>(
             Service::SportsChannel,
             &format!("\"{}\"", "x".repeat(400)),
             &mut out,

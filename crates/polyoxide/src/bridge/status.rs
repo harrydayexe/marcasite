@@ -73,17 +73,47 @@ pub struct Transaction {
 
 /// One page of transfers seen at a bridge address
 /// (`components/schemas/TransactionStatusResponse`), returned by
-/// [`GetTransactionStatus::send`].
+/// [`ListTransactions::send`].
+///
+/// Both fields are required by the spec, so a response without `transactions` or without
+/// `nextCursor` fails to decode (with [`Error::Decode`](crate::Error::Decode)) instead of
+/// being mistaken for the last page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct TransactionStatusPage {
     /// One page of transfers, newest first. This is a page, not the full history.
     pub transactions: Vec<Transaction>,
-    /// Opaque continuation token for the next page, or `None` when the walk is complete.
-    /// Pass it back unchanged with [`GetTransactionStatus::cursor`], for the same address
-    /// only. Stop on `None`, not on an empty or short page.
+    /// Opaque continuation token for the next page (wire name `nextCursor`), as sent:
+    /// `None` when the walk is complete. Prefer [`next_cursor()`](Self::next_cursor),
+    /// which also treats an empty string as the end. Pass it back unchanged with
+    /// [`ListTransactions::cursor`], for the same address only. Stop on `None`, not on an
+    /// empty or short page.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub next_cursor: Option<String>,
+}
+
+impl TransactionStatusPage {
+    /// The transfers on this page, newest first.
+    #[must_use]
+    pub fn items(&self) -> &[Transaction] {
+        &self.transactions
+    }
+
+    /// The transfers on this page, newest first, by value.
+    #[must_use]
+    pub fn into_items(self) -> Vec<Transaction> {
+        self.transactions
+    }
+
+    /// The cursor for the next page, to pass to [`ListTransactions::cursor`]; `None` on
+    /// the last page (a `null` or empty `nextCursor`).
+    #[must_use]
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor
+            .as_deref()
+            .filter(|cursor| !cursor.is_empty())
+    }
 }
 
 impl BridgeClient {
@@ -92,8 +122,8 @@ impl BridgeClient {
     ///
     /// `address` is a bridge address from [`BridgeClient::create_deposit_addresses`] or
     /// [`BridgeClient::create_withdrawal_addresses`]; EVM, Solana, Tron and Bitcoin formats
-    /// are supported. Use [`GetTransactionStatus::send`] for one page (repeat it without a
-    /// cursor to track recent activity) or [`GetTransactionStatus::into_stream`] to walk the
+    /// are supported. Use [`ListTransactions::send`] for one page (repeat it without a
+    /// cursor to track recent activity) or [`ListTransactions::into_stream`] to walk the
     /// full history.
     ///
     /// See <https://docs.polymarket.com/api-reference/bridge/get-transaction-status>.
@@ -104,7 +134,7 @@ impl BridgeClient {
     ///
     /// let bridge = polyoxide::bridge::BridgeClient::new()?;
     /// let history: Vec<_> = bridge
-    ///     .get_transaction_status("EXoZue2avJae1d45B3fVw2unhkrtToSYQqHtHgfZ2cbE")
+    ///     .list_transactions("EXoZue2avJae1d45B3fVw2unhkrtToSYQqHtHgfZ2cbE")
     ///     .limit(100)
     ///     .into_stream()
     ///     .try_collect()
@@ -113,8 +143,8 @@ impl BridgeClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_transaction_status(&self, address: impl Into<String>) -> GetTransactionStatus {
-        GetTransactionStatus {
+    pub fn list_transactions(&self, address: impl Into<String>) -> ListTransactions {
+        ListTransactions {
             client: self.clone(),
             address: address.into(),
             limit: None,
@@ -124,10 +154,10 @@ impl BridgeClient {
     }
 }
 
-/// Request builder for [`BridgeClient::get_transaction_status`].
+/// Request builder for [`BridgeClient::list_transactions`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetTransactionStatus {
+pub struct ListTransactions {
     client: BridgeClient,
     address: String,
     limit: Option<u32>,
@@ -135,7 +165,7 @@ pub struct GetTransactionStatus {
     paginate: bool,
 }
 
-impl GetTransactionStatus {
+impl ListTransactions {
     /// Maximum number of transfers per page, `1..=100` (server default `50`). A page may
     /// hold fewer transfers than requested and still have a following page.
     pub fn limit(mut self, limit: u32) -> Self {
@@ -162,8 +192,13 @@ impl GetTransactionStatus {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
-        if self.address.is_empty() {
-            return Err(ValidationError::new("address", "must not be empty").into());
+        // The address is a path segment: an empty or dot segment would change the path.
+        if matches!(self.address.as_str(), "" | "." | "..") {
+            return Err(ValidationError::new(
+                "address",
+                format!("`{}` is not a bridge address", self.address),
+            )
+            .into());
         }
         if let Some(limit) = self.limit
             && !(1..=MAX_LIMIT).contains(&limit)
@@ -196,28 +231,30 @@ impl GetTransactionStatus {
     ///
     /// # Errors
     ///
-    /// - [`Error::Validation`](crate::Error::Validation) if the address is empty or the
-    ///   limit is outside `1..=100` (nothing is sent).
+    /// - [`Error::Validation`](crate::Error::Validation) if the address is empty (or `.` or
+    ///   `..`) or the limit is outside `1..=100` (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` for an invalid address, limit
     ///   or cursor (e.g. a stale cursor), or `500` on a server error.
-    /// - Any other [`Error`](crate::Error) for transport, rate limiting or decoding
-    ///   failures.
+    /// - [`Error::Decode`](crate::Error::Decode) if the response does not match the
+    ///   documented schema, including a missing `transactions` or `nextCursor`.
+    /// - Any other [`Error`](crate::Error) for transport or rate limiting failures.
     pub async fn send(self) -> Result<TransactionStatusPage> {
         self.fetch(self.cursor.as_deref()).await
     }
 
     /// Streams every transfer from the configured cursor (or the newest) onwards, following
-    /// `nextCursor` until it is `null`.
+    /// `nextCursor` until it is `null` (or empty).
     ///
-    /// The stream yields the first error (including the validation errors of
-    /// [`send`](Self::send)) and then ends.
+    /// The stream yields the first error (any error of [`send`](Self::send)) and then
+    /// ends.
     pub fn into_stream(self) -> Paginated<Transaction> {
         let start = self.cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();
             async move {
                 let page = request.fetch(cursor.as_deref()).await?;
-                Ok(CursorPage::new(page.transactions, page.next_cursor))
+                let next = page.next_cursor().map(str::to_owned);
+                Ok(CursorPage::new(page.into_items(), next))
             }
         })
     }
@@ -297,6 +334,34 @@ mod tests {
         let page: TransactionStatusPage =
             serde_json::from_str(r#"{"transactions":[],"nextCursor":null}"#).unwrap();
         assert_eq!(page.next_cursor, None);
-        assert!(serde_json::from_str::<TransactionStatusPage>(r#"{"nextCursor":null}"#).is_err());
+        assert_eq!(page.next_cursor(), None);
+        assert!(page.items().is_empty());
+        let page: TransactionStatusPage =
+            serde_json::from_str(r#"{"transactions":[],"nextCursor":""}"#).unwrap();
+        assert_eq!(page.next_cursor.as_deref(), Some(""));
+        assert_eq!(page.next_cursor(), None);
+    }
+
+    #[test]
+    fn required_fields_must_be_present() {
+        // `nextCursor` is required (but nullable): a missing key is not the last page.
+        let err =
+            serde_json::from_str::<TransactionStatusPage>(r#"{"transactions":[]}"#).unwrap_err();
+        assert!(err.to_string().contains("nextCursor"), "{err}");
+        let err =
+            serde_json::from_str::<TransactionStatusPage>(r#"{"nextCursor":null}"#).unwrap_err();
+        assert!(err.to_string().contains("transactions"), "{err}");
+    }
+
+    #[test]
+    fn page_accessors() {
+        let page: TransactionStatusPage = serde_json::from_str(
+            r#"{"transactions":[{"status":"FAILED"},{"status":"COMPLETED"}],"nextCursor":"abc"}"#,
+        )
+        .unwrap();
+        assert_eq!(page.next_cursor(), Some("abc"));
+        assert_eq!(page.items().len(), 2);
+        let items = page.into_items();
+        assert_eq!(items[0].status, Some(TransactionStatus::Failed));
     }
 }

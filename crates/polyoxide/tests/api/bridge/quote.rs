@@ -15,14 +15,13 @@ use crate::common;
 
 /// Request example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
 fn documented_request() -> QuoteRequest {
-    QuoteRequest::new(
-        "10000000",
-        "137",
-        "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-        "0x17eC161f126e82A8ba337f4022d574DBEaFef575",
-        "137",
-        "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-    )
+    QuoteRequest::new()
+        .from_amount_base_unit("10000000")
+        .from_chain_id("137")
+        .from_token_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+        .recipient_address("0x17eC161f126e82A8ba337f4022d574DBEaFef575")
+        .to_chain_id("137")
+        .to_token_address("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB")
 }
 
 /// `200` example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
@@ -81,7 +80,7 @@ async fn get_quote_posts_json_body_and_decodes() {
 
     let quote = common::polymarket(&server)
         .bridge()
-        .get_quote(&documented_request())
+        .get_quote(documented_request())
         .await
         .unwrap();
     assert_eq!(quote.est_checkout_time_ms, Some(25_000));
@@ -113,11 +112,11 @@ async fn missing_field_error_is_typed() {
         .mount(&server)
         .await;
 
-    let mut request = documented_request();
-    request.from_amount_base_unit = String::new();
+    // An empty amount is set, so it passes the client-side check and the server rejects it.
+    let request = documented_request().from_amount_base_unit("");
     let err = common::polymarket(&server)
         .bridge()
-        .get_quote(&request)
+        .get_quote(request)
         .await
         .unwrap_err();
     let Error::Api(api) = &err else {
@@ -145,7 +144,7 @@ async fn quote_is_retried_because_it_is_read_only() {
         .await;
 
     let quote = client_with_one_retry(&server)
-        .get_quote(&documented_request())
+        .get_quote(documented_request())
         .await
         .unwrap();
     assert_eq!(quote.est_checkout_time_ms, Some(25_000));
@@ -167,7 +166,7 @@ async fn server_error_is_typed() {
 
     let err = common::polymarket(&server)
         .bridge()
-        .get_quote(&documented_request())
+        .get_quote(documented_request())
         .await
         .unwrap_err();
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500));
@@ -188,11 +187,42 @@ async fn non_numeric_fee_is_a_decode_error() {
 
     let err = common::polymarket(&server)
         .bridge()
-        .get_quote(&documented_request())
+        .get_quote(documented_request())
         .await
         .unwrap_err();
     let Error::Decode(decode) = &err else {
         panic!("expected Error::Decode, got {err:?}")
     };
     assert_eq!(decode.path(), "estFeeBreakdown.gasUsd");
+}
+
+#[tokio::test]
+async fn unset_fields_are_rejected_before_sending() {
+    let server = common::server().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(RESPONSE, "application/json"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let bridge = common::polymarket(&server).bridge().clone();
+    let err = bridge.get_quote(QuoteRequest::new()).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "fromAmountBaseUnit"),
+        "{err:?}"
+    );
+    let without_destination_token = QuoteRequest::new()
+        .from_amount_base_unit("10000000")
+        .from_chain_id("137")
+        .from_token_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+        .recipient_address("0x17eC161f126e82A8ba337f4022d574DBEaFef575")
+        .to_chain_id("137");
+    let err = bridge
+        .get_quote(without_destination_token)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Validation(v) if v.parameter() == "toTokenAddress"),
+        "{err:?}"
+    );
 }

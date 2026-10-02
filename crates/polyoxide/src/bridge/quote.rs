@@ -4,7 +4,7 @@ use polyoxide_core::{Result, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::{BridgeClient, ChainId};
+use super::{BridgeClient, ChainId, required};
 
 polyoxide_core::string_id! {
     /// A bridge quote id, e.g.
@@ -12,60 +12,107 @@ polyoxide_core::string_id! {
     pub struct QuoteId;
 }
 
-/// The body of `POST /quote` (`components/schemas/QuoteRequest`). Every field is required.
+/// The body of `POST /quote` (`components/schemas/QuoteRequest`), for
+/// [`BridgeClient::get_quote`].
+///
+/// The API requires every field. Each one has a named setter, and there is deliberately no
+/// constructor with positional arguments, so that a source and a destination value (or a
+/// token and a recipient address) cannot be swapped by accident. [`BridgeClient::get_quote`]
+/// reports a field that was not set as an [`Error::Validation`] naming it (by its wire
+/// name), before anything is sent.
 ///
 /// ```
 /// use polyoxide::bridge::QuoteRequest;
 ///
-/// // 10 tokens with 6 decimals, from Polygon to Polygon (the documented example).
-/// let request = QuoteRequest::new(
-///     "10000000",
-///     "137",
-///     "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-///     "0x17eC161f126e82A8ba337f4022d574DBEaFef575",
-///     "137",
-///     "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-/// );
-/// assert_eq!(request.from_amount_base_unit, "10000000");
+/// // The documented example: from Polygon to Polygon.
+/// let request = QuoteRequest::new()
+///     .from_amount_base_unit("10000000")
+///     .from_chain_id("137")
+///     .from_token_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+///     .to_chain_id("137")
+///     .to_token_address("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB")
+///     .recipient_address("0x17eC161f126e82A8ba337f4022d574DBEaFef575");
+/// # let _ = request;
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[non_exhaustive]
+///
+/// [`Error::Validation`]: crate::Error::Validation
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[must_use]
 pub struct QuoteRequest {
-    /// Amount of tokens to send, in the source token's base units (an integer string with no
-    /// decimal point, e.g. `"10000000"`).
-    pub from_amount_base_unit: String,
-    /// Source chain id.
-    pub from_chain_id: ChainId,
-    /// Source token address.
-    pub from_token_address: String,
-    /// Address of the recipient.
-    pub recipient_address: String,
-    /// Destination chain id.
-    pub to_chain_id: ChainId,
-    /// Destination token address.
-    pub to_token_address: String,
+    from_amount_base_unit: Option<String>,
+    from_chain_id: Option<ChainId>,
+    from_token_address: Option<String>,
+    recipient_address: Option<String>,
+    to_chain_id: Option<ChainId>,
+    to_token_address: Option<String>,
+}
+
+/// The wire form of a complete [`QuoteRequest`].
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QuoteRequestBody<'a> {
+    from_amount_base_unit: &'a str,
+    from_chain_id: &'a ChainId,
+    from_token_address: &'a str,
+    recipient_address: &'a str,
+    to_chain_id: &'a ChainId,
+    to_token_address: &'a str,
 }
 
 impl QuoteRequest {
-    /// Creates a quote request. Arguments follow the field order of the spec; see the
-    /// field docs for their meaning.
-    pub fn new(
-        from_amount_base_unit: impl Into<String>,
-        from_chain_id: impl Into<ChainId>,
-        from_token_address: impl Into<String>,
-        recipient_address: impl Into<String>,
-        to_chain_id: impl Into<ChainId>,
-        to_token_address: impl Into<String>,
-    ) -> Self {
-        Self {
-            from_amount_base_unit: from_amount_base_unit.into(),
-            from_chain_id: from_chain_id.into(),
-            from_token_address: from_token_address.into(),
-            recipient_address: recipient_address.into(),
-            to_chain_id: to_chain_id.into(),
-            to_token_address: to_token_address.into(),
-        }
+    /// An empty request; set every field with the setters.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Amount of tokens to send (`fromAmountBaseUnit`), in the source token's base units
+    /// (the documented example is `"10000000"`).
+    pub fn from_amount_base_unit(mut self, amount: impl Into<String>) -> Self {
+        self.from_amount_base_unit = Some(amount.into());
+        self
+    }
+
+    /// Source chain id (`fromChainId`, e.g. `"137"`).
+    pub fn from_chain_id(mut self, chain_id: impl Into<ChainId>) -> Self {
+        self.from_chain_id = Some(chain_id.into());
+        self
+    }
+
+    /// Source token address (`fromTokenAddress`).
+    pub fn from_token_address(mut self, address: impl Into<String>) -> Self {
+        self.from_token_address = Some(address.into());
+        self
+    }
+
+    /// Address of the recipient (`recipientAddress`).
+    pub fn recipient_address(mut self, address: impl Into<String>) -> Self {
+        self.recipient_address = Some(address.into());
+        self
+    }
+
+    /// Destination chain id (`toChainId`, e.g. `"137"`).
+    pub fn to_chain_id(mut self, chain_id: impl Into<ChainId>) -> Self {
+        self.to_chain_id = Some(chain_id.into());
+        self
+    }
+
+    /// Destination token address (`toTokenAddress`).
+    pub fn to_token_address(mut self, address: impl Into<String>) -> Self {
+        self.to_token_address = Some(address.into());
+        self
+    }
+
+    /// The wire body, or an [`Error::Validation`](crate::Error::Validation) naming the
+    /// first field (in the spec's order) that was not set.
+    fn body(&self) -> Result<QuoteRequestBody<'_>> {
+        Ok(QuoteRequestBody {
+            from_amount_base_unit: required("fromAmountBaseUnit", &self.from_amount_base_unit)?,
+            from_chain_id: required("fromChainId", &self.from_chain_id)?,
+            from_token_address: required("fromTokenAddress", &self.from_token_address)?,
+            recipient_address: required("recipientAddress", &self.recipient_address)?,
+            to_chain_id: required("toChainId", &self.to_chain_id)?,
+            to_token_address: required("toTokenAddress", &self.to_token_address)?,
+        })
     }
 }
 
@@ -87,8 +134,8 @@ pub struct Quote {
     /// `estOutputUsd`. The spec describes it as "Estimated token amount sent in USD".
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub est_output_usd: Option<Decimal>,
-    /// Estimated amount of the destination token received, in its base units (an integer
-    /// string).
+    /// Estimated amount of the destination token received (`estToTokenBaseUnit`; the
+    /// documented example is `"14491203"`).
     pub est_to_token_base_unit: Option<String>,
     /// Unique quote id of the request.
     pub quote_id: Option<QuoteId>,
@@ -152,16 +199,14 @@ impl BridgeClient {
     /// use polyoxide::bridge::{BridgeClient, QuoteRequest};
     ///
     /// let bridge = BridgeClient::new()?;
-    /// let quote = bridge
-    ///     .get_quote(&QuoteRequest::new(
-    ///         "10000000",
-    ///         "137",
-    ///         "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-    ///         "0x17eC161f126e82A8ba337f4022d574DBEaFef575",
-    ///         "137",
-    ///         "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-    ///     ))
-    ///     .await?;
+    /// let request = QuoteRequest::new()
+    ///     .from_amount_base_unit("10000000")
+    ///     .from_chain_id("137")
+    ///     .from_token_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+    ///     .to_chain_id("137")
+    ///     .to_token_address("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB")
+    ///     .recipient_address("0x17eC161f126e82A8ba337f4022d574DBEaFef575");
+    /// let quote = bridge.get_quote(request).await?;
     /// println!("receive {:?} base units", quote.est_to_token_base_unit);
     /// # Ok(())
     /// # }
@@ -169,15 +214,19 @@ impl BridgeClient {
     ///
     /// # Errors
     ///
+    /// - [`Error::Validation`](crate::Error::Validation) if a field of `request` was not
+    ///   set; its [`parameter`](crate::ValidationError::parameter) is the field's wire name,
+    ///   e.g. `fromAmountBaseUnit` (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` if the server rejects a field
     ///   (e.g. `"fromAmountBaseUnit is required"`), or `500` if no quote can be made
     ///   (`"cannot get quote"`).
     /// - Any other [`Error`](crate::Error) for transport, rate limiting or decoding
     ///   failures.
-    pub async fn get_quote(&self, request: &QuoteRequest) -> Result<Quote> {
+    pub async fn get_quote(&self, request: QuoteRequest) -> Result<Quote> {
+        let body = request.body()?;
         self.transport
             .post(&["quote"])
-            .json(request)
+            .json(&body)
             .idempotent(true)
             .send()
             .await
@@ -186,19 +235,24 @@ impl BridgeClient {
 
 #[cfg(test)]
 mod tests {
+    use polyoxide_core::Error;
+
     use super::*;
 
     /// Request example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.
+    fn documented_request() -> QuoteRequest {
+        QuoteRequest::new()
+            .from_amount_base_unit("10000000")
+            .from_chain_id("137")
+            .from_token_address("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
+            .recipient_address("0x17eC161f126e82A8ba337f4022d574DBEaFef575")
+            .to_chain_id("137")
+            .to_token_address("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB")
+    }
+
     #[test]
     fn serializes_documented_request() {
-        let request = QuoteRequest::new(
-            "10000000",
-            "137",
-            "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-            "0x17eC161f126e82A8ba337f4022d574DBEaFef575",
-            "137",
-            "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-        );
+        let request = documented_request();
         let expected = serde_json::json!({
             "fromAmountBaseUnit": "10000000",
             "fromChainId": "137",
@@ -207,7 +261,38 @@ mod tests {
             "toChainId": "137",
             "toTokenAddress": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
         });
-        assert_eq!(serde_json::to_value(&request).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(request.body().unwrap()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn missing_fields_are_named_by_their_wire_name() {
+        let missing = |request: QuoteRequest| match request.body() {
+            Err(Error::Validation(err)) => err.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        };
+        assert_eq!(missing(QuoteRequest::new()), "fromAmountBaseUnit");
+        let without_destination_chain = QuoteRequest::new()
+            .from_amount_base_unit("1")
+            .from_chain_id("137")
+            .from_token_address("0x1")
+            .recipient_address("0x2")
+            .to_token_address("0x3");
+        assert_eq!(missing(without_destination_chain), "toChainId");
+        let without_recipient = QuoteRequest::new()
+            .from_amount_base_unit("1")
+            .from_chain_id("137")
+            .from_token_address("0x1")
+            .to_chain_id("1")
+            .to_token_address("0x3");
+        assert_eq!(missing(without_recipient), "recipientAddress");
+        // Setters may be called in any order, and a later call replaces an earlier one.
+        let reordered = documented_request()
+            .to_token_address("0x4")
+            .from_chain_id("1");
+        assert!(reordered.body().is_ok());
     }
 
     /// `200` example of `POST /quote` in `docs/specs/bridge-openapi.yaml`.

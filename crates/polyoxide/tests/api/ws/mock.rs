@@ -53,6 +53,15 @@ pub async fn recv_text(socket: &mut ServerSocket) -> String {
     }
 }
 
+/// Receives the next frame of any kind sent by the client; `None` once the connection has
+/// ended.
+pub async fn recv_message(socket: &mut ServerSocket) -> Option<Message> {
+    tokio::time::timeout(TIMEOUT, socket.next())
+        .await
+        .expect("timed out waiting for a client frame")?
+        .ok()
+}
+
 /// Receives the next text frame and parses it as JSON.
 pub async fn recv_json(socket: &mut ServerSocket) -> serde_json::Value {
     let text = recv_text(socket).await;

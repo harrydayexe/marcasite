@@ -110,6 +110,57 @@ async fn subscribes_on_connect_and_decodes_events() {
 }
 
 #[tokio::test]
+async fn delivers_custom_feature_events() {
+    // `best_bid_ask` and `new_market` examples of `docs/specs/asyncapi.json`; the second
+    // `best_bid_ask` has an empty bid side.
+    const BEST_BID_ASK: &str = r#"{"event_type":"best_bid_ask","market":"0x0005c0d312de0be897668695bae9f32b624b4a1ae8b140c49f08447fcc74f442","asset_id":"85354956062430465315924116860125388538595433819574542752031640332592237464430","best_bid":"0.73","best_ask":"0.77","spread":"0.04","timestamp":"1766789469958"}"#;
+    const NEW_MARKET: &str = r#"{"event_type":"new_market","id":"1031769","question":"Will NVIDIA (NVDA) close above $240 end of January?","market":"0x311d0c4b6671ab54af4970c06fcf58662516f5168997bdda209ec3db5aa6b0c1","slug":"nvda-above-240-on-january-30-2026","description":"d","assets_ids":["76043073756653678226373981964075571318267289248134717369284518995922789326425","31690934263385727664202099278545688007799199447969475608906331829650099442770"],"outcomes":["Yes","No"],"event_message":{"id":"125819","ticker":"nvda-above-in-january-2026","slug":"nvda-above-in-january-2026","title":"t","description":"d"},"timestamp":"1766790415550","tags":["stocks"],"condition_id":"0x311d0c4b6671ab54af4970c06fcf58662516f5168997bdda209ec3db5aa6b0c1","active":true,"clob_token_ids":["76043073756653678226373981964075571318267289248134717369284518995922789326425","31690934263385727664202099278545688007799199447969475608906331829650099442770"],"sports_market_type":"","line":"","game_start_time":"","order_price_min_tick_size":"0.01","group_item_title":"NVDA above $240"}"#;
+    let (url, server) = serve("/ws/market", |mut socket| async move {
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({"assets_ids": [ASSET_A], "type": "market", "custom_feature_enabled": true})
+        );
+        send(&mut socket, BEST_BID_ASK).await;
+        send(
+            &mut socket,
+            &BEST_BID_ASK.replace(r#""best_bid":"0.73""#, r#""best_bid":"""#),
+        )
+        .await;
+        send(&mut socket, NEW_MARKET).await;
+        close(&mut socket, 1000, "").await;
+    })
+    .await;
+
+    let mut channel = connect(
+        &url,
+        MarketSubscription::new([ASSET_A]).custom_feature_enabled(true),
+    )
+    .await;
+    let Some(Ok(MarketEvent::BestBidAsk(bba))) = next(&mut channel).await else {
+        panic!("expected a best_bid_ask event");
+    };
+    assert_eq!(bba.best_bid, Some(Decimal::new(73, 2)));
+    assert_eq!(bba.spread, Some(Decimal::new(4, 2)));
+    assert_eq!(
+        bba.timestamp_millis().map(|t| t.timestamp_millis()),
+        Some(1_766_789_469_958)
+    );
+    let Some(Ok(MarketEvent::BestBidAsk(one_sided))) = next(&mut channel).await else {
+        panic!("expected a best_bid_ask event");
+    };
+    assert_eq!(one_sided.best_bid, None);
+    assert_eq!(one_sided.best_ask, Some(Decimal::new(77, 2)));
+    let Some(Ok(MarketEvent::NewMarket(market))) = next(&mut channel).await else {
+        panic!("expected a new_market event");
+    };
+    assert_eq!(market.slug, "nvda-above-240-on-january-30-2026");
+    assert_eq!(market.assets_ids.len(), 2);
+    assert_eq!(market.game_start_time, None);
+    assert!(next(&mut channel).await.is_none());
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn sends_ping_heartbeat_and_hides_pong() {
     let (url, server) = serve("/ws/market", |mut socket| async move {
         recv_json(&mut socket).await;

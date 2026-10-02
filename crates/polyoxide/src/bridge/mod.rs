@@ -10,7 +10,7 @@
 //! | `POST /quote` | [`BridgeClient::get_quote`] |
 //! | `POST /deposit` | [`BridgeClient::create_deposit_addresses`] |
 //! | `POST /withdraw` | [`BridgeClient::create_withdrawal_addresses`] |
-//! | `GET /status/{address}` | [`BridgeClient::get_transaction_status`] |
+//! | `GET /status/{address}` | [`BridgeClient::list_transactions`] |
 //!
 //! Every Bridge API endpoint is public; none requires authentication.
 //!
@@ -37,9 +37,18 @@ pub use addresses::{
 pub use assets::{ChainId, SupportedAsset, SupportedAssets, Token};
 pub use client::{BridgeClient, BridgeClientBuilder};
 pub use quote::{FeeBreakdown, Quote, QuoteId, QuoteRequest};
-pub use status::{GetTransactionStatus, Transaction, TransactionStatus, TransactionStatusPage};
+pub use status::{ListTransactions, Transaction, TransactionStatus, TransactionStatusPage};
 
 /// The optional header attributing deposit/withdrawal requests to an integration. Its value
 /// must match `^0x[a-fA-F0-9]{64}$` (`components/parameters/BuilderCodeHeader` in
 /// `docs/specs/bridge-openapi.yaml`).
 const BUILDER_CODE_HEADER: &str = "X-Builder-Code";
+
+/// The value of a required request-body field, or an
+/// [`Error::Validation`](crate::Error::Validation) naming it (by its wire name `field`) if
+/// it was not set.
+fn required<'a, T>(field: &'static str, value: &'a Option<T>) -> polyoxide_core::Result<&'a T> {
+    value.as_ref().ok_or_else(|| {
+        polyoxide_core::ValidationError::new(field, "is required but was not set").into()
+    })
+}

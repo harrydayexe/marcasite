@@ -61,7 +61,7 @@ async fn get_status_sends_limit_and_decodes_page() {
 
     let page = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .limit(100)
         .send()
         .await
@@ -105,7 +105,7 @@ async fn sends_cursor_and_paginate() {
 
     let page = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .cursor("eyJsYXN0SWQiOiI0MiJ9")
         .paginate()
         .send()
@@ -145,7 +145,7 @@ async fn stream_follows_next_cursor_until_null() {
 
     let statuses: Vec<_> = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .into_stream()
         .map_ok(|t| t.status.unwrap())
         .try_collect()
@@ -179,7 +179,7 @@ async fn unknown_status_does_not_break_decoding() {
 
     let page = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .send()
         .await
         .unwrap();
@@ -204,7 +204,7 @@ async fn stale_cursor_is_a_400() {
 
     let results: Vec<_> = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .cursor("stale")
         .into_stream()
         .collect()
@@ -227,7 +227,7 @@ async fn invalid_parameters_are_rejected_before_sending() {
     let bridge = common::polymarket(&server).bridge().clone();
     for limit in [0, 101] {
         let err = bridge
-            .get_transaction_status(BRIDGE_ADDRESS)
+            .list_transactions(BRIDGE_ADDRESS)
             .limit(limit)
             .send()
             .await
@@ -237,14 +237,16 @@ async fn invalid_parameters_are_rejected_before_sending() {
             "{err:?}"
         );
     }
-    let err = bridge.get_transaction_status("").send().await.unwrap_err();
-    assert!(
-        matches!(&err, Error::Validation(v) if v.parameter() == "address"),
-        "{err:?}"
-    );
+    for address in ["", ".", ".."] {
+        let err = bridge.list_transactions(address).send().await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Validation(v) if v.parameter() == "address"),
+            "{err:?}"
+        );
+    }
 
     let results: Vec<_> = bridge
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .limit(0)
         .into_stream()
         .collect()
@@ -266,9 +268,60 @@ async fn missing_transactions_is_a_decode_error() {
 
     let err = common::polymarket(&server)
         .bridge()
-        .get_transaction_status(BRIDGE_ADDRESS)
+        .list_transactions(BRIDGE_ADDRESS)
         .send()
         .await
         .unwrap_err();
     assert!(matches!(err, Error::Decode(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn missing_next_cursor_is_a_decode_error_not_the_end() {
+    let server = common::server().await;
+    // `nextCursor` is required (but nullable): a page without it must not end the walk
+    // silently.
+    Mock::given(method("GET"))
+        .and(path(format!("/status/{BRIDGE_ADDRESS}")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"transactions":[{"status":"COMPLETED"}]}"#,
+            "application/json",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let results: Vec<_> = common::polymarket(&server)
+        .bridge()
+        .list_transactions(BRIDGE_ADDRESS)
+        .into_stream()
+        .collect()
+        .await;
+    assert_eq!(results.len(), 1);
+    let Err(Error::Decode(decode)) = &results[0] else {
+        panic!("expected a decode error, got {results:?}");
+    };
+    assert!(decode.to_string().contains("nextCursor"), "{decode}");
+}
+
+#[tokio::test]
+async fn page_accessors_normalize_the_cursor() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/status/{BRIDGE_ADDRESS}")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(EXAMPLE, "application/json"))
+        .mount(&server)
+        .await;
+
+    let page = common::polymarket(&server)
+        .bridge()
+        .list_transactions(BRIDGE_ADDRESS)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.next_cursor(), Some("eyJsYXN0SWQiOiI0MiJ9"));
+    assert_eq!(page.items().len(), 3);
+    assert_eq!(
+        page.into_items()[2].status,
+        Some(TransactionStatus::Completed)
+    );
 }

@@ -89,14 +89,45 @@ impl ComboMarket {
 
 /// One page of the combo market catalog (`components/schemas/ComboMarketsResponse`),
 /// returned by [`ListComboMarkets::send`].
+///
+/// Both fields are required by the spec, so a response without `markets` or without
+/// `next_cursor` fails to decode (with [`Error::Decode`](crate::Error::Decode)) instead of
+/// being mistaken for the last page. Every market of the page must decode: one market that
+/// does not match the schema (for example an `outcome_prices` entry that is not a decimal
+/// number) fails the whole page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ComboMarketsPage {
     /// The markets on this page, by volume descending.
     pub markets: Vec<ComboMarket>,
-    /// Cursor for the next page, or `None` on the final page. Pass it back unchanged with
-    /// [`ListComboMarkets::cursor`].
+    /// Cursor for the next page, as sent: `None` on the final page. Prefer
+    /// [`next_cursor()`](Self::next_cursor), which also treats an empty string as the end.
+    /// Pass it back unchanged with [`ListComboMarkets::cursor`].
+    #[serde(deserialize_with = "Option::deserialize")]
     pub next_cursor: Option<String>,
+}
+
+impl ComboMarketsPage {
+    /// The markets on this page, by volume descending.
+    #[must_use]
+    pub fn items(&self) -> &[ComboMarket] {
+        &self.markets
+    }
+
+    /// The markets on this page, by volume descending, by value.
+    #[must_use]
+    pub fn into_items(self) -> Vec<ComboMarket> {
+        self.markets
+    }
+
+    /// The cursor for the next page, to pass to [`ListComboMarkets::cursor`]; `None` on the
+    /// final page (a `null` or empty `next_cursor`).
+    #[must_use]
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor
+            .as_deref()
+            .filter(|cursor| !cursor.is_empty())
+    }
 }
 
 impl CombosClient {
@@ -206,24 +237,28 @@ impl ListComboMarkets {
     ///   (nothing is sent).
     /// - [`Error::Api`](crate::Error::Api) with status `400` for parameters the server
     ///   rejects.
-    /// - Any other [`Error`](crate::Error) for transport, server, rate limiting or decoding
+    /// - [`Error::Decode`](crate::Error::Decode) if the response does not match the
+    ///   documented schema, including a missing `markets` or `next_cursor` (see
+    ///   [`ComboMarketsPage`]).
+    /// - Any other [`Error`](crate::Error) for transport, server or rate limiting
     ///   failures.
     pub async fn send(self) -> Result<ComboMarketsPage> {
         self.fetch(self.cursor.as_deref()).await
     }
 
     /// Streams every market from the configured cursor (or the start of the catalog)
-    /// onwards, following `next_cursor` until it is `null`.
+    /// onwards, following `next_cursor` until it is `null` (or empty).
     ///
-    /// The stream yields the first error (including the validation errors of
-    /// [`send`](Self::send)) and then ends.
+    /// The stream yields the first error (any error of [`send`](Self::send)) and then
+    /// ends.
     pub fn into_stream(self) -> Paginated<ComboMarket> {
         let start = self.cursor.clone();
         cursor_stream(start, move |cursor| {
             let request = self.clone();
             async move {
                 let page = request.fetch(cursor.as_deref()).await?;
-                Ok(CursorPage::new(page.markets, page.next_cursor))
+                let next = page.next_cursor().map(str::to_owned);
+                Ok(CursorPage::new(page.into_items(), next))
             }
         })
     }
@@ -298,6 +333,33 @@ mod tests {
             "next_cursor":null}"#;
         let err = serde_json::from_str::<ComboMarketsPage>(json).unwrap_err();
         assert!(err.to_string().contains("volume"), "{err}");
+    }
+
+    #[test]
+    fn next_cursor_is_required_but_nullable() {
+        // A missing key is not the final page.
+        let err = serde_json::from_str::<ComboMarketsPage>(r#"{"markets":[]}"#).unwrap_err();
+        assert!(err.to_string().contains("next_cursor"), "{err}");
+        let err = serde_json::from_str::<ComboMarketsPage>(r#"{"next_cursor":null}"#).unwrap_err();
+        assert!(err.to_string().contains("markets"), "{err}");
+
+        let last: ComboMarketsPage =
+            serde_json::from_str(r#"{"markets":[],"next_cursor":null}"#).unwrap();
+        assert_eq!(last.next_cursor, None);
+        assert_eq!(last.next_cursor(), None);
+        let empty: ComboMarketsPage =
+            serde_json::from_str(r#"{"markets":[],"next_cursor":""}"#).unwrap();
+        assert_eq!(empty.next_cursor.as_deref(), Some(""));
+        assert_eq!(empty.next_cursor(), None);
+    }
+
+    #[test]
+    fn page_accessors() {
+        let page: ComboMarketsPage = serde_json::from_str(EXAMPLE).unwrap();
+        assert_eq!(page.next_cursor(), Some("Mg"));
+        assert_eq!(page.items().len(), 1);
+        assert_eq!(page.items()[0].id, ComboMarketId::from("1897034"));
+        assert_eq!(page.into_items().len(), 1);
     }
 
     #[test]

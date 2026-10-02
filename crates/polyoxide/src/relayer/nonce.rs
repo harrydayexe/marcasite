@@ -83,6 +83,19 @@ impl RelayerClient {
     ///
     /// See <https://docs.polymarket.com/api-reference/relayer/get-relayer-address-and-nonce>.
     ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use polyoxide::relayer::{NonceType, RelayerClient};
+    ///
+    /// let relayer = RelayerClient::new()?;
+    /// let payload = relayer
+    ///     .get_relay_payload("0x77837466dd64fb52ECD00C737F060d0ff5CCB575", NonceType::Safe)
+    ///     .await?;
+    /// println!("relayer {:?}, nonce {:?}", payload.address, payload.nonce);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// # Errors
     ///
     /// - [`Error::Validation`](crate::Error::Validation) if `address` is not `0x` followed
