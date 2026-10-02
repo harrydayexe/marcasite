@@ -199,6 +199,33 @@ pub(crate) fn validate_keyset_limit(limit: Option<u32>) -> Result<()> {
     }
 }
 
+/// Largest `offset` the server accepts on `GET /markets`, `GET /events` and
+/// `GET /events/pagination` (observed live; not in the spec).
+pub(crate) const MAX_OFFSET: u64 = 2000;
+/// Largest `offset` the server accepts on `GET /comments` and
+/// `GET /comments/user_address/{user_address}` (observed live; not in the spec).
+pub(crate) const MAX_COMMENTS_OFFSET: u64 = 200;
+
+/// Checks an `offset` against the largest value the server accepts on a route. `deeper`
+/// names the alternative for walking further.
+///
+/// # Errors
+///
+/// Returns [`Error::Validation`](crate::Error::Validation) (parameter `offset`) if `offset`
+/// exceeds `max`.
+pub(crate) fn validate_offset(offset: Option<u64>, max: u64, deeper: &str) -> Result<()> {
+    match offset {
+        Some(offset) if offset > max => Err(ValidationError::new(
+            "offset",
+            format!(
+                "must be at most {max} (the server rejects larger offsets), got {offset}; {deeper}"
+            ),
+        )
+        .into()),
+        _ => Ok(()),
+    }
+}
+
 /// Smallest `limit` accepted by the keyset endpoints.
 pub(crate) const KEYSET_MIN_LIMIT: u32 = 1;
 /// Largest `limit` accepted by the keyset endpoints.
@@ -222,6 +249,21 @@ mod tests {
     fn formats_rfc3339() {
         let at = Utc.with_ymd_and_hms(2024, 1, 2, 3, 4, 5).unwrap();
         assert_eq!(rfc3339(&at), "2024-01-02T03:04:05Z");
+    }
+
+    #[test]
+    fn validates_offset_cap() {
+        assert!(validate_offset(None, MAX_OFFSET, "x").is_ok());
+        assert!(validate_offset(Some(2000), MAX_OFFSET, "x").is_ok());
+        let err = validate_offset(Some(2001), MAX_OFFSET, "use the keyset listing").unwrap_err();
+        let crate::Error::Validation(v) = &err else {
+            panic!("expected a validation error, got {err:?}")
+        };
+        assert_eq!(v.parameter(), "offset");
+        assert!(err.to_string().contains("2001"), "{err}");
+        assert!(err.to_string().contains("keyset"), "{err}");
+        assert!(validate_offset(Some(200), MAX_COMMENTS_OFFSET, "x").is_ok());
+        assert!(validate_offset(Some(201), MAX_COMMENTS_OFFSET, "x").is_err());
     }
 
     #[test]

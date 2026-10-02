@@ -88,16 +88,16 @@ mod util;
 
 pub use client::{GammaClient, GammaClientBuilder};
 pub use comments::{
-    Comment, CommentCount, CommentId, CommentParentEntityType, CommentPosition, CommentProfile,
-    GetCommentsById, ListComments, ListCommentsByUser, Reaction,
+    Comment, CommentCount, CommentId, CommentMedia, CommentParentEntityType, CommentPosition,
+    CommentProfile, GetCommentsById, ListComments, ListCommentsByUser, Reaction,
 };
 pub use events::{
     Event, EventCreator, EventCreatorId, EventTweetCount, EventsKeysetPage, EventsPage, GetEvent,
     ListEventCreators, ListEvents, ListEventsKeyset, ListEventsPaginated, ListSportEventResults,
 };
 pub use markets::{
-    FeeSchedule, GetMarket, GetMarketsInformation, ListMarkets, ListMarketsKeyset, Market,
-    MarketDescription, MarketsKeysetPage,
+    ClobReward, FeeSchedule, GetMarket, GetMarketsInformation, ListMarkets, ListMarketsKeyset,
+    Market, MarketDescription, MarketsKeysetPage,
 };
 pub use profiles::{Profile, PublicProfile, PublicProfileUser};
 pub use search::{Search, SearchResults, SearchTag};

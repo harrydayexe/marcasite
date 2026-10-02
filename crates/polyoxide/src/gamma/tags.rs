@@ -60,6 +60,9 @@ pub struct Tag {
     pub force_hide: Option<bool>,
     /// Whether the tag is shown in the carousel.
     pub is_carousel: Option<bool>,
+    /// Number of active events with the tag (undocumented; observed live on the tags
+    /// returned by [`GammaClient::get_related_tags`]).
+    pub active_events_count: Option<i64>,
 }
 
 /// A relationship between two tags (`components/schemas/RelatedTag`).
@@ -201,7 +204,10 @@ impl ListTags {
         limit: u32;
         /// Number of tags to skip (`offset`).
         offset: u32;
-        /// Comma-separated list of fields to order by (`order`).
+        /// Comma-separated list of fields to order by (`order`). Live expects the camelCase JSON
+        /// field names of the response type (e.g. `label`, `createdAt` or `id`); snake_case names
+        /// such as `start_date` are rejected with a `422` (`order fields are not valid`), although
+        /// the spec's keyset example uses them. See `SPEC_DEVIATIONS.md`.
         order: into String;
         /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
