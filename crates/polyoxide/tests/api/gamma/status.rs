@@ -17,7 +17,11 @@ async fn status_returns_plain_text() {
         .mount(&server)
         .await;
 
-    let status = common::polymarket(&server).gamma().status().await.unwrap();
+    let status = common::polymarket(&server)
+        .gamma()
+        .get_status()
+        .await
+        .unwrap();
     assert_eq!(status, "OK");
 }
 
@@ -32,7 +36,7 @@ async fn status_reports_failures() {
 
     let err = common::polymarket(&server)
         .gamma()
-        .status()
+        .get_status()
         .await
         .unwrap_err();
     assert!(err.is_not_found());

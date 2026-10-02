@@ -14,16 +14,21 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Category, Event, GammaClient, ImageOptimization, Tag, TagId,
-    util::{Lookup, integer_id, rfc3339, setters, validate_keyset_limit},
+    Category, Event, GammaClient, ImageOptimization, Tag, TagId, TeamId,
+    util::{
+        Lookup, check_integer_id, check_integer_ids, integer_id, rfc3339, setters,
+        validate_keyset_limit,
+    },
 };
 
 /// A market (`components/schemas/Market`).
 ///
 /// Every field is optional because the spec marks none as required. Fields the spec types
-/// as `number` are [`Decimal`]s; string-typed amounts (`liquidity`, `volume`, `fee`,
-/// `umaBond`, `umaReward`) are parsed into [`Decimal`]s too. Other string fields are kept
-/// exactly as sent.
+/// as `number` are [`Decimal`]s and serialize back as JSON numbers. The amounts the spec
+/// types as `string` (`liquidity`, `volume`, `fee`, `umaBond`, `umaReward`) are parsed
+/// into [`Decimal`]s too: an empty string or `null` becomes `None`, any other non-numeric
+/// text fails decoding, and they serialize back as JSON strings. Other string fields are
+/// kept exactly as sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -45,7 +50,9 @@ pub struct Market {
     pub end_date: Option<DateTime<Utc>>,
     /// Category.
     pub category: Option<String>,
-    /// Liquidity (a string on the wire).
+    /// Liquidity. The spec types this as a string (`liquidity`); it is parsed as a decimal, and
+    /// an empty string becomes `None`.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub liquidity: Option<Decimal>,
     /// Sponsor name.
     pub sponsor_name: Option<String>,
@@ -60,7 +67,9 @@ pub struct Market {
     pub y_axis_value: Option<String>,
     /// Denomination token.
     pub denomination_token: Option<String>,
-    /// Fee (a string on the wire).
+    /// Fee. The spec types this as a string (`fee`); it is parsed as a decimal, and
+    /// an empty string becomes `None`.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub fee: Option<Decimal>,
     /// Image URL.
     pub image: Option<String>,
@@ -70,7 +79,7 @@ pub struct Market {
     pub lower_bound: Option<String>,
     /// Upper bound. The spec types this as a plain string.
     pub upper_bound: Option<String>,
-    /// Description, including the resolution criteria.
+    /// Description.
     pub description: Option<String>,
     /// Outcomes. The spec types this as a plain string and documents no encoding, so it is
     /// kept exactly as sent.
@@ -78,7 +87,9 @@ pub struct Market {
     /// Outcome prices. The spec types this as a plain string and documents no encoding, so
     /// it is kept exactly as sent.
     pub outcome_prices: Option<String>,
-    /// Volume (a string on the wire).
+    /// Volume. The spec types this as a string (`volume`); it is parsed as a decimal, and
+    /// an empty string becomes `None`.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub volume: Option<Decimal>,
     /// Whether the market is active.
     pub active: Option<bool>,
@@ -182,15 +193,21 @@ pub struct Market {
     pub disqus_thread: Option<String>,
     /// Short outcomes. The spec types this as a plain string.
     pub short_outcomes: Option<String>,
-    /// Team A id (wire name `teamAID`).
+    /// Team A id (wire name `teamAID`). The spec types this as a string here (a team's
+    /// own `id` is an integer); it is kept exactly as sent.
     #[serde(rename = "teamAID")]
-    pub team_a_id: Option<String>,
-    /// Team B id (wire name `teamBID`).
+    pub team_a_id: Option<TeamId>,
+    /// Team B id (wire name `teamBID`). The spec types this as a string here (a team's
+    /// own `id` is an integer); it is kept exactly as sent.
     #[serde(rename = "teamBID")]
-    pub team_b_id: Option<String>,
-    /// UMA bond (a string on the wire).
+    pub team_b_id: Option<TeamId>,
+    /// UMA bond. The spec types this as a string (`umaBond`); it is parsed as a decimal, and
+    /// an empty string becomes `None`.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub uma_bond: Option<Decimal>,
-    /// UMA reward (a string on the wire).
+    /// UMA reward. The spec types this as a string (`umaReward`); it is parsed as a decimal, and
+    /// an empty string becomes `None`.
+    #[serde(default, with = "serde_util::string_or_number_option")]
     pub uma_reward: Option<Decimal>,
     /// 24-hour CLOB volume.
     #[serde(default, with = "serde_util::decimal_number_option")]
@@ -230,7 +247,7 @@ pub struct Market {
     pub events: Option<Vec<Event>>,
     /// Categories.
     pub categories: Option<Vec<Category>>,
-    /// Tags (included by some endpoints only, e.g. with `include_tag=true`).
+    /// Tags. The keyset listing documents them as included only with `include_tag=true`.
     pub tags: Option<Vec<Tag>>,
     /// Creator.
     pub creator: Option<String>,
@@ -301,7 +318,7 @@ pub struct Market {
     pub show_gmp_outcome: Option<bool>,
     /// Whether the market is activated manually.
     pub manual_activation: Option<bool>,
-    /// Whether this is the "other" market of a negative-risk event.
+    /// The `negRiskOther` flag (documented only as a boolean).
     pub neg_risk_other: Option<bool>,
     /// Game id.
     pub game_id: Option<String>,
@@ -310,7 +327,7 @@ pub struct Market {
     /// Sports market type (see
     /// [`GammaClient::get_sports_market_types`](super::GammaClient::get_sports_market_types)).
     pub sports_market_type: Option<String>,
-    /// Line (for sports markets).
+    /// Line.
     #[serde(default, with = "serde_util::decimal_number_option")]
     pub line: Option<Decimal>,
     /// UMA resolution statuses. The spec types this as a plain string.
@@ -332,7 +349,8 @@ pub struct Market {
     pub event_start_time: Option<DateTime<Utc>>,
     /// Whether fees are enabled.
     pub fees_enabled: Option<bool>,
-    /// Fee schedule.
+    /// Fee schedule (wire name `feeSchedule`). The keyset listings' response description
+    /// spells it `fee_schedule`; this field reads only the schema's `feeSchedule`.
     pub fee_schedule: Option<FeeSchedule>,
 }
 
@@ -364,35 +382,55 @@ pub struct MarketDescription {
 }
 
 /// One page of [`GammaClient::list_markets_keyset`] (`components/schemas/KeysetMarketsResponse`).
+///
+/// The fields keep their wire names; [`items`](Self::items),
+/// [`into_items`](Self::into_items) and [`next_cursor()`](Self::next_cursor()) give the same
+/// view as every other page type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct MarketsKeysetPage {
-    /// The markets on this page (empty if none were found).
+    /// The markets on this page (documented as an empty array if none were found).
     pub markets: Option<Vec<Market>>,
-    /// Cursor for the next page, passed as
-    /// [`after_cursor`](ListMarketsKeyset::after_cursor). Present only when the page is
-    /// full; absent on the last page.
+    /// Cursor for the next page, passed to [`cursor`](ListMarketsKeyset::cursor). The spec
+    /// documents it as present only when the number of returned markets equals the
+    /// effective limit, and omitted on the last page.
     pub next_cursor: Option<String>,
+}
+
+impl MarketsKeysetPage {
+    /// The markets on this page (empty if the page carries none).
+    #[must_use]
+    pub fn items(&self) -> &[Market] {
+        self.markets.as_deref().unwrap_or_default()
+    }
+
+    /// Consumes the page and returns its markets.
+    #[must_use]
+    pub fn into_items(self) -> Vec<Market> {
+        self.markets.unwrap_or_default()
+    }
+
+    /// The cursor for the next page, or `None` on the last page (an absent or empty
+    /// `next_cursor`).
+    #[must_use]
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor
+            .as_deref()
+            .filter(|cursor| !cursor.is_empty())
+    }
 }
 
 impl GammaClient {
     /// Lists markets (offset pagination).
     ///
-    /// The server only returns open markets unless [`closed`](ListMarkets::closed) is set
-    /// (the spec documents `closed` as defaulting to `false`).
+    /// The spec documents the `closed` filter's default as `false`.
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/list-markets>.
     ///
     /// ```no_run
     /// # async fn run() -> polyoxide::Result<()> {
     /// let gamma = polyoxide::gamma::GammaClient::new()?;
-    /// let markets = gamma
-    ///     .list_markets()
-    ///     .limit(10)
-    ///     .order("volume_num")
-    ///     .ascending(false)
-    ///     .send()
-    ///     .await?;
+    /// let markets = gamma.list_markets().limit(10).closed(false).send().await?;
     /// for market in markets {
     ///     println!("{:?}: {:?}", market.question, market.volume_num);
     /// }
@@ -407,9 +445,6 @@ impl GammaClient {
     }
 
     /// Gets a market by id.
-    ///
-    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the market does not
-    /// exist; see [`Error::is_not_found`](crate::Error::is_not_found).
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-market-by-id>.
     ///
@@ -431,9 +466,6 @@ impl GammaClient {
 
     /// Gets a market by slug.
     ///
-    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the market does not
-    /// exist.
-    ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-market-by-slug>.
     pub fn get_market_by_slug(&self, slug: impl Into<String>) -> GetMarket {
         GetMarket {
@@ -449,10 +481,13 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing market is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if `id` is not an
+    ///   integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the market does not exist;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn get_market_tags(&self, id: impl Into<MarketId>) -> Result<Vec<Tag>> {
         let id = id.into();
+        check_integer_id("id", id.as_str())?;
         self.transport
             .get(&["markets", id.as_str(), "tags"])
             .send()
@@ -466,13 +501,16 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing market is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if `id` is not an
+    ///   integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the market does not exist;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn get_market_description(
         &self,
         id: impl Into<MarketId>,
     ) -> Result<MarketDescription> {
         let id = id.into();
+        check_integer_id("id", id.as_str())?;
         self.transport
             .get(&["markets", id.as_str(), "description"])
             .send()
@@ -483,8 +521,14 @@ impl GammaClient {
     /// result sets.
     ///
     /// [`send`](ListMarketsKeyset::send) returns one [`MarketsKeysetPage`]; pass its
-    /// `next_cursor` to [`after_cursor`](ListMarketsKeyset::after_cursor) for the next
-    /// page, or use [`into_stream`](ListMarketsKeyset::into_stream) to walk every page.
+    /// [`next_cursor()`](MarketsKeysetPage::next_cursor()) to
+    /// [`cursor`](ListMarketsKeyset::cursor) for the next page, or use
+    /// [`into_stream`](ListMarketsKeyset::into_stream) to walk every page.
+    ///
+    /// The spec's response description says nested `clob_rewards` and `fee_schedule` are
+    /// populated on each market. The documented `Market` schema has no `clob_rewards`
+    /// property, so that data is not modelled (it is dropped when decoding), and it spells
+    /// the fee schedule `feeSchedule` ([`Market::fee_schedule`]).
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/list-markets-keyset-pagination>.
     ///
@@ -511,7 +555,11 @@ impl GammaClient {
         }
     }
 
-    /// Queries markets by information filters sent as a JSON body.
+    /// Queries markets by information filters sent as a JSON body
+    /// (`POST /markets/information`).
+    ///
+    /// [`get_abridged_markets`](Self::get_abridged_markets) takes the same filters on
+    /// `POST /markets/abridged`.
     ///
     /// See `docs/specs/gamma-openapi.yaml`, operationId `getMarketsInformation` (no
     /// published doc page).
@@ -523,10 +571,12 @@ impl GammaClient {
         }
     }
 
-    /// Queries abridged markets by information filters sent as a JSON body.
+    /// Queries abridged markets by information filters sent as a JSON body
+    /// (`POST /markets/abridged`).
     ///
     /// Takes the same filters and returns the same [`Market`] schema as
-    /// [`get_markets_information`](Self::get_markets_information).
+    /// [`get_markets_information`](Self::get_markets_information) (`POST
+    /// /markets/information`).
     ///
     /// See `docs/specs/gamma-openapi.yaml`, operationId `getAbridgedMarkets` (no published
     /// doc page).
@@ -549,8 +599,8 @@ pub struct ListMarkets {
 
 #[derive(Debug, Clone, Default)]
 struct ListMarketsParams {
-    limit: Option<u64>,
-    offset: Option<u64>,
+    limit: Option<u32>,
+    offset: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     id: Vec<MarketId>,
@@ -578,6 +628,14 @@ struct ListMarketsParams {
 }
 
 impl ListMarketsParams {
+    fn validate(&self) -> Result<()> {
+        check_integer_ids("id", &self.id)?;
+        if let Some(tag_id) = &self.tag_id {
+            check_integer_id("tag_id", tag_id.as_str())?;
+        }
+        Ok(())
+    }
+
     fn query(&self, offset: Option<u64>) -> Query {
         let mut q = Query::new();
         q.push_opt("limit", self.limit)
@@ -615,61 +673,68 @@ impl ListMarketsParams {
 
 impl ListMarkets {
     setters! {
-        /// Maximum number of markets per page.
-        limit: u64;
-        /// Number of markets to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of markets per page (`limit`; the docs give a minimum of `0` and
+        /// no maximum).
+        limit: u32;
+        /// Number of markets to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Only markets with these ids.
-        id: many MarketId;
-        /// Only markets with these slugs.
-        slug: many String;
-        /// Only markets with these CLOB token ids.
+        /// Filter by market ids (`id`, repeated). The spec types them as integers, so an id
+        /// that is not one or more ASCII digits is rejected before sending with
+        /// [`Error::Validation`](crate::Error::Validation).
+        ids => id: many MarketId;
+        /// Filter by slugs (`slug`, repeated).
+        slugs => slug: many String;
+        /// Filter by CLOB token ids (`clob_token_ids`, repeated).
         clob_token_ids: many TokenId;
-        /// Only markets with these condition ids.
+        /// Filter by condition ids (`condition_ids`, repeated).
         condition_ids: many ConditionId;
-        /// Minimum liquidity.
+        /// Minimum liquidity (`liquidity_num_min`).
         liquidity_num_min: into Decimal;
-        /// Maximum liquidity.
+        /// Maximum liquidity (`liquidity_num_max`).
         liquidity_num_max: into Decimal;
-        /// Minimum volume.
+        /// Minimum volume (`volume_num_min`).
         volume_num_min: into Decimal;
-        /// Maximum volume.
+        /// Maximum volume (`volume_num_max`).
         volume_num_max: into Decimal;
-        /// Earliest start date.
+        /// Earliest start date (`start_date_min`).
         start_date_min: DateTime<Utc>;
-        /// Latest start date.
+        /// Latest start date (`start_date_max`).
         start_date_max: DateTime<Utc>;
-        /// Earliest end date.
+        /// Earliest end date (`end_date_min`).
         end_date_min: DateTime<Utc>;
-        /// Latest end date.
+        /// Latest end date (`end_date_max`).
         end_date_max: DateTime<Utc>;
-        /// Only markets with this tag.
+        /// Filter by tag id (`tag_id`). The spec types it as an integer, so an id that is not
+        /// one or more ASCII digits is rejected before sending with
+        /// [`Error::Validation`](crate::Error::Validation).
         tag_id: into TagId;
-        /// Include markets with tags related to [`tag_id`](Self::tag_id).
+        /// The `related_tags` flag (documented only as a boolean).
         related_tags: bool;
-        /// Only "create your own market" markets (`true`) or only other markets (`false`).
+        /// The `cyom` filter (documented only as a boolean).
         cyom: bool;
-        /// Only markets with this UMA resolution status.
+        /// Filter by UMA resolution status (`uma_resolution_status`; the spec documents no
+        /// values).
         uma_resolution_status: into String;
-        /// Only markets for this game id.
+        /// Filter by game id (`game_id`, a string on this endpoint).
         game_id: into String;
-        /// Only markets with these sports market types.
+        /// Filter by sports market types (`sports_market_types`, repeated).
         sports_market_types: many String;
-        /// Minimum size for liquidity rewards.
+        /// Minimum size for liquidity rewards (`rewards_min_size`).
         rewards_min_size: into Decimal;
-        /// Only markets with these question ids.
+        /// Filter by question ids (`question_ids`, repeated).
         question_ids: many QuestionId;
-        /// Include each market's tags.
+        /// The `include_tag` flag (documented only as a boolean on this endpoint).
         include_tag: bool;
-        /// Only closed (`true`) or only open (`false`, the server default) markets.
+        /// The `closed` filter (documented only as a boolean, defaulting to `false`).
         closed: bool;
     }
 
     async fn fetch(&self, offset: Option<u64>) -> Result<Vec<Market>> {
+        self.params.validate()?;
         self.client
             .transport
             .get(&["markets"])
@@ -682,18 +747,22 @@ impl ListMarkets {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error).
+    /// - [`Error::Validation`](crate::Error::Validation) if an
+    ///   [`ids`](Self::ids) entry or [`tag_id`](Self::tag_id) is not an integer, checked
+    ///   before sending;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Market>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every market from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error
+    /// (the errors of [`send`](Self::send)). A page shorter than [`limit`](Self::limit)
+    /// does not end it, because the docs give no maximum `limit` and the server may return
+    /// fewer markets, so the last request returns an empty page.
     pub fn into_stream(self) -> Paginated<Market> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -712,7 +781,7 @@ pub struct GetMarket {
 }
 
 impl GetMarket {
-    /// Include the market's tags.
+    /// The `include_tag` flag (documented only as a boolean on this endpoint).
     pub fn include_tag(mut self, include_tag: bool) -> Self {
         self.include_tag = Some(include_tag);
         self
@@ -722,24 +791,29 @@ impl GetMarket {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing market is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if the id
+    ///   is not an integer (parameter `id`) or the slug is empty, `.` or `..` (parameter
+    ///   `slug`);
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the market does not exist
+    ///   (see [`Error::is_not_found`](crate::Error::is_not_found));
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Market> {
+        let segments = self.lookup.path("markets", &[])?;
         let mut query = Query::new();
         query.push_opt("include_tag", self.include_tag);
-        let transport = &self.client.transport;
-        let request = match &self.lookup {
-            Lookup::Id(id) => transport.get(&["markets", id.as_str()]),
-            Lookup::Slug(slug) => transport.get(&["markets", "slug", slug.as_str()]),
-        };
-        request.query(query).send().await
+        self.client
+            .transport
+            .get(&segments)
+            .query(query)
+            .send()
+            .await
     }
 }
 
 /// Request builder for [`GammaClient::list_markets_keyset`].
 ///
 /// The endpoint rejects `offset`, so there is no setter for it; page with
-/// [`after_cursor`](Self::after_cursor) instead.
+/// [`cursor`](Self::cursor) instead.
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
 pub struct ListMarketsKeyset {
@@ -749,7 +823,7 @@ pub struct ListMarketsKeyset {
 
 #[derive(Debug, Clone, Default)]
 struct ListMarketsKeysetParams {
-    limit: Option<u64>,
+    limit: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     after_cursor: Option<String>,
@@ -781,6 +855,12 @@ struct ListMarketsKeysetParams {
 }
 
 impl ListMarketsKeysetParams {
+    fn validate(&self) -> Result<()> {
+        validate_keyset_limit(self.limit)?;
+        check_integer_ids("id", &self.id)?;
+        check_integer_ids("tag_id", &self.tag_id)
+    }
+
     fn query(&self, after_cursor: Option<&str>) -> Query {
         let mut q = Query::new();
         q.push_opt("limit", self.limit)
@@ -821,73 +901,78 @@ impl ListMarketsKeysetParams {
 
 impl ListMarketsKeyset {
     setters! {
-        /// Maximum number of markets per page, between 1 and 100 (server default 20).
-        /// Values outside that range are rejected client-side with
+        /// Maximum number of markets per page (`limit`), between 1 and 100 (server default
+        /// 20). Values outside that range are rejected client-side with
         /// [`Error::Validation`](crate::Error::Validation).
-        limit: u64;
-        /// Comma-separated list of JSON field names to order by, e.g.
-        /// `volume_num,liquidity_num`.
+        limit: u32;
+        /// Comma-separated list of JSON field names to order by (`order`). The spec's
+        /// example is `volume_num,liquidity_num`.
         order: into String;
-        /// Sort direction (server default ascending). Only used when
+        /// Sort direction (`ascending`, server default `true`). Only used when
         /// [`order`](Self::order) is set.
         ascending: bool;
         /// Opaque cursor from a previous page's
-        /// [`next_cursor`](MarketsKeysetPage::next_cursor).
-        after_cursor: into String;
-        /// Only markets with these ids.
-        id: many MarketId;
-        /// Only markets with these slugs.
-        slug: many String;
-        /// Only closed (`true`) or only open (`false`, the server default) markets.
+        /// [`next_cursor()`](MarketsKeysetPage::next_cursor()), sent as `after_cursor`.
+        cursor => after_cursor: into String;
+        /// Filter by market ids (`id`, repeated). The spec types them as integers, so an id
+        /// that is not one or more ASCII digits is rejected before sending with
+        /// [`Error::Validation`](crate::Error::Validation).
+        ids => id: many MarketId;
+        /// Filter by slugs (`slug`, repeated).
+        slugs => slug: many String;
+        /// The `closed` filter (documented only as a boolean, defaulting to `false`).
         closed: bool;
-        /// The `decimalized` flag (undocumented beyond its boolean type).
+        /// The `decimalized` flag (documented only as a boolean).
         decimalized: bool;
-        /// Only markets with these CLOB token ids.
+        /// Filter by CLOB token ids (`clob_token_ids`, repeated).
         clob_token_ids: many TokenId;
-        /// Only markets with these condition ids.
+        /// Filter by condition ids (`condition_ids`, repeated).
         condition_ids: many ConditionId;
-        /// Only markets with these question ids.
+        /// Filter by question ids (`question_ids`, repeated).
         question_ids: many QuestionId;
-        /// Minimum liquidity.
+        /// Minimum liquidity (`liquidity_num_min`).
         liquidity_num_min: into Decimal;
-        /// Maximum liquidity.
+        /// Maximum liquidity (`liquidity_num_max`).
         liquidity_num_max: into Decimal;
-        /// Minimum volume.
+        /// Minimum volume (`volume_num_min`).
         volume_num_min: into Decimal;
-        /// Maximum volume.
+        /// Maximum volume (`volume_num_max`).
         volume_num_max: into Decimal;
-        /// Earliest start date.
+        /// Earliest start date (`start_date_min`).
         start_date_min: DateTime<Utc>;
-        /// Latest start date.
+        /// Latest start date (`start_date_max`).
         start_date_max: DateTime<Utc>;
-        /// Earliest end date.
+        /// Earliest end date (`end_date_min`).
         end_date_min: DateTime<Utc>;
-        /// Latest end date.
+        /// Latest end date (`end_date_max`).
         end_date_max: DateTime<Utc>;
-        /// Only markets with these tags.
-        tag_id: many TagId;
-        /// Include markets with tags related to [`tag_id`](Self::tag_id).
+        /// Filter by tag ids (`tag_id`, repeated). The spec types them as integers, so an id
+        /// that is not one or more ASCII digits is rejected before sending with
+        /// [`Error::Validation`](crate::Error::Validation).
+        tag_ids => tag_id: many TagId;
+        /// The `related_tags` flag (documented only as a boolean).
         related_tags: bool;
-        /// How to match tags (the spec documents no values).
+        /// The `tag_match` parameter (a string; the spec documents no values).
         tag_match: into String;
-        /// Only "create your own market" markets (`true`) or only other markets (`false`).
+        /// The `cyom` filter (documented only as a boolean).
         cyom: bool;
-        /// Only markets with RFQ enabled (`true`) or disabled (`false`).
+        /// The `rfq_enabled` filter (documented only as a boolean).
         rfq_enabled: bool;
-        /// Only markets with this UMA resolution status.
+        /// Filter by UMA resolution status (`uma_resolution_status`; the spec documents no
+        /// values).
         uma_resolution_status: into String;
-        /// Only markets for this game id.
+        /// Filter by game id (`game_id`, a string on this endpoint).
         game_id: into String;
-        /// Only markets with these sports market types.
+        /// Filter by sports market types (`sports_market_types`, repeated).
         sports_market_types: many String;
-        /// Include each market's tags.
+        /// When `true`, includes the `Tags` relation on each market (`include_tag`).
         include_tag: bool;
-        /// Locale.
+        /// The `locale` parameter (a string; the spec documents no values).
         locale: into String;
     }
 
     async fn fetch(&self, after_cursor: Option<&str>) -> Result<MarketsKeysetPage> {
-        validate_keyset_limit(self.params.limit)?;
+        self.params.validate()?;
         self.client
             .transport
             .get(&["markets", "keyset"])
@@ -896,21 +981,33 @@ impl ListMarketsKeyset {
             .await
     }
 
-    /// Fetches one page, starting at [`after_cursor`](Self::after_cursor) if set.
+    /// Fetches one page, starting at [`cursor`](Self::cursor) if set.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if [`limit`](Self::limit) is out of
-    /// range; otherwise see [`Error`](crate::Error). The server answers `422` (an
-    /// [`Error::Api`](crate::Error::Api) whose
-    /// [`error_type`](crate::ApiError::error_type) is `"validation error"`) for an invalid
-    /// cursor, order field or filter.
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if
+    ///   [`limit`](Self::limit) is out of range or an [`ids`](Self::ids) or
+    ///   [`tag_ids`](Self::tag_ids) entry is not an integer;
+    /// - [`Error::Api`](crate::Error::Api) with status `422` (whose
+    ///   [`error_type`](crate::ApiError::error_type) is `"validation error"`) for an
+    ///   invalid cursor, order field or filter;
+    /// - [`Error::Api`](crate::Error::Api) with status `500` (`"internal error"`) for a
+    ///   server-side failure;
+    /// - [`Error::Api`](crate::Error::Api) with status `503` and
+    ///   [`error_type`](crate::ApiError::error_type) `"service unavailable"`, which the
+    ///   spec documents as "keyset pagination is not configured". That is a server
+    ///   configuration state rather than a transient failure, so retrying is unlikely to
+    ///   help; [`GammaClient::list_markets`] is the offset-paginated alternative;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<MarketsKeysetPage> {
         self.fetch(self.params.after_cursor.as_deref()).await
     }
 
-    /// Streams every market from [`after_cursor`](Self::after_cursor) (or the beginning)
-    /// onwards, fetching pages lazily until a page has no `next_cursor`.
+    /// Streams every market from [`cursor`](Self::cursor) (or the beginning) onwards,
+    /// fetching pages lazily until a page has no (or an empty) `next_cursor`.
+    ///
+    /// The stream ends right after yielding the first error (the errors of
+    /// [`send`](Self::send)).
     pub fn into_stream(self) -> Paginated<Market> {
         let start = self.params.after_cursor.clone();
         cursor_stream(start, move |cursor| {
@@ -926,13 +1023,15 @@ impl ListMarketsKeyset {
     }
 }
 
-/// Request builder for [`GammaClient::get_markets_information`] and
-/// [`GammaClient::get_abridged_markets`].
+/// Request builder for [`GammaClient::get_markets_information`]
+/// (`POST /markets/information`) and [`GammaClient::get_abridged_markets`]
+/// (`POST /markets/abridged`).
 ///
 /// Every setter maps to one field of the JSON body
 /// (`components/schemas/MarketsInformationBody`); unset fields are omitted.
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` is awaited"]
+#[doc(alias = "GetAbridgedMarkets")]
 pub struct GetMarketsInformation {
     client: GammaClient,
     endpoint: &'static str,
@@ -1084,17 +1183,17 @@ impl MarketsInformationParams {
 
 impl GetMarketsInformation {
     setters! {
-        /// Only markets with these ids (`id`). The spec types ids as integers, so
-        /// non-numeric ids are rejected client-side with
-        /// [`Error::Validation`](crate::Error::Validation).
-        id: many MarketId;
-        /// Only markets with these slugs (`slug`).
-        slug: many String;
-        /// Only closed (`true`) or only open (`false`) markets (`closed`).
+        /// Filter by market ids (`id`). The spec types them as integers, so an id that is
+        /// not one or more ASCII digits (or does not fit in an `i64`) is rejected before
+        /// sending with [`Error::Validation`](crate::Error::Validation).
+        ids => id: many MarketId;
+        /// Filter by slugs (`slug`).
+        slugs => slug: many String;
+        /// The `closed` filter (documented only as a nullable boolean).
         closed: bool;
-        /// Only markets with these CLOB token ids (`clobTokenIds`).
+        /// Filter by CLOB token ids (`clobTokenIds`).
         clob_token_ids: many TokenId;
-        /// Only markets with these condition ids (`conditionIds`).
+        /// Filter by condition ids (`conditionIds`).
         condition_ids: many ConditionId;
         /// Minimum liquidity (`liquidityNumMin`).
         liquidity_num_min: into Decimal;
@@ -1112,26 +1211,26 @@ impl GetMarketsInformation {
         end_date_min: DateTime<Utc>;
         /// Latest end date (`endDateMax`).
         end_date_max: DateTime<Utc>;
-        /// Include markets with tags related to [`tag_id`](Self::tag_id) (`relatedTags`).
+        /// The `relatedTags` flag (documented only as a nullable boolean).
         related_tags: bool;
-        /// Only markets with this tag (`tagId`). The spec types it as an integer, so a
-        /// non-numeric id is rejected client-side with
-        /// [`Error::Validation`](crate::Error::Validation).
+        /// Filter by tag id (`tagId`). The spec types it as an integer, so an id that is not
+        /// one or more ASCII digits (or does not fit in an `i64`) is rejected before sending
+        /// with [`Error::Validation`](crate::Error::Validation).
         tag_id: into TagId;
-        /// Only "create your own market" markets (`true`) or only other markets (`false`)
-        /// (`cyom`).
+        /// The `cyom` filter (documented only as a nullable boolean).
         cyom: bool;
-        /// Only markets with this UMA resolution status (`umaResolutionStatus`).
+        /// Filter by UMA resolution status (`umaResolutionStatus`; the spec documents no
+        /// values).
         uma_resolution_status: into String;
-        /// Only markets for this game id (`gameId`).
+        /// Filter by game id (`gameId`).
         game_id: into String;
-        /// Only markets with these sports market types (`sportsMarketTypes`).
+        /// Filter by sports market types (`sportsMarketTypes`).
         sports_market_types: many String;
         /// Minimum size for liquidity rewards (`rewardsMinSize`).
         rewards_min_size: into Decimal;
-        /// Only markets with these question ids (`questionIds`).
+        /// Filter by question ids (`questionIds`).
         question_ids: many QuestionId;
-        /// Include each market's tags (`includeTags`).
+        /// The `includeTags` flag (documented only as a nullable boolean).
         include_tags: bool;
     }
 
@@ -1141,8 +1240,12 @@ impl GetMarketsInformation {
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`](crate::Error::Validation) if an id is not an integer;
-    /// otherwise see [`Error`](crate::Error). The server answers `422` for invalid filters.
+    /// - [`Error::Validation`](crate::Error::Validation), checked before sending, if an
+    ///   [`ids`](Self::ids) entry (parameter `id`) or [`tag_id`](Self::tag_id) (parameter
+    ///   `tagId`) is not an integer;
+    /// - [`Error::Api`](crate::Error::Api) with status `422` for a body the server rejects
+    ///   (documented only as "Validation error");
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Market>> {
         let body = self.params.into_body()?;
         self.client
@@ -1160,7 +1263,9 @@ mod tests {
     use super::*;
 
     /// Field names and types from `components/schemas/Market` in
-    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body).
+    /// `docs/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,
+    /// `volume` and `teamAID` are strings, `volume24hr`, `volume1wk` and the prices are
+    /// numbers.
     #[test]
     fn deserializes_market_wire_names_and_types() {
         let json = r#"{
@@ -1169,13 +1274,12 @@ mod tests {
             "conditionId": "0x5f65177b394277fd294cd75650044e32ba009a95022d88a0c1d565897d72f8f1",
             "endDate": "2024-11-05T12:00:00Z",
             "liquidity": "1500.25",
-            "volume": 2000,
-            "fee": "20000000000000000",
+            "volume": "2000",
             "outcomes": "x",
             "questionID": "0xabc",
             "teamAID": "7",
             "volume24hr": 12.5,
-            "volume1wk": "13",
+            "volume1wk": 13,
             "volume24hrClob": 1.25,
             "orderPriceMinTickSize": 0.01,
             "bestBid": 0.47,
@@ -1190,9 +1294,9 @@ mod tests {
         assert_eq!(market.id, Some(MarketId::from("239826")));
         assert_eq!(market.liquidity, Some(Decimal::new(150_025, 2)));
         assert_eq!(market.volume, Some(Decimal::from(2000)));
-        assert_eq!(market.fee, Some(Decimal::from(20_000_000_000_000_000_u64)));
+        assert_eq!(market.fee, None);
         assert_eq!(market.question_id, Some(QuestionId::from("0xabc")));
-        assert_eq!(market.team_a_id.as_deref(), Some("7"));
+        assert_eq!(market.team_a_id, Some(TeamId::from("7")));
         assert_eq!(market.volume_24hr, Some(Decimal::new(125, 1)));
         assert_eq!(market.volume_1wk, Some(Decimal::from(13)));
         assert_eq!(market.volume_24hr_clob, Some(Decimal::new(125, 2)));
@@ -1209,25 +1313,68 @@ mod tests {
         assert_eq!(fees.rebate_rate, None);
         assert_eq!(market.events.as_ref().unwrap().len(), 1);
         assert_eq!(market.tags.as_ref().unwrap()[0].id, Some(TagId::from("2")));
+
+        // String-typed fields stay strings and number-typed fields stay numbers.
+        let value = serde_json::to_value(&market).unwrap();
+        assert_eq!(value["liquidity"], serde_json::json!("1500.25"));
+        assert_eq!(value["volume"], serde_json::json!("2000"));
+        assert_eq!(value["teamAID"], serde_json::json!("7"));
+        assert_eq!(value["volume1wk"], serde_json::json!(13));
+        assert_eq!(value["volume24hr"], serde_json::json!(12.5));
     }
 
+    /// The string-typed amounts (`liquidity`, `volume`, `fee`, `umaBond`, `umaReward`):
+    /// `""` and `null` are "absent", other non-numeric text is a decode error.
     #[test]
-    fn number_fields_serialize_as_numbers_and_strings_as_strings() {
+    fn string_amounts_treat_empty_as_none() {
+        let market: Market = serde_json::from_str(
+            r#"{"liquidity":"","volume":"","fee":null,"umaBond":"  ","umaReward":"5"}"#,
+        )
+        .unwrap();
+        assert_eq!(market.liquidity, None);
+        assert_eq!(market.volume, None);
+        assert_eq!(market.fee, None);
+        assert_eq!(market.uma_bond, None);
+        assert_eq!(market.uma_reward, Some(Decimal::from(5)));
+
+        for field in ["liquidity", "volume", "fee", "umaBond", "umaReward"] {
+            let json = format!(r#"{{"{field}":"n/a"}}"#);
+            let err = serde_json::from_str::<Market>(&json).unwrap_err();
+            assert!(err.to_string().contains("n/a"), "{field}: {err}");
+        }
+    }
+
+    /// Lenient decoding beyond the spec: a string-typed amount sent as a JSON number and a
+    /// number-typed field sent as a numeric string are accepted, and serialize back in
+    /// their documented wire type.
+    #[test]
+    fn amounts_accept_the_other_json_representation() {
         let market: Market =
-            serde_json::from_str(r#"{"liquidity":"1.5","liquidityNum":1.5}"#).unwrap();
+            serde_json::from_str(r#"{"liquidity":1.5,"liquidityNum":"1.5"}"#).unwrap();
+        assert_eq!(market.liquidity, Some(Decimal::new(15, 1)));
+        assert_eq!(market.liquidity_num, Some(Decimal::new(15, 1)));
         let value = serde_json::to_value(&market).unwrap();
         assert_eq!(value["liquidity"], serde_json::json!("1.5"));
         assert_eq!(value["liquidityNum"], serde_json::json!(1.5));
     }
 
     #[test]
-    fn deserializes_keyset_page() {
+    fn deserializes_keyset_page_and_accessors() {
         let page: MarketsKeysetPage =
             serde_json::from_str(r#"{"markets":[{"id":"1"}],"next_cursor":"abc"}"#).unwrap();
-        assert_eq!(page.markets.unwrap().len(), 1);
+        assert_eq!(page.items().len(), 1);
+        assert_eq!(page.next_cursor(), Some("abc"));
         assert_eq!(page.next_cursor.as_deref(), Some("abc"));
+        assert_eq!(page.clone().into_items()[0].id, Some(MarketId::from("1")));
+
         let last: MarketsKeysetPage = serde_json::from_str(r#"{"markets":[]}"#).unwrap();
-        assert_eq!(last.next_cursor, None);
+        assert_eq!(last.next_cursor(), None);
+        assert!(last.items().is_empty());
+
+        let empty: MarketsKeysetPage = serde_json::from_str(r#"{"next_cursor":""}"#).unwrap();
+        assert_eq!(empty.next_cursor(), None);
+        assert!(empty.items().is_empty());
+        assert!(empty.into_items().is_empty());
     }
 
     #[test]
@@ -1252,11 +1399,59 @@ mod tests {
             })
         );
 
-        let bad = MarketsInformationParams {
-            id: vec![MarketId::from("abc")],
-            ..MarketsInformationParams::default()
+        for (params, parameter) in [
+            (
+                MarketsInformationParams {
+                    id: vec![MarketId::from("abc")],
+                    ..MarketsInformationParams::default()
+                },
+                "id",
+            ),
+            (
+                MarketsInformationParams {
+                    tag_id: Some(TagId::from("-1")),
+                    ..MarketsInformationParams::default()
+                },
+                "tagId",
+            ),
+        ] {
+            let err = params.into_body().unwrap_err();
+            let crate::Error::Validation(v) = &err else {
+                panic!("expected a validation error, got {err:?}")
+            };
+            assert_eq!(v.parameter(), parameter);
+        }
+    }
+
+    #[test]
+    fn integer_typed_query_filters_are_validated() {
+        let ok = ListMarketsParams {
+            id: vec![MarketId::from("1")],
+            tag_id: Some(TagId::from("2")),
+            ..ListMarketsParams::default()
         };
-        let err = bad.into_body().unwrap_err();
-        assert!(matches!(err, crate::Error::Validation(_)), "{err:?}");
+        assert!(ok.validate().is_ok());
+        let bad = ListMarketsParams {
+            tag_id: Some(TagId::from("politics")),
+            ..ListMarketsParams::default()
+        };
+        assert!(
+            matches!(bad.validate(), Err(crate::Error::Validation(v)) if v.parameter() == "tag_id")
+        );
+
+        let bad = ListMarketsKeysetParams {
+            tag_id: vec![TagId::from("1"), TagId::from("x")],
+            ..ListMarketsKeysetParams::default()
+        };
+        assert!(
+            matches!(bad.validate(), Err(crate::Error::Validation(v)) if v.parameter() == "tag_id")
+        );
+        let bad = ListMarketsKeysetParams {
+            id: vec![MarketId::from("")],
+            ..ListMarketsKeysetParams::default()
+        };
+        assert!(
+            matches!(bad.validate(), Err(crate::Error::Validation(v)) if v.parameter() == "id")
+        );
     }
 }

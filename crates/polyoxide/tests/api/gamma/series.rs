@@ -28,7 +28,7 @@ async fn list_series_sends_every_filter_and_decodes() {
         .offset(6)
         .order("volume")
         .ascending(false)
-        .slug(["nba", "nfl"])
+        .slugs(["nba", "nfl"])
         .categories_ids([1, 2])
         .categories_labels(["Sports"])
         .closed(false)

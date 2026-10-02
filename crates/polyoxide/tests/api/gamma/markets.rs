@@ -13,7 +13,10 @@ use wiremock::{
     matchers::{body_json, method, path, query_param},
 };
 
-use super::{fixture, json, json_value, pairs, query_of, requests, validation_error};
+use super::{
+    fixture, internal_error, json, json_value, no_retry_gamma, pairs, query_of, requests,
+    service_unavailable, validation_error,
+};
 use crate::common;
 
 #[tokio::test]
@@ -34,8 +37,8 @@ async fn list_markets_sends_every_filter_and_decodes() {
         .offset(4)
         .order("volume_num")
         .ascending(false)
-        .id(["1", "2"])
-        .slug(["a-b"])
+        .ids(["1", "2"])
+        .slugs(["a-b"])
         .clob_token_ids([TokenId::from("71321")])
         .condition_ids([ConditionId::from("0xabc")])
         .liquidity_num_min(10)
@@ -270,9 +273,9 @@ async fn list_markets_keyset_sends_filters_and_decodes_page() {
         .limit(100)
         .order("volume_num,liquidity_num")
         .ascending(true)
-        .after_cursor("c0")
-        .id(["1"])
-        .slug(["s"])
+        .cursor("c0")
+        .ids(["1"])
+        .slugs(["s"])
         .closed(false)
         .decimalized(true)
         .clob_token_ids(["7"])
@@ -286,7 +289,7 @@ async fn list_markets_keyset_sends_filters_and_decodes_page() {
         .start_date_max(at)
         .end_date_min(at)
         .end_date_max(at)
-        .tag_id(["1", "2"])
+        .tag_ids(["1", "2"])
         .related_tags(false)
         .tag_match("any")
         .cyom(true)
@@ -336,8 +339,9 @@ async fn list_markets_keyset_sends_filters_and_decodes_page() {
             ("locale", "en"),
         ])
     );
+    assert_eq!(page.items().len(), 1);
+    assert_eq!(page.next_cursor(), Some("next-1"));
     assert_eq!(page.markets.unwrap().len(), 1);
-    assert_eq!(page.next_cursor.as_deref(), Some("next-1"));
 }
 
 #[tokio::test]
@@ -421,7 +425,7 @@ async fn list_markets_keyset_surfaces_gamma_validation_errors() {
     let err = common::polymarket(&server)
         .gamma()
         .list_markets_keyset()
-        .after_cursor("bogus")
+        .cursor("bogus")
         .send()
         .await
         .unwrap_err();
@@ -475,8 +479,8 @@ async fn markets_information_posts_json_body() {
     let markets = common::polymarket(&server)
         .gamma()
         .get_markets_information()
-        .id(["1", "2"])
-        .slug(["a"])
+        .ids(["1", "2"])
+        .slugs(["a"])
         .closed(false)
         .clob_token_ids(["71321"])
         .condition_ids(["0xc"])
@@ -551,7 +555,7 @@ async fn markets_information_rejects_non_integer_ids_before_sending() {
     let err = common::polymarket(&server)
         .gamma()
         .get_markets_information()
-        .id(["not-a-number"])
+        .ids(["not-a-number"])
         .send()
         .await
         .unwrap_err();
@@ -581,4 +585,98 @@ async fn malformed_market_is_a_decode_error_with_path() {
         panic!("expected Error::Decode, got {err:?}")
     };
     assert_eq!(decode.path(), "volumeNum");
+}
+
+#[tokio::test]
+async fn list_markets_keyset_reports_documented_500_and_503() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/markets/keyset"))
+        .and(query_param("limit", "5"))
+        .respond_with(internal_error())
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/markets/keyset"))
+        .respond_with(service_unavailable())
+        .mount(&server)
+        .await;
+
+    let gamma = no_retry_gamma(&server);
+    let err = gamma
+        .list_markets_keyset()
+        .limit(5)
+        .send()
+        .await
+        .unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status().as_u16(), 500);
+    assert_eq!(api.error_type(), Some("internal error"));
+
+    let err = gamma.list_markets_keyset().send().await.unwrap_err();
+    let api = err.api_error().unwrap();
+    assert_eq!(api.status().as_u16(), 503);
+    assert_eq!(api.error_type(), Some("service unavailable"));
+    assert_eq!(api.message(), Some("keyset pagination is not configured"));
+}
+
+#[tokio::test]
+async fn markets_information_rejects_non_integer_tag_id_before_sending() {
+    let server = common::server().await;
+    let err = common::polymarket(&server)
+        .gamma()
+        .get_markets_information()
+        .tag_id("abc")
+        .send()
+        .await
+        .unwrap_err();
+    let Error::Validation(v) = &err else {
+        panic!("expected Error::Validation, got {err:?}")
+    };
+    assert_eq!(v.parameter(), "tagId");
+    assert!(requests(&server).await.is_empty());
+}
+
+/// One empty string-typed amount no longer fails the whole page: `""` decodes as `None`.
+#[tokio::test]
+async fn empty_string_amounts_decode_as_none() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/markets"))
+        .respond_with(json(
+            r#"[{"id":"1","liquidity":"","volume":"12.5","fee":null,"umaBond":"","umaReward":""}]"#,
+        ))
+        .mount(&server)
+        .await;
+
+    let markets = common::polymarket(&server)
+        .gamma()
+        .list_markets()
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(markets[0].liquidity, None);
+    assert_eq!(markets[0].volume, Some(Decimal::new(125, 1)));
+    assert_eq!(markets[0].uma_bond, None);
+}
+
+#[tokio::test]
+async fn non_numeric_string_amount_is_a_decode_error_with_path() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/markets"))
+        .respond_with(json(r#"[{"id":"1","liquidity":"lots"}]"#))
+        .mount(&server)
+        .await;
+
+    let err = common::polymarket(&server)
+        .gamma()
+        .list_markets()
+        .send()
+        .await
+        .unwrap_err();
+    let Error::Decode(decode) = &err else {
+        panic!("expected Error::Decode, got {err:?}")
+    };
+    assert_eq!(decode.path(), "[0].liquidity");
 }

@@ -3,7 +3,11 @@
 //! The Gamma docs publish no example response bodies, so `fixtures/*.json` are generated
 //! from `components/schemas` in `docs/specs/gamma-openapi.yaml`: every documented property
 //! is present with a placeholder value of its documented type (nested `Market`, `Event` and
-//! `Series` objects are reduced to `{"id": "9"}`).
+//! `Series` objects are reduced to `{"id": "9"}`). The exception is the amounts the spec
+//! types as plain `string` (`Market` `liquidity`, `volume`, `fee`, `umaBond`, `umaReward`
+//! and `CommentPosition.positionSize`): they hold numeric strings (`"1.5"`), because the
+//! crate decodes them as decimals. Whether the server always sends numeric text there is
+//! an open question; `""` and `null` decode as `None`.
 
 mod comments;
 mod events;
@@ -15,6 +19,7 @@ mod series;
 mod sports;
 mod status;
 mod tags;
+mod validation;
 
 use serde_json::Value;
 use wiremock::{MockServer, ResponseTemplate};
@@ -81,6 +86,37 @@ pub fn strip_nulls(value: Value) -> Value {
         Value::Array(items) => Value::Array(items.into_iter().map(strip_nulls).collect()),
         other => other,
     }
+}
+
+/// A Gamma client for `server` that never retries, so `5xx` tests do not back off.
+pub fn no_retry_gamma(server: &MockServer) -> polyoxide::gamma::GammaClient {
+    let http = polyoxide::HttpClient::builder()
+        .retry_policy(polyoxide::RetryPolicy::none())
+        .build()
+        .unwrap();
+    polyoxide::gamma::GammaClient::builder()
+        .base_url(server.uri())
+        .http_client(http)
+        .build()
+        .unwrap()
+}
+
+/// A `500` Gamma internal error (`components/schemas/InternalError`, using the spec's
+/// example values).
+pub fn internal_error() -> ResponseTemplate {
+    ResponseTemplate::new(500).set_body_raw(
+        r#"{"type":"internal error","error":"cannot get the information"}"#,
+        "application/json",
+    )
+}
+
+/// A `503` Gamma service-unavailable error (`components/schemas/ServiceUnavailableError`,
+/// using the spec's example values).
+pub fn service_unavailable() -> ResponseTemplate {
+    ResponseTemplate::new(503).set_body_raw(
+        r#"{"type":"service unavailable","error":"keyset pagination is not configured"}"#,
+        "application/json",
+    )
 }
 
 /// A `422` Gamma validation error (`components/schemas/ValidationError`, using the spec's

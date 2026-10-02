@@ -18,8 +18,6 @@ async fn list_tags_sends_query_and_decodes() {
     let server = common::server().await;
     Mock::given(method("GET"))
         .and(path("/tags"))
-        .and(query_param("limit", "2"))
-        .and(query_param("ascending", "true"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
             r#"[{"id":"1","label":"Politics","slug":"politics"},{"id":"2","label":"Sports"}]"#,
             "application/json",
@@ -33,10 +31,25 @@ async fn list_tags_sends_query_and_decodes() {
         .gamma()
         .list_tags()
         .limit(2)
+        .offset(4)
+        .order("label")
         .ascending(true)
+        .include_template(true)
+        .is_carousel(false)
         .send()
         .await
         .unwrap();
+    assert_eq!(
+        query_of(&server, 0).await,
+        pairs(&[
+            ("limit", "2"),
+            ("offset", "4"),
+            ("order", "label"),
+            ("ascending", "true"),
+            ("include_template", "true"),
+            ("is_carousel", "false"),
+        ])
+    );
     assert_eq!(tags.len(), 2);
     assert_eq!(tags[0].slug.as_deref(), Some("politics"));
 }

@@ -17,7 +17,7 @@ Base URL `https://gamma-api.polymarket.com`, spec [`docs/specs/gamma-openapi.yam
 
 | Status | Method | Path | Docs | Rust |
 |---|---|---|---|---|
-| [x] | `GET` | `/status` | spec only (`getGammaStatus`) | `GammaClient::status` |
+| [x] | `GET` | `/status` | spec only (`getGammaStatus`) | `GammaClient::get_status` |
 | [x] | `GET` | `/teams` | [local](docs/api-reference/sports/list-teams.md) / [online](https://docs.polymarket.com/api-reference/sports/list-teams) | `GammaClient::list_teams` |
 | [x] | `GET` | `/teams/{id}` | spec only (`getTeam`) | `GammaClient::get_team` |
 | [x] | `GET` | `/tags` | [local](docs/api-reference/tags/list-tags.md) / [online](https://docs.polymarket.com/api-reference/tags/list-tags) | `GammaClient::list_tags` |

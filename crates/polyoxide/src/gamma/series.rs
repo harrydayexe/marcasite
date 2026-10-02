@@ -7,7 +7,10 @@ use polyoxide_core::{Query, Result, pagination::offset_stream, serde_util};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use super::{Category, Chat, Collection, CommentCount, Event, GammaClient, Tag, util::setters};
+use super::{
+    Category, Chat, Collection, CommentCount, Event, GammaClient, Tag,
+    util::{check_integer_id, check_path_text, setters},
+};
 
 polyoxide_core::string_id! {
     /// A Gamma series id (sent as a string in responses; an integer in paths and filters).
@@ -106,7 +109,8 @@ pub struct Series {
     pub tags: Option<Vec<Tag>>,
     /// Number of comments.
     pub comment_count: Option<i64>,
-    /// Chats (included with `include_chat=true`).
+    /// Chats. The keyset event listing documents a series' chats as included only with
+    /// `include_chat=true`.
     pub chats: Option<Vec<Chat>>,
 }
 
@@ -156,9 +160,6 @@ impl GammaClient {
 
     /// Gets a series by id.
     ///
-    /// Fails with [`Error::Api`](crate::Error::Api) (status `404`) if the series does not
-    /// exist; see [`Error::is_not_found`](crate::Error::is_not_found).
-    ///
     /// See <https://docs.polymarket.com/api-reference/series/get-series-by-id>.
     pub fn get_series(&self, id: impl Into<SeriesId>) -> GetSeries {
         GetSeries {
@@ -175,10 +176,13 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing series is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if `id` is not an
+    ///   integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the series does not exist;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn get_series_comment_count(&self, id: impl Into<SeriesId>) -> Result<CommentCount> {
         let id = id.into();
+        check_integer_id("id", id.as_str())?;
         self.transport
             .get(&["series", id.as_str(), "comments", "count"])
             .send()
@@ -192,10 +196,13 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing series is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if `id` is not an
+    ///   integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the series does not exist;
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn get_series_summary(&self, id: impl Into<SeriesId>) -> Result<SeriesSummary> {
         let id = id.into();
+        check_integer_id("id", id.as_str())?;
         self.transport
             .get(&["series-summary", id.as_str()])
             .send()
@@ -209,11 +216,18 @@ impl GammaClient {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing series is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
-    pub async fn get_series_summary_by_slug(&self, slug: impl AsRef<str>) -> Result<SeriesSummary> {
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `slug`) if `slug` is
+    ///   empty, `.` or `..`, checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the series does not exist;
+    /// - otherwise see [`Error`](crate::Error).
+    pub async fn get_series_summary_by_slug(
+        &self,
+        slug: impl Into<String>,
+    ) -> Result<SeriesSummary> {
+        let slug = slug.into();
+        check_path_text("slug", &slug)?;
         self.transport
-            .get(&["series-summary", "slug", slug.as_ref()])
+            .get(&["series-summary", "slug", slug.as_str()])
             .send()
             .await
     }
@@ -229,8 +243,8 @@ pub struct ListSeries {
 
 #[derive(Debug, Clone, Default)]
 struct ListSeriesParams {
-    limit: Option<u64>,
-    offset: Option<u64>,
+    limit: Option<u32>,
+    offset: Option<u32>,
     order: Option<String>,
     ascending: Option<bool>,
     slug: Vec<String>,
@@ -262,27 +276,28 @@ impl ListSeriesParams {
 
 impl ListSeries {
     setters! {
-        /// Maximum number of series per page.
-        limit: u64;
-        /// Number of series to skip.
-        offset: u64;
-        /// Comma-separated list of fields to order by.
+        /// Maximum number of series per page (`limit`; the docs give a minimum of `0` and
+        /// no maximum).
+        limit: u32;
+        /// Number of series to skip (`offset`).
+        offset: u32;
+        /// Comma-separated list of fields to order by (`order`).
         order: into String;
-        /// Sort ascending (`true`) or descending (`false`).
+        /// Sort ascending (`true`) or descending (`false`) (`ascending`).
         ascending: bool;
-        /// Only series with these slugs.
-        slug: many String;
-        /// Only series in these category ids.
+        /// Filter by slugs (`slug`, repeated).
+        slugs => slug: many String;
+        /// Filter by category ids (`categories_ids`, repeated integers).
         categories_ids: many i64;
-        /// Only series in these category labels.
+        /// Filter by category labels (`categories_labels`, repeated).
         categories_labels: many String;
-        /// Only closed (`true`) or only open (`false`) series.
+        /// The `closed` filter (documented only as a boolean).
         closed: bool;
-        /// Include each series' chats.
+        /// The `include_chat` flag (documented only as a boolean on this endpoint).
         include_chat: bool;
-        /// Only series with this recurrence.
+        /// The `recurrence` filter (a string; the spec documents no values).
         recurrence: into String;
-        /// Leave out each series' events.
+        /// The `exclude_events` flag (documented only as a boolean).
         exclude_events: bool;
     }
 
@@ -301,16 +316,17 @@ impl ListSeries {
     ///
     /// See [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<Series>> {
-        self.fetch(self.params.offset).await
+        self.fetch(self.params.offset.map(u64::from)).await
     }
 
     /// Streams every series from the configured offset onwards, fetching pages lazily.
     ///
-    /// The stream ends at the first empty page. A page shorter than
-    /// [`limit`](Self::limit) does not end it, because the server may cap the page size, so
-    /// the last request returns an empty page.
+    /// The stream ends at the first empty page, or right after yielding the first error.
+    /// A page shorter than [`limit`](Self::limit) does not end it, because the docs give no
+    /// maximum `limit` and the server may return fewer series, so the last request returns
+    /// an empty page.
     pub fn into_stream(self) -> Paginated<Series> {
-        let start = self.params.offset.unwrap_or(0);
+        let start = self.params.offset.map_or(0, u64::from);
         offset_stream(start, move |offset| {
             let request = self.clone();
             async move { request.fetch(Some(offset)).await }
@@ -334,7 +350,7 @@ struct GetSeriesParams {
 
 impl GetSeries {
     setters! {
-        /// Include the series' chats.
+        /// The `include_chat` flag (documented only as a boolean on this endpoint).
         include_chat: bool;
     }
 
@@ -342,9 +358,13 @@ impl GetSeries {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); a missing series is an [`Error::Api`](crate::Error::Api)
-    /// with status `404`.
+    /// - [`Error::Validation`](crate::Error::Validation) (parameter `id`) if the id is not
+    ///   an integer (one or more ASCII digits), checked before sending;
+    /// - [`Error::Api`](crate::Error::Api) with status `404` if the series does not exist
+    ///   (see [`Error::is_not_found`](crate::Error::is_not_found));
+    /// - otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Series> {
+        check_integer_id("id", self.id.as_str())?;
         let mut query = Query::new();
         query.push_opt("include_chat", self.params.include_chat);
         self.client
