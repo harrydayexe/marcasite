@@ -1502,6 +1502,63 @@ mod tests {
         assert_eq!(value["liquidityNum"], serde_json::json!(1.5));
     }
 
+    /// `outcomes`, `outcomePrices`, `clobTokenIds` and `umaResolutionStatuses` decode from a
+    /// JSON-encoded string (every route but the optimized search) or a real array (optimized
+    /// search), and serialize back to the string form. Live format: see
+    /// `SPEC_DEVIATIONS.md` and `tests/api/gamma/fixtures/live`.
+    #[test]
+    fn list_in_string_fields_accept_both_encodings() {
+        let encoded: Market = serde_json::from_str(
+            r#"{"outcomes":"[\"Yes\", \"No\"]","outcomePrices":"[\"0.1\", \"0.9\"]",
+                "clobTokenIds":"[\"11\", \"22\"]","umaResolutionStatuses":"[\"proposed\"]"}"#,
+        )
+        .unwrap();
+        let array: Market = serde_json::from_str(
+            r#"{"outcomes":["Yes","No"],"outcomePrices":["0.1","0.9"],
+                "clobTokenIds":["11","22"],"umaResolutionStatuses":["proposed"]}"#,
+        )
+        .unwrap();
+        assert_eq!(encoded, array);
+        assert_eq!(
+            encoded.outcomes,
+            Some(vec!["Yes".to_owned(), "No".to_owned()])
+        );
+        assert_eq!(
+            encoded.outcome_prices,
+            Some(vec![Decimal::new(1, 1), Decimal::new(9, 1)])
+        );
+        assert_eq!(
+            encoded.clob_token_ids,
+            Some(vec![TokenId::from("11"), TokenId::from("22")])
+        );
+        assert_eq!(
+            encoded.uma_resolution_statuses,
+            Some(vec!["proposed".to_owned()])
+        );
+
+        let value = serde_json::to_value(&encoded).unwrap();
+        assert_eq!(value["outcomes"], serde_json::json!("[\"Yes\",\"No\"]"));
+        assert_eq!(
+            value["outcomePrices"],
+            serde_json::json!("[\"0.1\",\"0.9\"]")
+        );
+        assert_eq!(value["clobTokenIds"], serde_json::json!("[\"11\",\"22\"]"));
+
+        // Absent, `null` and `""` are `None`; `[]` is an empty list.
+        let none: Market = serde_json::from_str(
+            r#"{"outcomes":null,"outcomePrices":"","umaResolutionStatuses":"[]"}"#,
+        )
+        .unwrap();
+        assert_eq!(none.outcomes, None);
+        assert_eq!(none.outcome_prices, None);
+        assert_eq!(none.clob_token_ids, None);
+        assert_eq!(none.uma_resolution_statuses, Some(Vec::new()));
+
+        // Text that is not a JSON list is a decode error, not a silent `None`.
+        assert!(serde_json::from_str::<Market>(r#"{"outcomes":"Yes,No"}"#).is_err());
+        assert!(serde_json::from_str::<Market>(r#"{"outcomePrices":"[\"n/a\"]"}"#).is_err());
+    }
+
     #[test]
     fn deserializes_keyset_page_and_accessors() {
         let page: MarketsKeysetPage =
