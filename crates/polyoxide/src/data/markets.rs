@@ -3,14 +3,15 @@
 
 use crate::Paginated;
 use chrono::{DateTime, Utc};
-use polyoxide_core::{Query, Result, ValidationError, serde_util};
+use polyoxide_core::{Query, Result, ValidationError, serde_util, validate};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::{
     DataClient,
     types::{
-        Page, check_limit, check_list, check_required_list, collect_ids, distinct, page_stream,
+        Page, check_limit, collect_ids, condition_id, distinct_values, integer_id, page_stream,
+        positive_integer_id, required_values,
     },
 };
 use crate::types::{Address, ConditionId, EventId, QuestionId, TokenId};
@@ -42,8 +43,8 @@ pub struct HolderGroup {
 
 /// One market holder, enriched with their public profile (`components/schemas/Holder`).
 ///
-/// The position economics (`avg_price` to `total_pnl`) are only served with
-/// [`ListHolders::include_pnl`].
+/// The seven position-economics fields (`avg_price` to `total_pnl`) are only served with
+/// [`ListHolders::include_pnl`]; they are `None` otherwise.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Holder {
@@ -57,6 +58,7 @@ pub struct Holder {
     pub pseudonym: String,
     /// Holding in shares: net across the market's outcomes by default, per-side gross with
     /// `include_pnl`.
+    #[serde(with = "serde_util::decimal_number")]
     pub amount: Decimal,
     /// Whether the profile chose to show its name publicly.
     pub display_username_public: bool,
@@ -72,18 +74,25 @@ pub struct Holder {
     /// Profile verification badge.
     pub verified: bool,
     /// Historical entry price per share.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub avg_price: Option<Decimal>,
     /// Cost basis of the held size in USDC, excluding entry fees.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub entry_cost_usdc: Option<Decimal>,
     /// Current price of the held outcome token, in `[0, 1]`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub current_price: Option<Decimal>,
     /// `amount × current_price`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub current_value: Option<Decimal>,
     /// Profit already locked in by sells and redemptions.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub realized_pnl: Option<Decimal>,
     /// `current_value - entry_cost_usdc`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub unrealized_pnl: Option<Decimal>,
     /// `realized_pnl + unrealized_pnl`.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub total_pnl: Option<Decimal>,
 }
 
@@ -92,10 +101,11 @@ pub struct Holder {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct OpenInterest {
-    /// Condition id the row answers for; `GLOBAL` for the global figure (see
-    /// [`is_global`](Self::is_global)).
+    /// Condition id the row answers for. On the global figure it holds the sentinel
+    /// `GLOBAL`, which is not a condition id: check [`is_global`](Self::is_global) first.
     pub condition_id: ConditionId,
     /// Priced gross open interest, in USDC; `0` when nothing is held.
+    #[serde(with = "serde_util::decimal_number")]
     pub value: Decimal,
 }
 
@@ -116,6 +126,7 @@ impl OpenInterest {
 #[non_exhaustive]
 pub struct LiveVolume {
     /// Sum of the rows' `taker_volume`, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub taker_volume_total: Decimal,
     /// One row per market, `taker_volume` descending; empty when the events resolve to no
     /// markets.
@@ -129,6 +140,7 @@ pub struct ConditionVolume {
     /// On-chain condition id of the market.
     pub condition_id: ConditionId,
     /// Cumulative one-side (taker) volume in shares, truncated to 6 decimals.
+    #[serde(with = "serde_util::decimal_number")]
     pub taker_volume: Decimal,
 }
 
@@ -161,9 +173,14 @@ pub struct PricePoint {
     #[serde(with = "serde_util::timestamp_seconds")]
     pub timestamp: DateTime<Utc>,
     /// Price, in `0..=1`.
+    #[serde(with = "serde_util::decimal_number")]
     pub price: Decimal,
     /// Width in seconds of the window the price was observed in: `0` for an exact tick,
     /// the bucket width for an aggregate.
+    ///
+    /// On a request that pins [`bucket_seconds`](ListPricesHistory::bucket_seconds), it
+    /// echoes the requested grid, not the density of what filled it; counting rows is the
+    /// only density measure.
     pub resolution_seconds: i64,
 }
 
@@ -258,7 +275,7 @@ pub struct Resolution {
     /// one.
     pub transaction_hash: String,
     /// Log index of the latest lifecycle event, as a numeric string; empty where
-    /// `transaction_hash` is empty.
+    /// `transaction_hash` is empty. Kept as served (a string, as the schema types it).
     pub log_index: String,
     /// Latest lifecycle change, as served: epoch seconds on question-keyed rows, RFC 3339
     /// on condition-keyed rows. See [`last_update_time`](Self::last_update_time).
@@ -283,6 +300,9 @@ pub struct Resolution {
     pub price: Option<String>,
     /// Price of the first proposal, as a numeric string; `69` means unset. Question-keyed
     /// rows only.
+    ///
+    /// The UMA price fields are kept as the served strings: the docs give neither their
+    /// scale nor their range, so they are not converted to a [`Decimal`].
     pub proposed_price: Option<String>,
     /// Price of the second proposal, as a numeric string (same conventions as
     /// `proposed_price`).
@@ -317,6 +337,10 @@ impl Resolution {
 
 /// Which resolution rows to fetch with [`DataClient::get_resolutions`]: exactly one
 /// selector family per request.
+///
+/// The ids are checked when the request is sent: a question id must be `0x` followed by
+/// 64 hex digits, condition ids likewise, and event ids positive integers; lists accept
+/// at most 20 distinct values, and duplicates are sent once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ResolutionSelector {
@@ -356,18 +380,20 @@ impl ResolutionSelector {
         let mut q = Query::new();
         match self {
             Self::Question(id) => {
-                if id.as_str().trim().is_empty() {
-                    return Err(ValidationError::new("question_id", "must not be empty").into());
-                }
+                validate::bytes32("question_id", id.as_str())?;
                 q.push("question_id", id);
             }
             Self::Conditions(ids) => {
-                check_required_list("condition", ids)?;
-                q.push_csv("condition", ids);
+                q.push_csv(
+                    "condition",
+                    required_values("condition", ids, condition_id)?,
+                );
             }
             Self::Events(ids) => {
-                check_required_list("event_id", ids)?;
-                q.push_csv("event_id", ids);
+                q.push_csv(
+                    "event_id",
+                    required_values("event_id", ids, positive_integer_id)?,
+                );
             }
         }
         Ok(q)
@@ -385,7 +411,7 @@ impl DataClient {
     /// (`GET /v2/holders`, cursor-paginated).
     ///
     /// `conditions` is required: between 1 and 20 distinct condition ids (exactly one with
-    /// [`include_pnl`](ListHolders::include_pnl)).
+    /// [`include_pnl`](ListHolders::include_pnl)). Duplicates are sent once.
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/list-a-markets-top-holders>.
     pub fn list_holders<I>(&self, conditions: I) -> ListHolders
@@ -415,37 +441,62 @@ impl DataClient {
     }
 
     /// Gets the cumulative taker volume of every market under the given events
-    /// (`GET /v2/live-volume`); between 1 and 20 distinct event ids.
+    /// (`GET /v2/live-volume`); between 1 and 20 distinct integer event ids.
+    ///
+    /// The server ignores ids it cannot parse, so a typo would silently drop an event;
+    /// this client rejects any id that is not made of ASCII digits instead. Duplicates are
+    /// sent once.
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-live-volume-for-an-event>.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if no event id or more than
-    /// 20 distinct event ids are given; otherwise see [`Error`](crate::Error) (all ids
-    /// unparseable is an [`Error::Api`](crate::Error::Api) with status `400`).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if no event id is given, an
+    /// id is not an integer, or more than 20 distinct ids are given; otherwise see
+    /// [`Error`](crate::Error).
     pub async fn get_live_volume<I>(&self, event_ids: I) -> Result<LiveVolume>
     where
         I: IntoIterator,
         I::Item: Into<EventId>,
     {
         let event_ids: Vec<EventId> = collect_ids(event_ids);
-        check_required_list("event_id", &event_ids)?;
+        let event_ids = required_values("event_id", &event_ids, integer_id)?;
         let mut query = Query::new();
         query.push_csv("event_id", &event_ids);
         self.fetch_data(&["v2", "live-volume"], query).await
     }
 
-    /// Gets a token's price history, or a single point-in-time observation
+    /// Lists a token's price history, or a single point-in-time observation
     /// (`GET /v2/prices-history`, cursor-paginated).
     ///
-    /// Choose exactly one window form: [`start`](GetPricesHistory::start) (with an optional
-    /// [`end`](GetPricesHistory::end)), [`interval`](GetPricesHistory::interval), or
-    /// [`as_of`](GetPricesHistory::as_of).
+    /// Choose exactly one window form: [`start`](ListPricesHistory::start) (with an
+    /// optional [`end`](ListPricesHistory::end)), [`interval`](ListPricesHistory::interval),
+    /// or [`as_of`](ListPricesHistory::as_of).
     ///
     /// See <https://docs.polymarket.com/api-reference/markets/get-a-tokens-price-history>.
-    pub fn get_prices_history(&self, token_id: impl Into<TokenId>) -> GetPricesHistory {
-        GetPricesHistory {
+    ///
+    /// ```no_run
+    /// # async fn run() -> polyoxide::Result<()> {
+    /// use futures_util::TryStreamExt as _;
+    /// use polyoxide::data::{DataClient, PriceHistoryInterval};
+    ///
+    /// let data = DataClient::new()?;
+    /// let points: Vec<_> = data
+    ///     .list_prices_history(
+    ///         "31974447302330162086995746309500877260929998201718217388109724292047967921664",
+    ///     )
+    ///     .interval(PriceHistoryInterval::OneWeek)
+    ///     .bucket_seconds(1800)
+    ///     .into_stream()
+    ///     .try_collect()
+    ///     .await?;
+    /// // The last point is the terminal point: the latest observation in the window.
+    /// # let _ = points;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_prices_history(&self, token_id: impl Into<TokenId>) -> ListPricesHistory {
+        ListPricesHistory {
             client: self.clone(),
             token_id: token_id.into(),
             start: None,
@@ -465,8 +516,9 @@ impl DataClient {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) for an empty selector or one
-    /// with more than 20 distinct ids; otherwise see [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) for an empty selector, one
+    /// with more than 20 distinct ids, or a malformed id (see [`ResolutionSelector`]);
+    /// otherwise see [`Error`](crate::Error).
     pub async fn get_resolutions(&self, selector: ResolutionSelector) -> Result<Vec<Resolution>> {
         let query = selector.query()?;
         self.fetch_data(&["v2", "resolutions"], query).await
@@ -487,7 +539,8 @@ pub struct ListHolders {
 
 impl ListHolders {
     /// Rows per outcome token (`limit`, default 100, at most 1000; at most 100 with
-    /// [`include_pnl`](Self::include_pnl)). Overridden by a cursor.
+    /// [`include_pnl`](Self::include_pnl)). A cursor carries its own window and overrides
+    /// it.
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -514,10 +567,10 @@ impl ListHolders {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
-        check_required_list("condition", &self.conditions)?;
+        let conditions = required_values("condition", &self.conditions, condition_id)?;
         check_limit(self.limit, MAX_HOLDERS_LIMIT)?;
         if self.include_pnl == Some(true) {
-            if distinct(&self.conditions) != 1 {
+            if conditions.len() != 1 {
                 return Err(ValidationError::new(
                     "condition",
                     "exactly one condition id is accepted with `include_pnl`",
@@ -527,7 +580,7 @@ impl ListHolders {
             check_limit(self.limit, MAX_HOLDERS_PNL_LIMIT)?;
         }
         let mut q = Query::new();
-        q.push_csv("condition", &self.conditions)
+        q.push_csv("condition", &conditions)
             .push_opt("limit", self.limit)
             .push_opt("cursor", cursor)
             .push_opt("min_balance", self.min_balance)
@@ -540,8 +593,9 @@ impl ListHolders {
     /// # Errors
     ///
     /// Returns [`Error::Validation`](crate::Error::Validation) if no condition id or more
-    /// than 20 are given, `limit` is above 1000, or `include_pnl` is combined with several
-    /// condition ids or a `limit` above 100; otherwise see [`Error`](crate::Error).
+    /// than 20 distinct ones are given, one is not `0x` followed by 64 hex digits, `limit`
+    /// is above 1000, or `include_pnl` is combined with several condition ids or a `limit`
+    /// above 100; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<HolderGroup>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(HOLDERS, query).await
@@ -553,7 +607,7 @@ impl ListHolders {
     /// Every page re-sends the same `condition` list with the cursor, as the API requires.
     /// Page walks advance every token group together, so a token's holders are spread
     /// over several groups: merge them by [`HolderGroup::token_id`]. The stream ends when
-    /// `next_cursor` is `null`.
+    /// the server reports no further page.
     pub fn into_stream(self) -> Paginated<HolderGroup> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -571,7 +625,7 @@ pub struct GetOpenInterest {
 
 impl GetOpenInterest {
     /// Condition ids (`condition`, at most 20 distinct values). Omit for the global
-    /// figure.
+    /// figure. Duplicates are sent once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -586,20 +640,21 @@ impl GetOpenInterest {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if more than 20 condition ids
-    /// are given; otherwise see [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if a condition id is not
+    /// `0x` followed by 64 hex digits or more than 20 distinct ids are given; otherwise
+    /// see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Vec<OpenInterest>> {
-        check_list("condition", &self.conditions)?;
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         let mut query = Query::new();
-        query.push_csv("condition", &self.conditions);
+        query.push_csv("condition", &conditions);
         self.client.fetch_data(&["v2", "oi"], query).await
     }
 }
 
-/// Request builder for [`DataClient::get_prices_history`].
+/// Request builder for [`DataClient::list_prices_history`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetPricesHistory {
+pub struct ListPricesHistory {
     client: DataClient,
     token_id: TokenId,
     start: Option<DateTime<Utc>>,
@@ -611,15 +666,18 @@ pub struct GetPricesHistory {
     cursor: Option<String>,
 }
 
-impl GetPricesHistory {
-    /// Inclusive window start (`start`). Alone it means "up to the present" and is capped
-    /// at 15 days back; set [`end`](Self::end) too when paging.
+impl ListPricesHistory {
+    /// Inclusive window start (`start`, epoch seconds). Alone it means "up to the
+    /// present" and is capped at 15 days back from now; set [`end`](Self::end) too when
+    /// paging, because the cap is re-checked on every page. Explicit `start`/`end`
+    /// windows cap at 15 days; the [`interval`](Self::interval) presets are the
+    /// long-range path.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Exclusive window end (`end`). Requires [`start`](Self::start).
+    /// Exclusive window end (`end`, epoch seconds). Requires [`start`](Self::start).
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
@@ -639,21 +697,25 @@ impl GetPricesHistory {
         self
     }
 
-    /// Point-in-time read: the latest observation at or before this instant (`as_of`).
-    /// Cannot be combined with a window.
+    /// Point-in-time read: the latest observation at or before this instant (`as_of`,
+    /// epoch seconds). Cannot be combined with a window.
     pub fn as_of(mut self, as_of: DateTime<Utc>) -> Self {
         self.as_of = Some(as_of);
         self
     }
 
     /// First-page size (`limit`, default and maximum 10 000). Ignored by the server once a
-    /// cursor is supplied.
+    /// cursor is supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
     }
 
     /// Resumes from a previous page's [`next_cursor`](Page::next_cursor) (`cursor`).
+    ///
+    /// The docs do not say whether a cursor page must restate the window; a request with
+    /// a cursor and no window form is sent as is. [`into_stream`](Self::into_stream)
+    /// always restates the window.
     pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
         self.cursor = Some(cursor.into());
         self
@@ -681,7 +743,8 @@ impl GetPricesHistory {
             )
             .into());
         }
-        // A cursor may carry the window; otherwise exactly one window form is required.
+        // Exactly one window form per request. Whether a cursor page needs it restated is
+        // not documented, so a cursor without a window form is passed through.
         if forms == 0 && cursor.is_none() {
             return Err(ValidationError::new(
                 "start",
@@ -689,6 +752,7 @@ impl GetPricesHistory {
             )
             .into());
         }
+        // A `0` bound is a documented `400`; a negative one is never meaningful.
         for (name, bound) in [
             ("start", self.start),
             ("end", self.end),
@@ -729,10 +793,11 @@ impl GetPricesHistory {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if the window is missing or
-    /// ambiguous, `end` is set without `start`, a bound is not after the Unix epoch,
-    /// `bucket_seconds` is outside 60..=86400, or `limit` is above 10 000; otherwise see
-    /// [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if the token id is empty,
+    /// the window is missing (without a cursor) or ambiguous, `end` is set without
+    /// `start`, a bound is not after the Unix epoch, `bucket_seconds` is outside
+    /// 60..=86400, or `limit` is above 10 000; otherwise see [`Error`](crate::Error). The
+    /// 15-day cap of explicit windows is enforced by the server only.
     pub async fn send(self) -> Result<Page<PricePoint>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(PRICES_HISTORY, query).await
@@ -742,7 +807,7 @@ impl GetPricesHistory {
     ///
     /// Every page re-sends the same token and window with the cursor. The terminal point
     /// (the latest observation in the window) and a resolved market's settlement point
-    /// arrive on the final page. The stream ends when `next_cursor` is `null`.
+    /// arrive on the final page. The stream ends when the server reports no further page.
     pub fn into_stream(self) -> Paginated<PricePoint> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -755,41 +820,68 @@ impl GetPricesHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::types::Envelope;
+    use crate::data::types::{
+        Envelope,
+        test_ids::{CONDITION, CONDITION_2},
+    };
+    use polyoxide_core::Error;
+
+    /// A holder row from `components/schemas/Holder` without `include_pnl`: none of the
+    /// seven position-economics fields is served.
+    const HOLDER: &str = r#"{
+      "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
+      "bio": "",
+      "token_id": "1",
+      "pseudonym": "Calm-Owl",
+      "amount": 1500.25,
+      "display_username_public": true,
+      "outcome_index": 0,
+      "name": "",
+      "profile_image": "",
+      "profile_image_optimized": "",
+      "verified": false
+    }"#;
 
     /// Field names and types from `components/schemas/HoldersPage`, `MetaHolder` and
     /// `Holder` in `docs/specs/data-v2-openapi.json`.
     #[test]
     fn deserializes_holders_page() {
-        let json = r#"{
-          "data": [{
-            "token_id": "1",
-            "holders": [{
-              "proxy_wallet": "0xabc",
-              "bio": "",
-              "token_id": "1",
-              "pseudonym": "Calm-Owl",
-              "amount": 1500.25,
-              "display_username_public": true,
-              "outcome_index": 0,
-              "name": "",
-              "profile_image": "",
-              "profile_image_optimized": "",
-              "verified": false,
-              "avg_price": 0.4,
-              "current_price": null
-            }]
-          }],
-          "pagination": {"limit": 100, "offset": 0, "has_more": false, "next_cursor": null}
-        }"#;
-        let page: Page<HolderGroup> = serde_json::from_str(json).unwrap();
-        let group = page.items.first().unwrap();
+        let json = format!(
+            r#"{{
+              "data": [{{"token_id": "1", "holders": [{HOLDER}]}}],
+              "pagination": {{"limit": 100, "offset": 0, "has_more": false, "next_cursor": null}}
+            }}"#
+        );
+        let page: Page<HolderGroup> = serde_json::from_str(&json).unwrap();
+        let group = page.items().first().unwrap();
         let holder = group.holders.first().unwrap();
         assert_eq!(holder.amount.to_string(), "1500.25");
-        assert_eq!(holder.avg_price, Some(Decimal::new(4, 1)));
-        assert_eq!(holder.current_price, None);
+        assert_eq!(holder.avg_price, None);
         assert_eq!(holder.total_pnl, None);
         assert_eq!(page.next_cursor(), None);
+    }
+
+    /// With `include_pnl=true` all seven position-economics fields are served.
+    #[test]
+    fn deserializes_holder_with_pnl() {
+        let json = HOLDER.replace(
+            r#""verified": false"#,
+            r#""verified": false,
+              "avg_price": 0.4,
+              "entry_cost_usdc": 600.1,
+              "current_price": 0.5,
+              "current_value": 750.125,
+              "realized_pnl": -2,
+              "unrealized_pnl": 150.025,
+              "total_pnl": 148.025"#,
+        );
+        let holder: Holder = serde_json::from_str(&json).unwrap();
+        assert_eq!(holder.avg_price, Some(Decimal::new(4, 1)));
+        assert_eq!(holder.current_price, Some(Decimal::new(5, 1)));
+        assert_eq!(holder.total_pnl, Some(Decimal::new(148_025, 3)));
+        let value = serde_json::to_value(&holder).unwrap();
+        assert_eq!(value["realized_pnl"], serde_json::json!(-2));
+        assert_eq!(value["amount"], serde_json::json!(1500.25));
     }
 
     /// `/v2/oi` without `condition` serves the global figure (`condition_id = "GLOBAL"`,
@@ -812,6 +904,10 @@ mod tests {
             serde_json::from_str(r#"{"data":{"taker_volume_total":0.0,"conditions":[]}}"#).unwrap();
         assert_eq!(env.data.taker_volume_total, Decimal::ZERO);
         assert!(env.data.conditions.is_empty());
+        assert_eq!(
+            serde_json::to_value(&env.data).unwrap(),
+            serde_json::json!({"taker_volume_total": 0, "conditions": []})
+        );
     }
 
     /// Field names and types from `components/schemas/ResolutionWithSettlementTime` /
@@ -833,7 +929,7 @@ mod tests {
             "settlement_time_basis": "liveness"
           },
           {
-            "condition_id": "0xdef",
+            "condition_id": "0xd9b06e2fd9ddb7ab61c9e3d5d8e074c555802478bbf75145804ff709a4246f79",
             "status": "resolved",
             "extended_review": false,
             "was_disputed": true,
@@ -883,6 +979,17 @@ mod tests {
         .unwrap();
         assert_eq!(point.price.to_string(), "0.515");
         assert_eq!(point.resolution_seconds, 0);
+        assert_eq!(
+            serde_json::to_value(&point).unwrap(),
+            serde_json::json!({"timestamp": 1787133600, "price": 0.515, "resolution_seconds": 0})
+        );
+    }
+
+    fn validation_parameter(result: Result<Query>) -> String {
+        match result {
+            Err(Error::Validation(v)) => v.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -890,45 +997,56 @@ mod tests {
         let client = DataClient::new().unwrap();
         let at = DateTime::from_timestamp(1_787_133_600, 0).unwrap();
         // No window.
-        assert!(client.get_prices_history("1").query(None).is_err());
-        // A cursor may carry the window.
-        assert!(client.get_prices_history("1").query(Some("c")).is_ok());
+        assert_eq!(
+            validation_parameter(client.list_prices_history("1").query(None)),
+            "start"
+        );
+        // With a cursor and no window form, the request is passed through (undocumented
+        // whether the cursor carries the window).
+        assert!(client.list_prices_history("1").query(Some("c")).is_ok());
         // Two windows.
-        assert!(
-            client
-                .get_prices_history("1")
-                .start(at)
-                .interval(PriceHistoryInterval::Max)
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_prices_history("1")
+                    .start(at)
+                    .interval(PriceHistoryInterval::Max)
+                    .query(None)
+            ),
+            "interval"
         );
         // `end` without `start`.
-        assert!(
-            client
-                .get_prices_history("1")
-                .end(at)
-                .query(Some("c"))
-                .is_err()
+        assert_eq!(
+            validation_parameter(client.list_prices_history("1").end(at).query(Some("c"))),
+            "end"
         );
         // Bucket width out of range.
-        assert!(
-            client
-                .get_prices_history("1")
-                .as_of(at)
-                .bucket_seconds(59)
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_prices_history("1")
+                    .as_of(at)
+                    .bucket_seconds(59)
+                    .query(None)
+            ),
+            "bucket_seconds"
         );
-        // A zero bound is rejected by the server; reject it client-side.
-        assert!(
-            client
-                .get_prices_history("1")
-                .start(DateTime::UNIX_EPOCH)
-                .query(None)
-                .is_err()
+        // A zero bound is a documented `400`; reject it client-side.
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_prices_history("1")
+                    .start(DateTime::UNIX_EPOCH)
+                    .query(None)
+            ),
+            "start"
+        );
+        assert_eq!(
+            validation_parameter(client.list_prices_history(" ").as_of(at).query(None)),
+            "token_id"
         );
         let q = client
-            .get_prices_history("1")
+            .list_prices_history("1")
             .interval(PriceHistoryInterval::OneWeek)
             .bucket_seconds(300)
             .query(None)
@@ -939,47 +1057,90 @@ mod tests {
     #[test]
     fn holders_and_resolutions_validation() {
         let client = DataClient::new().unwrap();
-        assert!(
-            client
-                .list_holders(Vec::<String>::new())
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(client.list_holders(Vec::<String>::new()).query(None)),
+            "condition"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_holders([CONDITION, CONDITION_2])
+                    .include_pnl(true)
+                    .query(None)
+            ),
+            "condition"
+        );
+        // The same id twice is one distinct id.
+        let q = client
+            .list_holders([CONDITION, CONDITION])
+            .include_pnl(true)
+            .query(None)
+            .unwrap();
+        assert_eq!(q.get("condition"), Some(CONDITION));
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_holders([CONDITION])
+                    .include_pnl(true)
+                    .limit(101)
+                    .query(None)
+            ),
+            "limit"
         );
         assert!(
             client
-                .list_holders(["0x1", "0x2"])
-                .include_pnl(true)
-                .query(None)
-                .is_err()
-        );
-        assert!(
-            client
-                .list_holders(["0x1"])
-                .include_pnl(true)
-                .limit(101)
-                .query(None)
-                .is_err()
-        );
-        assert!(
-            client
-                .list_holders(["0x1"])
+                .list_holders([CONDITION])
                 .include_pnl(true)
                 .limit(100)
                 .query(None)
                 .is_ok()
         );
-        assert!(
-            ResolutionSelector::events(Vec::<String>::new())
-                .query()
-                .is_err()
-        );
-        assert!(ResolutionSelector::question("").query().is_err());
         assert_eq!(
-            ResolutionSelector::conditions(["0x1", "0x2"])
+            validation_parameter(client.list_holders(["0x1"]).query(None)),
+            "condition"
+        );
+
+        let selector_parameter = |selector: ResolutionSelector| match selector.query() {
+            Err(Error::Validation(v)) => v.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        };
+        assert_eq!(
+            selector_parameter(ResolutionSelector::events(Vec::<String>::new())),
+            "event_id"
+        );
+        assert_eq!(
+            selector_parameter(ResolutionSelector::events(["0"])),
+            "event_id"
+        );
+        assert_eq!(
+            selector_parameter(ResolutionSelector::events(["12a"])),
+            "event_id"
+        );
+        assert_eq!(
+            selector_parameter(ResolutionSelector::question("")),
+            "question_id"
+        );
+        assert_eq!(
+            selector_parameter(ResolutionSelector::question("0x1234")),
+            "question_id"
+        );
+        assert_eq!(
+            selector_parameter(ResolutionSelector::conditions(["0x1"])),
+            "condition"
+        );
+        assert_eq!(
+            ResolutionSelector::conditions([CONDITION, CONDITION_2, CONDITION])
                 .query()
                 .unwrap()
                 .to_string(),
-            "condition=0x1%2C0x2"
+            format!("condition={CONDITION}%2C{CONDITION_2}")
+        );
+        assert_eq!(
+            ResolutionSelector::events(["20", "10", "20"])
+                .query()
+                .unwrap()
+                .to_string(),
+            "event_id=20%2C10"
         );
     }
 }

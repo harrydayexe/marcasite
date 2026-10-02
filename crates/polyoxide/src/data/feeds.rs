@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     DataClient,
     types::{
-        ComboLeg, FilterType, Page, SortDirection, check_limit, check_list, collect_ids,
-        page_stream,
+        ComboLeg, FilterType, Page, SortDirection, any_value, check_limit, check_user, collect_ids,
+        condition_id, distinct_values, empty_string_or, epoch_seconds, page_stream,
     },
 };
 use crate::types::{Address, ConditionId, EventId, Side, TokenId};
@@ -21,6 +21,10 @@ const COMBO_ACTIVITY: &[&str] = &["v2", "activity", "combos"];
 
 /// Maximum `limit` of the feeds.
 const MAX_FEED_LIMIT: u32 = 1000;
+
+/// The `start` value that asks `/v2/trades?user=` and `/v2/activity` for the full history
+/// (`start=1`); an omitted or `0` start floors to three years back.
+const FULL_HISTORY_START: i64 = 1;
 
 /// A trade (`components/schemas/Trade`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,8 +39,10 @@ pub struct Trade {
     /// On-chain condition id of the market.
     pub condition_id: ConditionId,
     /// Filled quantity, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub size: Decimal,
     /// Execution price per share, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub price: Decimal,
     /// Block timestamp of the fill.
     #[serde(with = "serde_util::timestamp_seconds")]
@@ -128,18 +134,21 @@ pub struct Activity {
     #[serde(rename = "type")]
     pub activity_type: ActivityType,
     /// Share quantity of the action (for tips, the amount transferred).
+    #[serde(with = "serde_util::decimal_number")]
     pub size: Decimal,
     /// Cash value of the action, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub usdc_size: Decimal,
     /// Hash of the settling transaction.
     pub transaction_hash: String,
     /// Price per share in USDC (trades; `0` where no price applies).
+    #[serde(with = "serde_util::decimal_number")]
     pub price: Decimal,
     /// CLOB asset id of the outcome token the action touched.
     pub token_id: TokenId,
     /// Direction: `BUY`/`SELL` on trade rows, `IN`/`OUT` on tips; `None` where a side does
-    /// not apply (served as `""`).
-    #[serde(deserialize_with = "serde_util::empty_string_as_none")]
+    /// not apply (served as `""`, and serialized back as `""`).
+    #[serde(with = "empty_string_or")]
     pub side: Option<ActivitySide>,
     /// Index of the outcome;
     /// [`UNLABELED_OUTCOME_INDEX`](super::UNLABELED_OUTCOME_INDEX) means it could not be
@@ -165,8 +174,9 @@ pub struct Activity {
     pub profile_image: String,
     /// Resized profile image URL, when one exists.
     pub profile_image_optimized: String,
-    /// Set on combo trade rows; omitted (`None`) on non-combo rows. Combo detail lives on
-    /// [`DataClient::list_combo_activity`].
+    /// Set on combo trade rows; omitted (`None`, and left out when serialized) on
+    /// non-combo rows. Combo detail lives on [`DataClient::list_combo_activity`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_combo: Option<bool>,
 }
 
@@ -218,8 +228,10 @@ pub struct ComboActivity {
     /// The combo's legs, in leg order.
     pub legs: Vec<ComboLeg>,
     /// Cash amount of the action, in USDC; `None` where no cash leg applies.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub amount_usdc: Option<Decimal>,
     /// Redemption payout in USDC on `REDEEM` rows; `None` otherwise.
+    #[serde(default, with = "serde_util::decimal_number_option")]
     pub payout_usdc: Option<Decimal>,
 }
 
@@ -329,7 +341,7 @@ impl ListTrades {
     }
 
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -361,22 +373,32 @@ impl ListTrades {
         self
     }
 
-    /// Inclusive window start on the block timestamp (`start`). Honoured with
-    /// [`user`](Self::user) only: omitted floors to three years back, and the Unix
-    /// timestamp `1` asks for full history.
+    /// Inclusive window start on the block timestamp (`start`, epoch seconds). Honoured
+    /// with [`user`](Self::user) only; the other shapes ignore it.
+    ///
+    /// Omitted, or the Unix epoch (sent as `0`), floors the window to three years back;
+    /// use [`full_history`](Self::full_history) for the full history.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Inclusive window end (`end`). Honoured with [`user`](Self::user) only; omitted
-    /// means now plus one day.
+    /// Asks for the full history instead of the default three years: sends `start=1`, as
+    /// documented. Honoured with [`user`](Self::user) only. Replaces any
+    /// [`start`](Self::start).
+    pub fn full_history(mut self) -> Self {
+        self.start = DateTime::from_timestamp(FULL_HISTORY_START, 0);
+        self
+    }
+
+    /// Inclusive window end (`end`, epoch seconds). Honoured with [`user`](Self::user)
+    /// only; omitted (or the Unix epoch, sent as `0`) means now plus one day.
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
     }
 
-    /// Condition ids (`condition`, at most 20 distinct values).
+    /// Condition ids (`condition`, at most 20 distinct values). Duplicates are sent once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -386,7 +408,7 @@ impl ListTrades {
         self
     }
 
-    /// Gamma event ids (`event_id`, at most 20 distinct values).
+    /// Gamma event ids (`event_id`, at most 20 distinct values). Duplicates are sent once.
     pub fn event_ids<I>(mut self, event_ids: I) -> Self
     where
         I: IntoIterator,
@@ -403,9 +425,14 @@ impl ListTrades {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
+        if let Some(user) = &self.user {
+            check_user(user)?;
+        }
         check_limit(self.limit, MAX_FEED_LIMIT)?;
-        check_list("condition", &self.conditions)?;
-        check_list("event_id", &self.event_ids)?;
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
+        let event_ids = distinct_values("event_id", &self.event_ids, any_value)?;
+        let start = epoch_seconds("start", self.start)?;
+        let end = epoch_seconds("end", self.end)?;
         let mut q = Query::new();
         q.push_opt("user", self.user.as_ref())
             .push_opt("limit", self.limit)
@@ -413,10 +440,10 @@ impl ListTrades {
             .push_opt("taker_only", self.taker_only)
             .push_opt("filter_type", self.filter_type.as_ref())
             .push_opt("filter_amount", self.filter_amount)
-            .push_opt("start", self.start.map(|t| t.timestamp()))
-            .push_opt("end", self.end.map(|t| t.timestamp()))
-            .push_csv("condition", &self.conditions)
-            .push_csv("event_id", &self.event_ids)
+            .push_opt("start", start)
+            .push_opt("end", end)
+            .push_csv("condition", &conditions)
+            .push_csv("event_id", &event_ids)
             .push_opt("side", self.side.as_ref());
         Ok(q)
     }
@@ -425,9 +452,10 @@ impl ListTrades {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if `limit` is above 1000 or
-    /// more than 20 condition or event ids are given; otherwise see
-    /// [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is set but empty,
+    /// `limit` is above 1000, a condition id is not `0x` followed by 64 hex digits, more
+    /// than 20 distinct condition or event ids are given, or a bound is before the Unix
+    /// epoch; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<Trade>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(TRADES, query).await
@@ -437,7 +465,7 @@ impl ListTrades {
     ///
     /// The cursor carries only the seek anchor and page size, so every page re-sends the
     /// same filters (changing one mid-walk would silently re-anchor the feed). The stream
-    /// ends when `next_cursor` is `null`.
+    /// ends when the server reports no further page.
     pub fn into_stream(self) -> Paginated<Trade> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -465,7 +493,8 @@ pub struct ListActivity {
 }
 
 impl ListActivity {
-    /// Page size (`limit`, default 100, at most 1000).
+    /// Page size (`limit`, default 100, at most 1000). Per the overview, it only applies
+    /// to the first page: once a cursor is supplied, the cursor's own page size wins.
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -486,7 +515,7 @@ impl ListActivity {
     }
 
     /// Condition ids (`condition`, at most 20 distinct values). Mutually exclusive with
-    /// [`event_ids`](Self::event_ids).
+    /// [`event_ids`](Self::event_ids). Duplicates are sent once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -497,7 +526,8 @@ impl ListActivity {
     }
 
     /// Gamma event ids, resolved to the events' markets (`event_id`, at most 20 distinct
-    /// values). Mutually exclusive with [`conditions`](Self::conditions).
+    /// values). Mutually exclusive with [`conditions`](Self::conditions). Duplicates are
+    /// sent once.
     pub fn event_ids<I>(mut self, event_ids: I) -> Self
     where
         I: IntoIterator,
@@ -513,14 +543,24 @@ impl ListActivity {
         self
     }
 
-    /// Inclusive window start on the block timestamp (`start`). Omitted floors to three
-    /// years back; the Unix timestamp `1` asks for full history.
+    /// Inclusive window start on the block timestamp (`start`, epoch seconds).
+    ///
+    /// Omitted, or the Unix epoch (sent as `0`), floors the window to three years back;
+    /// use [`full_history`](Self::full_history) for the full history.
     pub fn start(mut self, start: DateTime<Utc>) -> Self {
         self.start = Some(start);
         self
     }
 
-    /// Inclusive window end (`end`); omitted means now plus one day.
+    /// Asks for the full history instead of the default three years: sends `start=1`, as
+    /// documented. Replaces any [`start`](Self::start).
+    pub fn full_history(mut self) -> Self {
+        self.start = DateTime::from_timestamp(FULL_HISTORY_START, 0);
+        self
+    }
+
+    /// Inclusive window end (`end`, epoch seconds); omitted (or the Unix epoch, sent as
+    /// `0`) means now plus one day.
     pub fn end(mut self, end: DateTime<Utc>) -> Self {
         self.end = Some(end);
         self
@@ -532,7 +572,8 @@ impl ListActivity {
         self
     }
 
-    /// Sort direction (`sort_direction`, default [`SortDirection::Desc`]).
+    /// Sort direction (`sort_direction`, default [`SortDirection::Desc`]). The cursor
+    /// binds it, and streams re-send it on every page.
     pub fn sort_direction(mut self, sort_direction: SortDirection) -> Self {
         self.sort_direction = Some(sort_direction);
         self
@@ -545,26 +586,29 @@ impl ListActivity {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
+        check_user(&self.user)?;
         check_limit(self.limit, MAX_FEED_LIMIT)?;
-        check_list("condition", &self.conditions)?;
-        check_list("event_id", &self.event_ids)?;
-        if !self.conditions.is_empty() && !self.event_ids.is_empty() {
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
+        let event_ids = distinct_values("event_id", &self.event_ids, any_value)?;
+        if !conditions.is_empty() && !event_ids.is_empty() {
             return Err(ValidationError::new(
                 "event_id",
                 "`event_id` and `condition` are mutually exclusive",
             )
             .into());
         }
+        let start = epoch_seconds("start", self.start)?;
+        let end = epoch_seconds("end", self.end)?;
         let mut q = Query::new();
         q.push("user", &self.user)
             .push_opt("limit", self.limit)
             .push_opt("cursor", cursor)
             .push_csv("type", &self.types)
-            .push_csv("condition", &self.conditions)
-            .push_csv("event_id", &self.event_ids)
+            .push_csv("condition", &conditions)
+            .push_csv("event_id", &event_ids)
             .push_opt("side", self.side.as_ref())
-            .push_opt("start", self.start.map(|t| t.timestamp()))
-            .push_opt("end", self.end.map(|t| t.timestamp()))
+            .push_opt("start", start)
+            .push_opt("end", end)
             .push_opt("sort_by", self.sort_by.as_ref())
             .push_opt("sort_direction", self.sort_direction.as_ref())
             .push_opt(
@@ -578,9 +622,10 @@ impl ListActivity {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if `limit` is above 1000,
-    /// more than 20 condition or event ids are given, or both are given; otherwise see
-    /// [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
+    /// is above 1000, a condition id is not `0x` followed by 64 hex digits, more than 20
+    /// distinct condition or event ids are given, both are given, or a bound is before
+    /// the Unix epoch; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<Activity>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(ACTIVITY, query).await
@@ -590,8 +635,9 @@ impl ListActivity {
     /// lazily.
     ///
     /// The cursor carries only the seek anchor, page size and sort direction, so every
-    /// page re-sends the same filters (changing one mid-walk would silently re-anchor the
-    /// feed). The stream ends when `next_cursor` is `null`.
+    /// page re-sends the same filters and sort direction (changing a filter mid-walk would
+    /// silently re-anchor the feed). The stream ends when the server reports no further
+    /// page.
     pub fn into_stream(self) -> Paginated<Activity> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -624,7 +670,8 @@ impl ListComboActivity {
         self
     }
 
-    /// Combo condition ids (`condition`, at most 20 distinct values).
+    /// Combo condition ids (`condition`, at most 20 distinct values). Duplicates are sent
+    /// once.
     pub fn conditions<I>(mut self, conditions: I) -> Self
     where
         I: IntoIterator,
@@ -635,13 +682,14 @@ impl ListComboActivity {
     }
 
     fn query(&self, cursor: Option<&str>) -> Result<Query> {
+        check_user(&self.user)?;
         check_limit(self.limit, MAX_FEED_LIMIT)?;
-        check_list("condition", &self.conditions)?;
+        let conditions = distinct_values("condition", &self.conditions, condition_id)?;
         let mut q = Query::new();
         q.push("user", &self.user)
             .push_opt("limit", self.limit)
             .push_opt("cursor", cursor)
-            .push_csv("condition", &self.conditions);
+            .push_csv("condition", &conditions);
         Ok(q)
     }
 
@@ -649,8 +697,9 @@ impl ListComboActivity {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Validation`](crate::Error::Validation) if `limit` is above 1000 or
-    /// more than 20 condition ids are given; otherwise see [`Error`](crate::Error).
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty, `limit`
+    /// is above 1000, a condition id is not `0x` followed by 64 hex digits, or more than
+    /// 20 distinct condition ids are given; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Page<ComboActivity>> {
         let query = self.query(self.cursor.as_deref())?;
         self.client.fetch_page(COMBO_ACTIVITY, query).await
@@ -660,8 +709,8 @@ impl ListComboActivity {
     /// pages lazily.
     ///
     /// Every page re-sends `user` and the same filters with the cursor (the feed rule:
-    /// changing a filter mid-walk re-anchors it). The stream ends when `next_cursor` is
-    /// `null`.
+    /// changing a filter mid-walk re-anchors it). The stream ends when the server reports
+    /// no further page.
     pub fn into_stream(self) -> Paginated<ComboActivity> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -674,6 +723,8 @@ impl ListComboActivity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::types::test_ids::{COMBO_CONDITION, CONDITION, WALLET};
+    use polyoxide_core::Error;
 
     /// Field names and types from `components/schemas/Trade` in
     /// `docs/specs/data-v2-openapi.json`.
@@ -705,6 +756,11 @@ mod tests {
         assert_eq!(trade.size, Decimal::from(100));
         assert_eq!(trade.price.to_string(), "0.5203");
         assert_eq!(trade.timestamp.timestamp(), 1_787_133_600);
+        // Amounts serialize back as JSON numbers, the timestamp as an integer.
+        let value = serde_json::to_value(&trade).unwrap();
+        assert_eq!(value["size"], serde_json::json!(100));
+        assert_eq!(value["price"], serde_json::json!(0.5203));
+        assert_eq!(value["timestamp"], serde_json::json!(1_787_133_600));
     }
 
     /// Field names and types from `components/schemas/Activity`; `side` is empty where a
@@ -712,9 +768,9 @@ mod tests {
     #[test]
     fn deserializes_activity() {
         let json = r#"{
-            "proxy_wallet": "0xabc",
+            "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "timestamp": 1787133600,
-            "condition_id": "0xdef",
+            "condition_id": "0xd9b06e2fd9ddb7ab61c9e3d5d8e074c555802478bbf75145804ff709a4246f79",
             "type": "REDEEM",
             "size": 10,
             "usdc_size": 10,
@@ -739,6 +795,11 @@ mod tests {
         assert_eq!(activity.side, None);
         assert_eq!(activity.is_combo, None);
         assert_eq!(activity.outcome_index, crate::data::UNLABELED_OUTCOME_INDEX);
+        // Re-serialized as on the wire: `side: ""`, no `is_combo`.
+        let value = serde_json::to_value(&activity).unwrap();
+        assert_eq!(value["side"], serde_json::json!(""));
+        assert!(value.get("is_combo").is_none());
+        assert_eq!(serde_json::from_value::<Activity>(value).unwrap(), activity);
 
         let tip = json
             .replace(r#""type": "REDEEM""#, r#""type": "TIP""#)
@@ -746,6 +807,17 @@ mod tests {
         let tip: Activity = serde_json::from_str(&tip).unwrap();
         assert_eq!(tip.activity_type, ActivityType::Tip);
         assert_eq!(tip.side, Some(ActivitySide::Out));
+        assert_eq!(serde_json::to_value(&tip).unwrap()["side"], "OUT");
+
+        let combo_trade = json
+            .replace(r#""type": "REDEEM""#, r#""type": "TRADE""#)
+            .replace(r#""side": """#, r#""side": "BUY""#)
+            .replace(
+                r#""profile_image_optimized": """#,
+                r#""profile_image_optimized": "", "is_combo": true"#,
+            );
+        let combo_trade: Activity = serde_json::from_str(&combo_trade).unwrap();
+        assert_eq!(combo_trade.is_combo, Some(true));
 
         // `side` is required by the schema (even when empty).
         let missing = json.replace(r#""side": "","#, "");
@@ -765,8 +837,8 @@ mod tests {
         let json = r#"{
             "id": "0xfeed-3",
             "type": "REDEEM",
-            "proxy_wallet": "0xabc",
-            "combo_condition_id": "0x03aa",
+            "proxy_wallet": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
+            "combo_condition_id": "0x03aa000000000000000000000000000000000000000000000000000000000001",
             "combo_position_id": "123",
             "block_number": 75000000,
             "timestamp": 1787133600,
@@ -779,28 +851,102 @@ mod tests {
         assert_eq!(row.activity_type, ComboActivityType::Redeem);
         assert_eq!(row.amount_usdc, None);
         assert_eq!(row.payout_usdc, Some(Decimal::new(125, 1)));
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["payout_usdc"], serde_json::json!(12.5));
+        assert_eq!(value["amount_usdc"], serde_json::Value::Null);
+    }
+
+    fn validation_parameter(result: Result<Query>) -> String {
+        match result {
+            Err(Error::Validation(v)) => v.parameter().to_owned(),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
     }
 
     #[test]
     fn activity_query() {
         let client = DataClient::new().unwrap();
-        assert!(
-            client
-                .list_activity("0xabc")
-                .conditions(["0x1"])
-                .event_ids(["1"])
-                .query(None)
-                .is_err()
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_activity(WALLET)
+                    .conditions([CONDITION])
+                    .event_ids(["1"])
+                    .query(None)
+            ),
+            "event_id"
+        );
+        assert_eq!(
+            validation_parameter(client.list_activity("").query(None)),
+            "user"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_activity(WALLET)
+                    .start(DateTime::from_timestamp(-1, 0).unwrap())
+                    .query(None)
+            ),
+            "start"
         );
         let q = client
-            .list_activity("0xabc")
+            .list_activity(WALLET)
             .types([ActivityType::Trade, ActivityType::Tip])
             .sort_direction(SortDirection::Asc)
+            .full_history()
             .query(Some("c"))
             .unwrap();
         assert_eq!(
             q.to_string(),
-            "user=0xabc&cursor=c&type=TRADE%2CTIP&sort_direction=ASC"
+            format!("user={WALLET}&cursor=c&type=TRADE%2CTIP&start=1&sort_direction=ASC")
+        );
+    }
+
+    #[test]
+    fn trades_query() {
+        let client = DataClient::new().unwrap();
+        // The Unix epoch is sent as `0` (the server's three-year floor); `full_history`
+        // sends the documented `1`.
+        let q = client
+            .list_trades()
+            .user(WALLET)
+            .start(DateTime::UNIX_EPOCH)
+            .query(None)
+            .unwrap();
+        assert_eq!(q.get("start"), Some("0"));
+        let q = client
+            .list_trades()
+            .user(WALLET)
+            .start(DateTime::UNIX_EPOCH)
+            .full_history()
+            .event_ids(["7", "7", "8"])
+            .query(None)
+            .unwrap();
+        assert_eq!(q.get("start"), Some("1"));
+        assert_eq!(q.get("event_id"), Some("7,8"));
+        assert_eq!(
+            validation_parameter(client.list_trades().user(" ").query(None)),
+            "user"
+        );
+        assert_eq!(
+            validation_parameter(client.list_trades().event_ids(["1,2"]).query(None)),
+            "event_id"
+        );
+        assert_eq!(
+            validation_parameter(
+                client
+                    .list_combo_activity(WALLET)
+                    .conditions(["0x03aa"])
+                    .query(None)
+            ),
+            "condition"
+        );
+        assert!(
+            client
+                .list_combo_activity(WALLET)
+                .conditions([COMBO_CONDITION])
+                .query(None)
+                .is_ok()
         );
     }
 }

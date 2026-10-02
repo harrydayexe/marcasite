@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     DataClient,
-    types::{Page, TimePeriod, check_limit, page_stream},
+    types::{Page, TimePeriod, check_limit, check_user, page_stream},
 };
-use crate::types::{Address, ConditionId, TokenId};
+use crate::types::{Address, ConditionId, EventId, TokenId};
 
 const LEADERBOARD: &[&str] = &["v2", "leaderboard"];
 const BIGGEST_WINNERS: &[&str] = &["v2", "biggest-winners"];
@@ -53,8 +53,10 @@ pub struct LeaderboardEntry {
     pub user_id: Address,
     /// Window PnL in USDC: the marked equity change net of flows for finite windows, the
     /// realized-only lifetime ledger for [`TimePeriod::All`].
+    #[serde(with = "serde_util::decimal_number")]
     pub pnl: Decimal,
     /// Both-sides traded volume, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Profile display name of the wallet.
     pub user_name: String,
@@ -74,8 +76,10 @@ pub struct LeaderboardUserEntry {
     /// The looked-up wallet.
     pub user_id: Address,
     /// Window PnL in USDC (same semantics as [`LeaderboardEntry::pnl`]).
+    #[serde(with = "serde_util::decimal_number")]
     pub pnl: Decimal,
     /// Both-sides traded volume, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Profile display name of the wallet.
     pub user_name: String,
@@ -85,12 +89,15 @@ pub struct LeaderboardUserEntry {
     pub x_username: String,
     /// Profile verification badge.
     pub verified: bool,
-    /// Rank on the PnL board; `None` when unranked there. (The endpoint description also
-    /// says a rank of `0` means unranked; the schema documents `null`. Treat both as
-    /// unranked.)
+    /// Rank on the PnL board, exposed as served.
+    ///
+    /// The docs give two readings of "unranked": the schema says a `null` rank (`None`)
+    /// means unranked on that board, while the `/v2/leaderboard` description says a rank
+    /// of `0` on this arm means unranked, not first. Treat both `None` and `Some(0)` as
+    /// unranked.
     pub rank_pnl: Option<u32>,
-    /// Rank on the volume board; `None` when unranked there (see
-    /// [`rank_pnl`](Self::rank_pnl) about `0`).
+    /// Rank on the volume board, exposed as served; `None` and `Some(0)` both mean
+    /// unranked (see [`rank_pnl`](Self::rank_pnl)).
     pub rank_volume: Option<u32>,
 }
 
@@ -118,10 +125,13 @@ pub struct BiggestWinner {
     /// The winning wallet.
     pub user_id: Address,
     /// `final_value - initial_value`, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub pnl: Decimal,
     /// Cost basis of the winning position, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub initial_value: Decimal,
     /// Value at resolution, in USDC.
+    #[serde(with = "serde_util::decimal_number")]
     pub final_value: Decimal,
     /// When the position resolved.
     #[serde(with = "serde_util::timestamp_seconds")]
@@ -130,9 +140,13 @@ pub struct BiggestWinner {
     pub condition_id: ConditionId,
     /// Token id of the winning position.
     pub position_id: TokenId,
-    /// Gamma event id of the parent event; `0` on combo rows. Served as a JSON integer
-    /// here, unlike the string event ids of the other routes.
-    pub event_id: i32,
+    /// Gamma event id of the parent event. Served as a JSON integer here (unlike the
+    /// string event ids of the other routes), and serialized back as one.
+    ///
+    /// Combo rows have no Gamma event and carry the sentinel `0`, kept as served: branch
+    /// on [`kind`](Self::kind) before building an event link.
+    #[serde(with = "serde_util::integer_id")]
+    pub event_id: EventId,
     /// Parent event slug; empty on combo rows.
     pub event_slug: String,
     /// Parent event title; on combo rows, the `" / "`-joined leg questions.
@@ -159,6 +173,7 @@ pub struct BuilderStanding {
     /// Whether the builder is verified.
     pub verified: bool,
     /// Volume attributed to the builder in the window, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Distinct active users (makers) attributed to the builder in the window.
     pub active_users: u64,
@@ -183,15 +198,17 @@ pub struct BuilderVolumePoint {
     /// Whether the builder is verified.
     pub verified: bool,
     /// Volume attributed in that bucket, in shares.
+    #[serde(with = "serde_util::decimal_number")]
     pub volume: Decimal,
     /// Distinct active users attributed in that bucket.
     pub active_users: u64,
 }
 
 impl DataClient {
-    /// Reads the trader leaderboard of realized PnL or volume
-    /// (`GET /v2/leaderboard`, cursor-paginated). For one wallet's standing use
-    /// [`get_leaderboard_standing`](Self::get_leaderboard_standing).
+    /// Lists the trader leaderboard of PnL or volume (`GET /v2/leaderboard`,
+    /// cursor-paginated). For one wallet's standing use
+    /// [`get_leaderboard_standing`](Self::get_leaderboard_standing), the `user=` arm of the
+    /// same route.
     ///
     /// See <https://docs.polymarket.com/api-reference/boards/get-the-trader-leaderboard>.
     ///
@@ -201,20 +218,20 @@ impl DataClient {
     ///
     /// let data = DataClient::new()?;
     /// let page = data
-    ///     .get_leaderboard()
+    ///     .list_leaderboard()
     ///     .time_period(TimePeriod::Week)
     ///     .sort_by(LeaderboardSortBy::Volume)
     ///     .limit(25)
     ///     .send()
     ///     .await?;
-    /// for entry in &page.items {
+    /// for entry in page.items() {
     ///     let _ = (entry.rank, &entry.user_name, entry.volume);
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_leaderboard(&self) -> GetLeaderboard {
-        GetLeaderboard {
+    pub fn list_leaderboard(&self) -> ListLeaderboard {
+        ListLeaderboard {
             client: self.clone(),
             time_period: None,
             category: None,
@@ -225,7 +242,8 @@ impl DataClient {
     }
 
     /// Looks up one wallet's standing on both trader boards
-    /// (`GET /v2/leaderboard?user=`).
+    /// (`GET /v2/leaderboard?user=`). For the board itself use
+    /// [`list_leaderboard`](Self::list_leaderboard), the other arm of the same route.
     ///
     /// See <https://docs.polymarket.com/api-reference/boards/get-the-trader-leaderboard>.
     pub fn get_leaderboard_standing(&self, user: impl Into<Address>) -> GetLeaderboardStanding {
@@ -251,12 +269,12 @@ impl DataClient {
         }
     }
 
-    /// Reads the builders leaderboard, ranked by volume
+    /// Lists the builders leaderboard, ranked by volume
     /// (`GET /v2/builders/leaderboard`, cursor-paginated).
     ///
     /// See <https://docs.polymarket.com/api-reference/boards/get-the-builders-leaderboard>.
-    pub fn get_builders_leaderboard(&self) -> GetBuildersLeaderboard {
-        GetBuildersLeaderboard {
+    pub fn list_builders_leaderboard(&self) -> ListBuildersLeaderboard {
+        ListBuildersLeaderboard {
             client: self.clone(),
             time_period: None,
             limit: None,
@@ -277,10 +295,10 @@ impl DataClient {
     }
 }
 
-/// Request builder for [`DataClient::get_leaderboard`].
+/// Request builder for [`DataClient::list_leaderboard`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetLeaderboard {
+pub struct ListLeaderboard {
     client: DataClient,
     time_period: Option<TimePeriod>,
     category: Option<String>,
@@ -289,7 +307,7 @@ pub struct GetLeaderboard {
     cursor: Option<String>,
 }
 
-impl GetLeaderboard {
+impl ListLeaderboard {
     /// The window (`time_period`, default [`TimePeriod::Day`]).
     pub fn time_period(mut self, time_period: TimePeriod) -> Self {
         self.time_period = Some(time_period);
@@ -310,7 +328,7 @@ impl GetLeaderboard {
     }
 
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -349,8 +367,8 @@ impl GetLeaderboard {
     /// Streams every row from the configured cursor onwards, fetching pages lazily.
     ///
     /// Every page restates the same board parameters with the cursor (allowed, since they
-    /// agree with the board the cursor pins). The stream ends when `next_cursor` is
-    /// `null`.
+    /// agree with the board the cursor pins). The stream ends when the server reports
+    /// no further page.
     pub fn into_stream(self) -> Paginated<LeaderboardEntry> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -386,9 +404,12 @@ impl GetLeaderboardStanding {
     ///
     /// # Errors
     ///
-    /// See [`Error`](crate::Error); an invalid `time_period` or a known protocol contract
-    /// address is an [`Error::Api`](crate::Error::Api) with status `400`.
+    /// Returns [`Error::Validation`](crate::Error::Validation) if `user` is empty (an empty
+    /// `user` would select the board arm of the route instead); an invalid `time_period`
+    /// or a known protocol contract address is an [`Error::Api`](crate::Error::Api) with
+    /// status `400`; otherwise see [`Error`](crate::Error).
     pub async fn send(self) -> Result<Option<LeaderboardUserEntry>> {
+        check_user(&self.user)?;
         let mut query = Query::new();
         query
             .push_opt("time_period", self.time_period.as_ref())
@@ -424,7 +445,7 @@ impl ListBiggestWinners {
     }
 
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -461,7 +482,7 @@ impl ListBiggestWinners {
     /// Streams every row from the configured cursor onwards, fetching pages lazily.
     ///
     /// Every page restates the same window and category with the cursor. The stream ends
-    /// when `next_cursor` is `null`.
+    /// when the server reports no further page.
     pub fn into_stream(self) -> Paginated<BiggestWinner> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -471,17 +492,17 @@ impl ListBiggestWinners {
     }
 }
 
-/// Request builder for [`DataClient::get_builders_leaderboard`].
+/// Request builder for [`DataClient::list_builders_leaderboard`].
 #[derive(Debug, Clone)]
 #[must_use = "requests do nothing until `.send()` or `.into_stream()` is used"]
-pub struct GetBuildersLeaderboard {
+pub struct ListBuildersLeaderboard {
     client: DataClient,
     time_period: Option<TimePeriod>,
     limit: Option<u32>,
     cursor: Option<String>,
 }
 
-impl GetBuildersLeaderboard {
+impl ListBuildersLeaderboard {
     /// The window (`time_period`, default [`TimePeriod::Day`]).
     pub fn time_period(mut self, time_period: TimePeriod) -> Self {
         self.time_period = Some(time_period);
@@ -489,7 +510,7 @@ impl GetBuildersLeaderboard {
     }
 
     /// First-page size (`limit`, at most 1000). Ignored by the server once a cursor is
-    /// supplied.
+    /// supplied (the cursor's own page size wins).
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit);
         self
@@ -525,7 +546,7 @@ impl GetBuildersLeaderboard {
     /// Streams every row from the configured cursor onwards, fetching pages lazily.
     ///
     /// Every page restates the same window with the cursor. The stream ends when
-    /// `next_cursor` is `null`.
+    /// the server reports no further page.
     pub fn into_stream(self) -> Paginated<BuilderStanding> {
         let client = self.client.clone();
         let start = self.cursor.clone();
@@ -581,13 +602,14 @@ impl GetBuildersVolume {
 mod tests {
     use super::*;
     use crate::data::types::Envelope;
+    use polyoxide_core::Error;
 
     /// Field names and types from `components/schemas/LeaderboardEntry`.
     #[test]
     fn deserializes_leaderboard_entry() {
         let json = r#"{
             "rank": 1,
-            "user_id": "0xabc",
+            "user_id": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "pnl": 12345.67,
             "volume": 99999.5,
             "user_name": "whale",
@@ -598,17 +620,19 @@ mod tests {
         let entry: LeaderboardEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.rank, 1);
         assert_eq!(entry.pnl.to_string(), "12345.67");
+        let value = serde_json::to_value(&entry).unwrap();
+        assert_eq!(value["pnl"], serde_json::json!(12345.67));
     }
 
     /// `components/schemas/Envelope_Option_LeaderboardUserEntry`: `data` may be `null`,
-    /// and a `null` rank means unranked on that board.
+    /// and ranks are exposed as served (`null`, or `0` per the endpoint description).
     #[test]
     fn deserializes_leaderboard_standing() {
         let none: Envelope<Option<LeaderboardUserEntry>> =
             serde_json::from_str(r#"{"data":null}"#).unwrap();
         assert_eq!(none.data, None);
         let json = r#"{"data":{
-            "user_id": "0xabc",
+            "user_id": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "pnl": -5,
             "volume": 10,
             "user_name": "",
@@ -616,40 +640,47 @@ mod tests {
             "x_username": "",
             "verified": false,
             "rank_pnl": null,
-            "rank_volume": 42
+            "rank_volume": 0
         }}"#;
         let entry = serde_json::from_str::<Envelope<Option<LeaderboardUserEntry>>>(json)
             .unwrap()
             .data
             .unwrap();
         assert_eq!(entry.rank_pnl, None);
-        assert_eq!(entry.rank_volume, Some(42));
+        assert_eq!(entry.rank_volume, Some(0));
     }
 
-    /// Field names and types from `components/schemas/BiggestWinner`: a combo row has
-    /// `event_id` `0` and an empty `event_slug`.
+    /// Field names and types from `components/schemas/BiggestWinner`: a combo row carries
+    /// the combo condition, a `' / '`-joined leg title, `event_id` `0` and an empty
+    /// `event_slug`.
     #[test]
     fn deserializes_biggest_winner() {
         let json = r#"{
             "win_rank": 1,
             "kind": "combo",
-            "user_id": "0xabc",
+            "user_id": "0x983eedfbd75803602e4a6e6ea9aab6dc6b9c6748",
             "pnl": 900,
             "initial_value": 100,
             "final_value": 1000,
             "resolved_at": 1787133600,
-            "condition_id": "0x03aa",
+            "condition_id": "0x03aa000000000000000000000000000000000000000000000000000000000001",
             "position_id": "123",
             "event_id": 0,
             "event_slug": "",
-            "event_title": "A / B",
+            "event_title": "Will A win? / Will B win?",
             "user_name": "",
             "profile_image": ""
         }"#;
         let row: BiggestWinner = serde_json::from_str(json).unwrap();
         assert_eq!(row.kind, WinKind::Combo);
-        assert_eq!(row.event_id, 0);
+        assert_eq!(row.event_id, EventId::from("0"));
         assert_eq!(row.resolved_at.timestamp(), 1_787_133_600);
+        // The integer id and the amounts serialize back as JSON numbers.
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["event_id"], serde_json::json!(0));
+        assert_eq!(value["pnl"], serde_json::json!(900));
+        assert_eq!(value["resolved_at"], serde_json::json!(1_787_133_600));
+        assert_eq!(serde_json::from_value::<BiggestWinner>(value).unwrap(), row);
     }
 
     /// Field names and types from `components/schemas/BuilderStanding` and
@@ -671,14 +702,18 @@ mod tests {
         .unwrap();
         let point = points.data.first().unwrap();
         assert_eq!(point.date, NaiveDate::from_ymd_opt(2026, 8, 19).unwrap());
+        assert_eq!(serde_json::to_value(point).unwrap()["volume"], 5);
     }
 
     #[test]
     fn boards_query() {
         let client = DataClient::new().unwrap();
-        assert!(client.get_leaderboard().limit(1001).query(None).is_err());
+        assert!(matches!(
+            client.list_leaderboard().limit(1001).query(None),
+            Err(Error::Validation(v)) if v.parameter() == "limit"
+        ));
         let q = client
-            .get_leaderboard()
+            .list_leaderboard()
             .time_period(TimePeriod::Month)
             .category("sports")
             .sort_by(LeaderboardSortBy::Pnl)

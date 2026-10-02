@@ -18,7 +18,7 @@ use wiremock::{
 };
 
 use super::{
-    fixtures::{self, CONDITION, WALLET},
+    fixtures::{self, COMBO_CONDITION, CONDITION, CONDITION_2, WALLET, WALLET_2},
     received_queries,
 };
 use crate::common;
@@ -32,10 +32,14 @@ async fn list_positions_sends_filters_and_decodes_page() {
         .and(query_param("status", "REDEEMABLE"))
         .and(query_param("limit", "1"))
         .and(query_param_is_missing("offset"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(
-            vec![fixtures::position(fixtures::TOKEN)],
-            Some("eyJkYXRhIjp7InR5cGUiOiJwb3NpdGlvbnMi"),
-        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-trace-id", "trace-positions")
+                .set_body_json(fixtures::page(
+                    vec![fixtures::position(fixtures::TOKEN)],
+                    Some("eyJkYXRhIjp7InR5cGUiOiJwb3NpdGlvbnMi"),
+                )),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -53,8 +57,8 @@ async fn list_positions_sends_filters_and_decodes_page() {
         .send()
         .await
         .unwrap();
-    assert_eq!(page.items.len(), 1);
-    let position = &page.items[0];
+    assert_eq!(page.items().len(), 1);
+    let position = &page.items()[0];
     assert_eq!(position.status, PositionStatus::Redeemable);
     assert_eq!(position.entry_cost_usdc.to_string(), "45159.4653");
     assert_eq!(
@@ -62,6 +66,7 @@ async fn list_positions_sends_filters_and_decodes_page() {
         Some("eyJkYXRhIjp7InR5cGUiOiJwb3NpdGlvbnMi")
     );
     assert!(page.has_more());
+    assert_eq!(page.trace_id(), Some("trace-positions"));
     assert_eq!(
         received_queries(&server).await,
         vec![format!(
@@ -165,9 +170,163 @@ async fn list_positions_validates_before_sending() {
         .unwrap_err();
     assert!(matches!(&err, Error::Validation(v) if v.parameter() == "limit"));
 
+    // `event_id` and `REDEEMABLE_LOST` are user-anchored only.
+    let err = data
+        .list_positions()
+        .conditions([CONDITION])
+        .event_ids(["12345"])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "event_id"));
+    let err = data
+        .list_positions()
+        .conditions([CONDITION])
+        .status(PositionStatus::RedeemableLost)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "status"));
+
+    // Malformed ids and an empty wallet never reach the server.
+    let err = data
+        .list_positions()
+        .user(WALLET)
+        .conditions(["0xzz"])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "condition"));
+    let err = data
+        .list_positions()
+        .user("")
+        .conditions([CONDITION])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "user"));
+
     // A validation failure in a stream is yielded as its first item.
     let result: Result<Vec<_>, _> = data.list_positions().into_stream().try_collect().await;
     assert!(matches!(result, Err(Error::Validation(_))));
+}
+
+#[tokio::test]
+async fn list_positions_sends_each_condition_once() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/positions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(Vec::new(), None)))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let data = common::polymarket(&server).data().clone();
+
+    // Without `user` exactly one id is accepted; the same id twice is one id.
+    data.list_positions()
+        .conditions([CONDITION, CONDITION])
+        .send()
+        .await
+        .unwrap();
+    data.list_positions()
+        .user(WALLET)
+        .conditions([CONDITION, CONDITION_2, CONDITION])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        received_queries(&server).await,
+        vec![
+            format!("condition={CONDITION}"),
+            format!("user={WALLET}&condition={CONDITION}%2C{CONDITION_2}"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn stream_stops_when_has_more_is_false_despite_a_cursor() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/positions"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixtures::page_with(
+                vec![fixtures::position("1")],
+                Some("stale-cursor"),
+                false,
+            )),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/positions"))
+        .and(query_param("cursor", "stale-cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::page(Vec::new(), None)))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let data = common::polymarket(&server).data().clone();
+    let page = data.list_positions().user(WALLET).send().await.unwrap();
+    assert!(!page.has_more());
+    assert_eq!(page.next_cursor(), None);
+    assert_eq!(page.pagination.next_cursor.as_deref(), Some("stale-cursor"));
+
+    let positions: Vec<_> = data
+        .list_positions()
+        .user(WALLET)
+        .into_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(positions.len(), 1);
+}
+
+#[tokio::test]
+async fn stream_stops_on_a_cursor_cycle() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .and(path("/v2/trades"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixtures::page(vec![fixtures::trade("0x1")], Some("a"))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/v2/trades"))
+        .and(query_param("cursor", "a"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixtures::page(vec![fixtures::trade("0x2")], Some("b"))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // A misbehaving server sends the walk back to `a`: the stream ends instead of looping.
+    Mock::given(method("GET"))
+        .and(path("/v2/trades"))
+        .and(query_param("cursor", "b"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixtures::page(vec![fixtures::trade("0x3")], Some("a"))),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let hashes: Vec<String> = common::polymarket(&server)
+        .data()
+        .list_trades()
+        .into_stream()
+        .map_ok(|t| t.transaction_hash)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(hashes, vec!["0x1", "0x2", "0x3"]);
 }
 
 #[tokio::test]
@@ -225,10 +384,56 @@ async fn list_combo_positions_resends_user_with_cursor() {
             .map(<[String]>::len),
         Some(2)
     );
+    assert_eq!(positions[0].combo_condition_id, COMBO_CONDITION);
+    assert!(positions[0].first_entry_at.is_some());
     assert_eq!(
         positions[0].first_entry_at_micros,
-        Some(positions[0].first_entry_at)
+        positions[0].first_entry_at
     );
+}
+
+#[tokio::test]
+async fn list_combo_positions_validates_before_sending() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let data = common::polymarket(&server).data().clone();
+
+    let err = data
+        .list_combo_positions(WALLET)
+        .updated_after(DateTime::from_timestamp(-60, 0).unwrap())
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "updated_after"));
+    let err = data
+        .list_combo_positions(WALLET)
+        .updated_after(DateTime::from_timestamp(1_787_133_600, 0).unwrap())
+        .updated_before(DateTime::from_timestamp(1_787_133_599, 0).unwrap())
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "updated_before"));
+    let err = data
+        .list_combo_positions(WALLET)
+        .statuses([
+            ComboPositionStatus::Redeemable,
+            ComboPositionStatus::Partial,
+        ])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "status"));
+    let err = data
+        .list_combo_positions(WALLET)
+        .conditions(["0x03aa"])
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "condition"));
 }
 
 #[tokio::test]
@@ -237,7 +442,10 @@ async fn get_portfolio_value_sends_conditions_csv() {
     Mock::given(method("GET"))
         .and(path("/v2/value"))
         .and(query_param("user", WALLET))
-        .and(query_param("condition", format!("{CONDITION},0x01")))
+        .and(query_param(
+            "condition",
+            format!("{CONDITION},{CONDITION_2}"),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(fixtures::envelope(
             json!({"proxy_wallet": WALLET, "value": 1234.5678}),
         )))
@@ -248,7 +456,7 @@ async fn get_portfolio_value_sends_conditions_csv() {
     let value = common::polymarket(&server)
         .data()
         .get_portfolio_value(WALLET)
-        .conditions([CONDITION, "0x01"])
+        .conditions([CONDITION, CONDITION_2, CONDITION])
         .send()
         .await
         .unwrap();
@@ -270,8 +478,8 @@ async fn get_approvals_decodes_snapshot() {
                 "contracts": [{
                     "id": "usdc-ctf-exchange",
                     "feature": "trading",
-                    "token": "0x1",
-                    "spender": "0x2",
+                    "token": WALLET_2,
+                    "spender": "0x0000000000000000000000000000000000000002",
                     "standard": "ERC20",
                     "approved": true,
                     "amount": "1000000"
@@ -292,6 +500,45 @@ async fn get_approvals_decodes_snapshot() {
     assert_eq!(contract.standard, TokenStandard::Erc20);
     assert_eq!(contract.amount.as_deref(), Some("1000000"));
     assert!(!contract.is_unlimited());
+}
+
+#[tokio::test]
+async fn wallet_routes_documenting_an_evm_address_validate_it() {
+    let server = common::server().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let data = common::polymarket(&server).data().clone();
+
+    for user in ["", "0x1234", "983eedfbd75803602e4a6e6ea9aab6dc6b9c6748"] {
+        let err = data.get_approvals(user).await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Validation(v) if v.parameter() == "user"),
+            "{user:?}: {err}"
+        );
+        let err = data.get_user_stats(user).await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Validation(v) if v.parameter() == "user"),
+            "{user:?}: {err}"
+        );
+    }
+    // Elsewhere only an empty wallet is rejected.
+    for err in [
+        data.get_portfolio_value(" ").send().await.unwrap_err(),
+        data.get_user_pnl("").send().await.unwrap_err(),
+        data.get_user_volume("").send().await.unwrap_err(),
+    ] {
+        assert!(matches!(&err, Error::Validation(v) if v.parameter() == "user"));
+    }
+    let err = data
+        .get_user_volume(WALLET)
+        .start(DateTime::from_timestamp(-86_400, 0).unwrap())
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(&err, Error::Validation(v) if v.parameter() == "start"));
 }
 
 #[tokio::test]
@@ -338,10 +585,7 @@ async fn get_user_stats_maps_null_data_to_none() {
     let server = common::server().await;
     Mock::given(method("GET"))
         .and(path("/v2/user-stats"))
-        .and(query_param(
-            "user",
-            "0x0000000000000000000000000000000000000001",
-        ))
+        .and(query_param("user", WALLET_2))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": null})))
         .expect(1)
         .mount(&server)
@@ -364,12 +608,7 @@ async fn get_user_stats_maps_null_data_to_none() {
         .await;
 
     let data = common::polymarket(&server).data().clone();
-    assert_eq!(
-        data.get_user_stats("0x0000000000000000000000000000000000000001")
-            .await
-            .unwrap(),
-        None
-    );
+    assert_eq!(data.get_user_stats(WALLET_2).await.unwrap(), None);
     let stats = data.get_user_stats(WALLET).await.unwrap().unwrap();
     assert_eq!(stats.trades, 0);
     assert_eq!(stats.join_date.map(|d| d.timestamp()), Some(1_700_000_000));
