@@ -41,6 +41,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
+reqwest = { workspace = true, features = ["rustls", "query"] }
+serde_path_to_error.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
 tokio-tungstenite.workspace = true
 wiremock.workspace = true
