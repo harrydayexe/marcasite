@@ -1,6 +1,6 @@
 # Module `marcasite::types`
 
-> Generated from marcasite 0.1.0 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.1.1 (all features) by `just docs-md`. Do not edit.
 
 Identifier newtypes and enums shared by several services.
 
