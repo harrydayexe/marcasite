@@ -2,7 +2,7 @@
 //! sizes and the neg-risk flag.
 //!
 //! The method naming scheme for endpoints with several documented forms (`get_<things>`,
-//! `_by_body`, `_by_path`) is described in the [`clob`](crate::clob) module docs.
+//! `_by_path`) is described in the [`clob`](crate::clob) module docs.
 
 use std::collections::HashMap;
 
