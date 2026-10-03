@@ -1,8 +1,9 @@
 # Polymarket Predictions API Reference (local copy)
 
 Verbatim copy of the official Polymarket Predictions API reference, fetched 2026-10-01 from
-`https://docs.polymarket.com/<path>.md`. This is the source of truth for the marcasite Rust SDK.
-Do not edit these files; re-fetch instead. If something here conflicts with memory, this wins.
+`https://docs.polymarket.com/<path>.md`. It is the starting point for every statement about the API;
+where the live API behaves differently, the SDK follows live (see `SPEC_DEVIATIONS.md` and the root
+`AGENTS.md`). Do not edit the copied pages; re-fetch instead.
 
 ## How to navigate (read in this order, stop when you have what you need)
 

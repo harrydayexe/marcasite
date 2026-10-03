@@ -24,6 +24,7 @@ follows the live API.
 - Use `docs/polymarket/specs/` (OpenAPI/AsyncAPI) for schemas, enums, required/optional fields and types.
   These files are large; `grep -n` for the `operationId` or schema name instead of reading them whole.
 - `docs/polymarket/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
+  The exception is `docs/polymarket/AGENTS.md`, this project's navigation guide to the copy.
   `docs/sdk/` is not Polymarket's documentation: it is this SDK's API, generated from rustdoc
   (see [Generated SDK docs](#generated-sdk-docs)).
 - **Verify against the live API** (`just test-live`, or `curl` for a quick look) before relying on a
@@ -97,7 +98,7 @@ Decisions confirmed with the user (2026-10-01):
 
 Still undecided (ask the user before choosing): signing/crypto crates and auth design, MSRV.
 
-Principles once decided:
+Principles:
 
 - One client per service (e.g. `GammaClient`, `ClobClient`, `DataClient`), sharing a common
   transport/config. Gate services behind Cargo features so users compile only what they use.
@@ -114,14 +115,14 @@ Principles once decided:
 - Model every field the live API sends (documented or not; record undocumented ones in
   `SPEC_DEVIATIONS.md`). Required fields are non-`Option`; optional/nullable fields are
   `Option<T>`. Do not use `#[serde(default)]` to hide a missing required field.
-- Use enums for documented string enums. Mark public enums and non-exhaustive structs
-  `#[non_exhaustive]`; consider an `Unknown(String)` / catch-all variant so new server values do
-  not break deserialization. Ask the user for the policy if unsure.
-- Prices, sizes and amounts often arrive as strings: use a decimal type (e.g. `rust_decimal`),
+- Use enums for documented string enums (`string_enum!`, with an `Unknown(String)` catch-all so
+  new server values do not break deserialization). Mark public enums and non-exhaustive structs
+  `#[non_exhaustive]`.
+- Prices, sizes and amounts often arrive as strings: use `rust_decimal::Decimal`,
   never `f64`, for money/price/size. Match the wire format exactly as the spec defines it.
 - Newtypes for identifiers (`TokenId`, `ConditionId`, `OrderId`, `MarketId`, addresses) so they
   cannot be mixed up.
-- Timestamps: typed (e.g. `chrono`/`time`) with the exact documented format/unit.
+- Timestamps: `chrono::DateTime<Utc>` with the exact documented format/unit.
 - Derive `Debug, Clone, PartialEq` (and `Eq`, `Hash` where valid), `Serialize`/`Deserialize` as
   needed. Use `#[serde(rename_all = ...)]` matching the spec's casing.
 
@@ -138,7 +139,8 @@ Principles once decided:
 ## Code standards
 
 - `cargo fmt` clean; `cargo clippy --all-targets --all-features -- -D warnings` clean.
-- `#![deny(missing_docs)]`, `#![forbid(unsafe_code)]` unless the user approves otherwise.
+- `missing_docs = "deny"` and `unsafe_code = "forbid"` (workspace lints in `Cargo.toml`); do not
+  relax them without the user's approval.
 - Every public item has rustdoc; key entry points have runnable doc examples (use `no_run` for
   network calls).
 - Prefer borrowing (`&str`, `impl Into<String>`, `impl AsRef<str>`) in public APIs. Public types
