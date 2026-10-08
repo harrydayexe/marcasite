@@ -16,6 +16,16 @@ const HIDDEN_TRAITS: &[&str] = &["StructuralPartialEq"];
 pub(crate) struct Ctx<'a> {
     pub(crate) crates: &'a Crates,
     pub(crate) model: &'a Model,
+    pub(crate) links: Links,
+}
+
+/// What intra-doc links point at.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Links {
+    /// The generated markdown files (`gamma.md#struct.GammaClient`).
+    Files,
+    /// The target's public path (`marcasite::gamma::GammaClient`), for the MCP index.
+    Paths,
 }
 
 impl Ctx<'_> {
@@ -28,7 +38,10 @@ impl Ctx<'_> {
         let resolve = |k: &str| {
             let id = item.links.get(k)?;
             match self.crates.resolve(r.krate, *id)? {
-                Resolved::Local(target) => self.model.locs.get(&target).map(|l| l.url()),
+                Resolved::Local(target) => self.model.locs.get(&target).map(|l| match self.links {
+                    Links::Files => l.url(),
+                    Links::Paths => l.path.clone(),
+                }),
                 Resolved::External { .. } => None,
             }
         };
@@ -79,7 +92,7 @@ impl Ctx<'_> {
     }
 
     /// The item's definition as Rust source (bodies and private fields elided).
-    fn definition(&self, r: ItemRef, item: &Item, name: &str) -> anyhow::Result<String> {
+    pub(crate) fn definition(&self, r: ItemRef, item: &Item, name: &str) -> anyhow::Result<String> {
         let mut s = attrs(item);
         match &item.inner {
             ItemEnum::Struct(st) => {
@@ -265,7 +278,11 @@ impl Ctx<'_> {
     }
 
     /// Trait impls as `Trait<Args>` (with associated types, e.g. `Stream<Item = T>`), sorted.
-    fn trait_impls(&self, r: ItemRef, impls: &[rustdoc_types::Id]) -> anyhow::Result<Vec<String>> {
+    pub(crate) fn trait_impls(
+        &self,
+        r: ItemRef,
+        impls: &[rustdoc_types::Id],
+    ) -> anyhow::Result<Vec<String>> {
         let mut out = Vec::new();
         for id in impls {
             let ItemEnum::Impl(imp) = &self
@@ -385,31 +402,9 @@ impl Ctx<'_> {
                 continue;
             }
             let mname = m.name.as_deref().context("unnamed associated item")?;
-            let vis = if in_trait { "" } else { "pub " };
-            let sig = match &m.inner {
-                ItemEnum::Function(f) => ty::fn_sig(vis, mname, f),
-                ItemEnum::AssocConst { type_, value, .. } => {
-                    let v = value
-                        .as_ref()
-                        .map(|v| format!(" = {v}"))
-                        .unwrap_or_default();
-                    format!("{vis}const {mname}: {}{v};", ty::ty(type_))
-                }
-                ItemEnum::AssocType { bounds, type_, .. } => {
-                    let b = if bounds.is_empty() {
-                        String::new()
-                    } else {
-                        format!(": {}", ty::bounds(bounds))
-                    };
-                    let t = type_
-                        .as_ref()
-                        .map(|t| format!(" = {}", ty::ty(t)))
-                        .unwrap_or_default();
-                    format!("type {mname}{b}{t};")
-                }
-                _ => continue,
+            let Some(sig) = member_sig(m, mname, in_trait) else {
+                continue;
             };
-            let sig = format!("{}{sig}", attrs(m));
             writeln!(
                 rendered,
                 "##### <a id=\"{owner}.{}.{mname}\"></a>`{mname}`\n",
@@ -421,6 +416,36 @@ impl Ctx<'_> {
         }
         Ok(rendered)
     }
+}
+
+/// The signature of an associated item (`fn`, `const`, `type`) with its attributes, or `None`
+/// for other kinds.
+pub(crate) fn member_sig(m: &Item, name: &str, in_trait: bool) -> Option<String> {
+    let vis = if in_trait { "" } else { "pub " };
+    let sig = match &m.inner {
+        ItemEnum::Function(f) => ty::fn_sig(vis, name, f),
+        ItemEnum::AssocConst { type_, value, .. } => {
+            let v = value
+                .as_ref()
+                .map(|v| format!(" = {v}"))
+                .unwrap_or_default();
+            format!("{vis}const {name}: {}{v};", ty::ty(type_))
+        }
+        ItemEnum::AssocType { bounds, type_, .. } => {
+            let b = if bounds.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", ty::bounds(bounds))
+            };
+            let t = type_
+                .as_ref()
+                .map(|t| format!(" = {}", ty::ty(t)))
+                .unwrap_or_default();
+            format!("type {name}{b}{t};")
+        }
+        _ => return None,
+    };
+    Some(format!("{}{sig}", attrs(m)))
 }
 
 /// `#[non_exhaustive]` / `#[must_use]` lines.
@@ -445,20 +470,31 @@ fn doc_comment(docs: &str, indent: &str) -> String {
 }
 
 fn deprecation(out: &mut String, item: &Item) -> anyhow::Result<()> {
-    if let Some(d) = &item.deprecation {
-        let since = d
-            .since
-            .as_ref()
-            .map(|s| format!(" since {s}"))
-            .unwrap_or_default();
-        let note = d
-            .note
-            .as_ref()
-            .map(|n| format!(": {n}"))
-            .unwrap_or_default();
+    if let Some((since, note)) = deprecation_parts(item) {
         writeln!(out, "**Deprecated{since}**{note}\n")?;
     }
     Ok(())
+}
+
+/// A plain-text deprecation notice (`Deprecated since 0.2: use x`), or `None`.
+pub(crate) fn deprecation_note(item: &Item) -> Option<String> {
+    deprecation_parts(item).map(|(since, note)| format!("Deprecated{since}{note}"))
+}
+
+/// The ` since X` and `: note` parts of a deprecation, each possibly empty.
+fn deprecation_parts(item: &Item) -> Option<(String, String)> {
+    let d = item.deprecation.as_ref()?;
+    let since = d
+        .since
+        .as_ref()
+        .map(|s| format!(" since {s}"))
+        .unwrap_or_default();
+    let note = d
+        .note
+        .as_ref()
+        .map(|n| format!(": {n}"))
+        .unwrap_or_default();
+    Some((since, note))
 }
 
 fn push_block(out: &mut String, block: &str) {

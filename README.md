@@ -113,6 +113,24 @@ signatures and rustdoc) as plain markdown, one file per module. It is generated 
 `just docs-md` and kept current by CI, so it can be dropped into an LLM's context (e.g. a Claude
 project) or read by a coding agent.
 
+### MCP server for coding agents
+
+[`marcasite-mcp`](crates/marcasite-mcp/) is an [MCP](https://modelcontextprotocol.io/) server that
+gives coding agents (Claude Code, Cursor, any MCP client) item-level access to the same docs:
+`search`, `get_item` (signature and docs of e.g. `GammaClient::list_markets`), `list_module` and
+`find_endpoint` (which method implements a Polymarket endpoint, or that it is not implemented yet),
+plus `marcasite://sdk/{module}` resources and a `use-marcasite` primer prompt. It only serves docs
+over stdio and never calls Polymarket. It is released in lockstep with `marcasite`, with the docs
+embedded:
+
+```sh
+cargo install marcasite-mcp            # or marcasite-mcp@<version> to match your marcasite
+claude mcp add marcasite -- marcasite-mcp
+```
+
+Other clients run the same `marcasite-mcp` command, e.g. `{"mcpServers": {"marcasite": {"command":
+"marcasite-mcp"}}}`.
+
 ```sh
 just check   # fmt, clippy, tests, docs, cargo-deny — everything CI runs
 ```

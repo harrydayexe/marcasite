@@ -317,3 +317,66 @@ fn fn_pointer(fp: &FunctionPointer) -> String {
 fn join(it: impl Iterator<Item = String>) -> String {
     it.collect::<Vec<_>>().join(", ")
 }
+
+/// Collects the ids of every named type in `t` (generic arguments, associated type bindings and
+/// `impl Trait` bounds included), in order of appearance.
+pub(crate) fn path_ids(t: &Type, out: &mut Vec<rustdoc_types::Id>) {
+    match t {
+        Type::ResolvedPath(p) => {
+            out.push(p.id);
+            if let Some(a) = &p.args {
+                args_ids(a, out);
+            }
+        }
+        Type::DynTrait(d) => {
+            for pt in &d.traits {
+                out.push(pt.trait_.id);
+                if let Some(a) = &pt.trait_.args {
+                    args_ids(a, out);
+                }
+            }
+        }
+        Type::ImplTrait(bounds) => {
+            for b in bounds {
+                if let GenericBound::TraitBound { trait_, .. } = b {
+                    out.push(trait_.id);
+                    if let Some(a) = &trait_.args {
+                        args_ids(a, out);
+                    }
+                }
+            }
+        }
+        Type::Tuple(items) => items.iter().for_each(|t| path_ids(t, out)),
+        Type::Slice(inner)
+        | Type::Array { type_: inner, .. }
+        | Type::Pat { type_: inner, .. }
+        | Type::RawPointer { type_: inner, .. }
+        | Type::BorrowedRef { type_: inner, .. } => path_ids(inner, out),
+        Type::QualifiedPath { self_type, .. } => path_ids(self_type, out),
+        Type::Generic(_) | Type::Primitive(_) | Type::FunctionPointer(_) | Type::Infer => {}
+    }
+}
+
+fn args_ids(a: &GenericArgs, out: &mut Vec<rustdoc_types::Id>) {
+    match a {
+        GenericArgs::AngleBracketed { args, constraints } => {
+            for arg in args {
+                if let GenericArg::Type(t) = arg {
+                    path_ids(t, out);
+                }
+            }
+            for c in constraints {
+                if let AssocItemConstraintKind::Equality(Term::Type(t)) = &c.binding {
+                    path_ids(t, out);
+                }
+            }
+        }
+        GenericArgs::Parenthesized { inputs, output } => {
+            inputs.iter().for_each(|t| path_ids(t, out));
+            if let Some(o) = output {
+                path_ids(o, out);
+            }
+        }
+        GenericArgs::ReturnTypeNotation => {}
+    }
+}

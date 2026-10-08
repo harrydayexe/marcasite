@@ -45,9 +45,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: extractions/setup-just@v3
       - uses: Swatinem/rust-cache@v2
-      # Installs the pinned nightly (`docs_nightly` in the justfile) and fails if docs/sdk/
-      # does not match the code.
+      # Installs the pinned nightly (`docs_nightly` in the justfile) and fails if docs/sdk/ or
+      # the MCP index (crates/marcasite-mcp/data/index.json) does not match the code.
       - run: just docs-md-check
+
+  package-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      # Builds the crate from its packaged tarball, so the published crate (with its embedded
+      # data/index.json) is known to build on its own.
+      - run: cargo package -p marcasite-mcp
 
   deny:
     runs-on: ubuntu-latest

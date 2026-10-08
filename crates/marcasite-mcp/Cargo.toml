@@ -1,0 +1,27 @@
+[package]
+name = "marcasite-mcp"
+description = "MCP server that serves the marcasite SDK docs (unofficial Polymarket Rust SDK) to coding agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["polymarket", "mcp", "sdk", "docs", "llm"]
+categories = ["development-tools", "command-line-utilities"]
+readme = "README.md"
+include = ["src/**", "data/index.json", "README.md", "Cargo.toml"]
+
+[dependencies]
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "io-std"] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util"] }
+
+[lints]
+workspace = true
