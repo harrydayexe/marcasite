@@ -9,6 +9,8 @@ up to date** whenever an endpoint is added or changed. It is the single place to
   in the spec link to the spec file + `operationId`); *Rust* is the client method; *Status* is
   `[x]` implemented and tested, `[ ]` not yet implemented.
 - Base URLs are defaults; every client accepts an override (see `*ClientBuilder::base_url`).
+- The tables are parsed by `just docs-md` into the `marcasite-mcp` index: keep the header rows,
+  and name implementing methods as `` `Type::method` `` code spans (see `AGENTS.md`).
 
 
 ## Gamma API

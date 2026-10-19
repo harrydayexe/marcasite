@@ -11,6 +11,7 @@ anyhow = "1.0.98"
 # Exact version: its FORMAT_VERSION must match the rustdoc JSON emitted by the nightly pinned in
 # `src/docs/json.rs` (`NIGHTLY`). Bump the two together.
 rustdoc-types = "=0.61.0"
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

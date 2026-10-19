@@ -7,7 +7,7 @@ use std::path::Path;
 use anyhow::{Context, bail};
 
 use super::json::Crates;
-use super::render::item::Ctx;
+use super::render::item::{Ctx, Links};
 use super::resolve::{Entry, Model, Page, kind};
 
 /// Kind sections in page order: (anchor kind, heading).
@@ -25,7 +25,11 @@ const SECTIONS: &[(&str, &str)] = &[
 
 /// Renders every file, keyed by file name.
 pub(crate) fn render(crates: &Crates, model: &Model) -> anyhow::Result<BTreeMap<String, String>> {
-    let ctx = Ctx { crates, model };
+    let ctx = Ctx {
+        crates,
+        model,
+        links: Links::Files,
+    };
     let version = crates
         .krate(super::json::Krate::Main)
         .crate_version

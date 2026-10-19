@@ -95,6 +95,12 @@ Decisions confirmed with the user (2026-10-01):
   `marcasite_core::serde_util`).
 - Scope so far: **unauthenticated endpoints only**. `ENDPOINTS.md` (repo root) is the checklist of
   every endpoint with doc links and implementation status. **Update it with every endpoint change.**
+  Its tables are parsed by `cargo xtask docs` for the MCP index (see
+  [Generated SDK docs](#generated-sdk-docs)): keep the header rows as they are
+  (`| Status | Method | Path | Docs | Rust |`, `| Status | Channel | URL | Docs | Rust |`,
+  `| Service | Method | Path | Docs |`), the `module `marcasite::x`` mention in each section intro,
+  status `[x]`/`[ ]`, and name the implementing methods as `` `Type::method` `` code spans in the
+  `Rust` cell. Every `[x]` row must name at least one method and each must exist.
 
 Still undecided (ask the user before choosing): signing/crypto crates and auth design, MSRV.
 
@@ -186,14 +192,16 @@ Principles:
 | `just test-live [args]` | Live, read-only tests against the production APIs (needs network) |
 | `just doc` | Build docs with `-D warnings` |
 | `just deny` | `cargo deny check` (advisories, licences, bans, sources) |
-| `just docs-md` | Regenerate `docs/sdk/` (markdown API docs for LLMs) |
-| `just docs-md-check` | Fail if `docs/sdk/` is stale (CI runs this; not part of `just check`) |
+| `just docs-md` | Regenerate `docs/sdk/` (markdown API docs for LLMs) and the MCP index |
+| `just docs-md-check` | Fail if `docs/sdk/` or the MCP index is stale (CI runs this; not part of `just check`) |
+| `just mcp` | Run the `marcasite-mcp` docs server on stdio |
 
 Run `just --list --list-submodules` for everything. `just deny` needs `cargo install cargo-deny`.
 
 Layout: Cargo workspace. `crates/marcasite-core` holds shared transport/config/errors;
-`crates/marcasite` is the user-facing facade; `xtask/` holds unpublished dev tooling
-(`cargo xtask help`). Logging is via `tracing` (never install a subscriber in library code).
+`crates/marcasite` is the user-facing facade; `crates/marcasite-mcp` is a binary MCP server that
+serves the SDK docs to coding agents (no dependency on `marcasite`; released in lockstep with it);
+`xtask/` holds unpublished dev tooling (`cargo xtask help`). Logging is via `tracing` (never install a subscriber in library code).
 Toolchain is pinned in `rust-toolchain.toml`.
 
 ## Generated SDK docs
@@ -201,8 +209,9 @@ Toolchain is pinned in `rust-toolchain.toml`.
 `docs/sdk/` is the public API of `marcasite` (every module, type, method and signature, with
 rustdoc) as markdown, for LLMs and coding agents. It is generated, never hand-edited:
 
-- **After any change to the public API or to rustdoc, run `just docs-md` and commit
-  `docs/sdk/`.** CI (`sdk-docs` job) fails when it is stale.
+- **After any change to the public API, to rustdoc or to `ENDPOINTS.md`, run `just docs-md` and
+  commit `docs/sdk/` and `crates/marcasite-mcp/data/index.json`.** CI (`sdk-docs` job) fails
+  when either is stale.
 - `just docs-md` emits rustdoc JSON for both crates into `target/sdk-docs/` with the nightly
   pinned as `docs_nightly` in the justfile (rustdoc's JSON output is unstable), then runs
   `cargo xtask docs` on the normal toolchain to render it. Only that recipe uses the nightly.
@@ -211,6 +220,16 @@ rustdoc) as markdown, for LLMs and coding agents. It is generated, never hand-ed
 - The generator (`xtask/src/docs/`) follows re-exports into private modules and into
   `marcasite-core`, documents each item once (root, then `types`, then the service modules)
   and links the other re-exports to it, and rewrites intra-doc links to the generated files.
+- The same run writes `crates/marcasite-mcp/data/index.json` (`xtask/src/docs/index.rs`): every
+  module and item (signature, docs with intra-doc links rewritten to item paths, cited
+  `docs.polymarket.com` URLs, members, re-exports, related items) plus the `ENDPOINTS.md` rows
+  with their methods resolved to items. It fails if an `ENDPOINTS.md` method does not exist.
+  `marcasite-mcp` embeds this file and never parses markdown; its deserializing types
+  (`crates/marcasite-mcp/src/index.rs`) mirror the generator's, so change both and bump
+  `FORMAT_VERSION` on both sides together.
+- `marcasite-mcp`'s tool names, parameters and resource URIs are a public compatibility
+  surface: renaming or removing one is a breaking change. Stdout is its protocol stream: never
+  print to it (logs go to stderr via `tracing-subscriber`, allowed because it is a binary).
 
 ## Workflow for agents
 
