@@ -1,6 +1,6 @@
 # Module `marcasite::data`
 
-> Generated from marcasite 0.1.2 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.1.3 (all features) by `just docs-md`. Do not edit.
 
 Data API v2 client (`https://data-api.polymarket.com`, routes under `/v2`).
 
