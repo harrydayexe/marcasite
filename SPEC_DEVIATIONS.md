@@ -271,6 +271,19 @@ All CLOB pinning tests are in `crates/marcasite/tests/live/clob.rs`. Spec paths 
   raw `String`; breaking) and serialized back as a string; `hash` stays a `String`.
 - **Pinning test:** `pin_book_formats` (and the `timestamp` range check in `get_order_book`).
 
+### Order book `last_trade_price` is empty for an untraded token
+
+- **Kind:** Mismatch
+- **Docs say:** `OrderBookSummary.last_trade_price` is a required string (example `"0.45"`),
+  for `GET /book` and `POST /books` alike.
+- **Live does:** for a token that has never traded, both routes send
+  `"last_trade_price": ""` (seen on about 13% of the books of a 500-token batch, 2026-10-31).
+  The key is always present; no other field of the book was seen empty.
+- **SDK does:** `OrderBookSummary.last_trade_price` is an `Option<Decimal>` (was `Decimal`;
+  breaking): `""` decodes to `None` and serializes back to `""`; a missing key is still an
+  error. Before, one untraded token failed the whole `get_order_books` batch.
+- **Pinning test:** `pin_book_last_trade_price_empty_without_trades`.
+
 ### `GET /rebates/current` `date` is an RFC 3339 date-time
 
 - **Kind:** Mismatch

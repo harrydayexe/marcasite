@@ -2311,7 +2311,11 @@ pub struct OrderBookSummary {
     /// Whether negative risk is enabled for this market.
     pub neg_risk: bool,
     /// Last trade price (a numeric string on the wire).
-    pub last_trade_price: Decimal,
+    ///
+    /// `None` for a token that has never traded: live sends an empty string there, which
+    /// the spec does not document (see `SPEC_DEVIATIONS.md`). The key itself is required,
+    /// as documented; `None` serializes back to `""`.
+    pub last_trade_price: Option<Decimal>,
 }
 ```
 

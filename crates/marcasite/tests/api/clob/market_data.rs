@@ -261,6 +261,26 @@ async fn get_order_books() {
         .await
         .unwrap();
     assert_eq!(books[0].tick_size, d("0.01"));
+    assert_eq!(books[0].last_trade_price, Some(d("0.45")));
+}
+
+/// A token that has never traded has `"last_trade_price": ""` (live, 2026-10-31); it must not
+/// fail the other books of the batch.
+#[tokio::test]
+async fn get_order_books_with_an_untraded_token() {
+    let server = common::server().await;
+    let untraded = BOOK.replace(r#""last_trade_price": "0.45""#, r#""last_trade_price": """#);
+    Mock::given(method("POST"))
+        .and(path("/books"))
+        .respond_with(json(&format!("[{BOOK},{untraded}]")))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let books = clob(&server).get_order_books(["1", "2"]).await.unwrap();
+    assert_eq!(books.len(), 2);
+    assert_eq!(books[0].last_trade_price, Some(d("0.45")));
+    assert_eq!(books[1].last_trade_price, None);
 }
 
 #[tokio::test]
