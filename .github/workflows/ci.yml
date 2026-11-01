@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - uses: Swatinem/rust-cache@v2
       # Installs the pinned nightly (`docs_nightly` in the justfile) and fails if docs/sdk/ or
       # the MCP index (crates/marcasite-mcp/data/index.json) does not match the code.
