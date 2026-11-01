@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "marcasite_version": "0.1.3",
+  "marcasite_version": "0.2.0",
   "modules": [
     {
       "path": "marcasite",
