@@ -69,7 +69,12 @@ pub struct OrderBookSummary {
     /// Whether negative risk is enabled for this market.
     pub neg_risk: bool,
     /// Last trade price (a numeric string on the wire).
-    pub last_trade_price: Decimal,
+    ///
+    /// `None` for a token that has never traded: live sends an empty string there, which
+    /// the spec does not document (see `SPEC_DEVIATIONS.md`). The key itself is required,
+    /// as documented; `None` serializes back to `""`.
+    #[serde(with = "serde_util::decimal_or_empty")]
+    pub last_trade_price: Option<Decimal>,
 }
 
 /// The midpoint price of a token: the average of the best bid and best ask
@@ -704,7 +709,35 @@ mod tests {
         assert_eq!(book.asks[0].size, d("10057923.36"));
         assert_eq!(book.tick_size, d("0.001"));
         assert!(book.neg_risk);
-        assert_eq!(book.last_trade_price, d("0.001"));
+        assert_eq!(book.last_trade_price, Some(d("0.001")));
+    }
+
+    /// `GET /book` and `POST /books` for a token that has never traded (live, captured
+    /// 2026-10-31, trimmed): `last_trade_price` is `""`.
+    #[test]
+    fn order_book_without_trades_has_no_last_trade_price() {
+        let json = r#"{
+            "market": "0x6231ec0ba9d53a7d36c0328dfbd834e778f6e891ec6438d7d3e6f39d377c8f32",
+            "asset_id": "110212708220762723780623631669128285743865261243074067496163475281418328413543",
+            "timestamp": "1793487370444",
+            "hash": "43f855733c179fc034ebe5cae47a30db7c3aeca1",
+            "bids": [{"price": "0.001", "size": "4000021.34"}],
+            "asks": [{"price": "0.999", "size": "16876"}],
+            "min_order_size": "5",
+            "tick_size": "0.001",
+            "neg_risk": true,
+            "last_trade_price": ""
+        }"#;
+        let book: OrderBookSummary = round_trip(json);
+        assert_eq!(book.last_trade_price, None);
+        assert_eq!(book.min_order_size, d("5"));
+
+        // The key is documented as required, so its absence is still an error.
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let mut missing = value.as_object().unwrap().clone();
+        missing.remove("last_trade_price");
+        let err = serde_json::from_value::<OrderBookSummary>(missing.into()).unwrap_err();
+        assert!(err.to_string().contains("last_trade_price"), "{err}");
     }
 
     #[test]

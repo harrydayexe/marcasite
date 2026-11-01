@@ -26,7 +26,7 @@ use serde_json::Value;
 
 use super::frame::{
     ChannelEvent, ConnectOptions, EventStream, IdleTimeout, Rejected, deserialize_via_from_value,
-    empty_decimal, parse_as, str_field,
+    parse_as, str_field,
 };
 
 /// Documented limit of active `(channel, filter)` subscriptions per connection.
@@ -1115,10 +1115,10 @@ pub struct BestBidAsk {
     /// Best bid price. The spec types it as a (required) decimal string and does not say
     /// how an empty book side is sent; an empty string decodes to `None` (and
     /// re-serializes as `""`).
-    #[serde(with = "empty_decimal")]
+    #[serde(with = "serde_util::decimal_or_empty")]
     pub best_bid: Option<Decimal>,
     /// Best ask price; `None` for an empty string, as for [`best_bid`](Self::best_bid).
-    #[serde(with = "empty_decimal")]
+    #[serde(with = "serde_util::decimal_or_empty")]
     pub best_ask: Option<Decimal>,
     /// Order book hash at this change.
     pub hash: String,

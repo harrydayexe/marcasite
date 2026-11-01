@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use super::frame::{
     ChannelEvent, ConnectOptions, EventStream, IdleTimeout, Rejected, check_interval,
-    deserialize_via_from_value, empty_decimal, parse_as, str_field,
+    deserialize_via_from_value, parse_as, str_field,
 };
 
 /// The text frame the client sends as a heartbeat.
@@ -757,7 +757,7 @@ pub struct BookEvent {
     /// (2026-10-02) on the initial snapshots sent on subscribe. `None` when absent or empty.
     #[serde(
         default,
-        with = "empty_decimal",
+        with = "serde_util::decimal_or_empty",
         skip_serializing_if = "Option::is_none"
     )]
     pub tick_size: Option<Decimal>,
@@ -766,7 +766,7 @@ pub struct BookEvent {
     /// `None` (as does an absent field).
     #[serde(
         default,
-        with = "empty_decimal",
+        with = "serde_util::decimal_or_empty",
         skip_serializing_if = "Option::is_none"
     )]
     pub last_trade_price: Option<Decimal>,
@@ -879,14 +879,14 @@ pub struct BestBidAskEvent {
     pub market: ConditionId,
     /// Best bid price. The spec types it as a (required) string and does not say how an
     /// empty side is sent; an empty string decodes to `None` (and re-serializes as `""`).
-    #[serde(with = "empty_decimal")]
+    #[serde(with = "serde_util::decimal_or_empty")]
     pub best_bid: Option<Decimal>,
     /// Best ask price; `None` for an empty string, as for [`best_bid`](Self::best_bid).
-    #[serde(with = "empty_decimal")]
+    #[serde(with = "serde_util::decimal_or_empty")]
     pub best_ask: Option<Decimal>,
     /// Spread between best ask and best bid; `None` for an empty string, as for
     /// [`best_bid`](Self::best_bid).
-    #[serde(with = "empty_decimal")]
+    #[serde(with = "serde_util::decimal_or_empty")]
     pub spread: Option<Decimal>,
     /// Event time, as sent. The spec gives no unit for this field (the documented example
     /// is Unix milliseconds); see [`Self::timestamp_millis`].

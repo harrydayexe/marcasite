@@ -422,6 +422,71 @@ async fn get_order_books() {
     check::<Vec<OrderBookSummary>>("POST /books", &post(CLOB, "/books", &body).await);
 }
 
+/// Pins SPEC_DEVIATIONS.md "Order book `last_trade_price` is empty for an untraded token":
+/// `/book` and `/books` send `"last_trade_price": ""` for a token that has never traded,
+/// which the SDK decodes as `None` (one such token used to fail the whole batch).
+#[tokio::test]
+#[ignore = "live network"]
+async fn pin_book_last_trade_price_empty_without_trades() {
+    // The lowest-volume active markets are the likeliest to have untraded tokens.
+    let markets = get(
+        GAMMA,
+        "/markets",
+        &[
+            ("limit", "200"),
+            ("active", "true"),
+            ("closed", "false"),
+            ("order", "volumeNum"),
+            ("ascending", "true"),
+        ],
+    )
+    .await
+    .json;
+    let tokens: Vec<String> = markets
+        .as_array()
+        .expect("a market list")
+        .iter()
+        .filter(|m| m["enableOrderBook"] == true)
+        .filter_map(|m| m["clobTokenIds"].as_str())
+        .flat_map(|ids| serde_json::from_str::<Vec<String>>(ids).expect("token id list"))
+        .take(100)
+        .collect();
+    assert!(
+        !tokens.is_empty(),
+        "no low-volume market with an order book"
+    );
+
+    let body: Value = tokens.iter().map(|t| json!({ "token_id": t })).collect();
+    let raw = post(CLOB, "/books", &body).await;
+    let untraded: Vec<&str> = raw
+        .json
+        .as_array()
+        .expect("a book list")
+        .iter()
+        .filter(|book| book["last_trade_price"] == "")
+        .filter_map(|book| book["asset_id"].as_str())
+        .collect();
+    let untraded = *untraded.first().unwrap_or_else(|| {
+        panic!(
+            "no book of {} low-volume tokens has an empty `last_trade_price`; \
+             see SPEC_DEVIATIONS.md",
+            tokens.len()
+        )
+    });
+
+    let books = clob()
+        .get_order_books(tokens.iter().map(String::as_str))
+        .await
+        .unwrap();
+    let book = books
+        .iter()
+        .find(|book| book.asset_id.as_str() == untraded)
+        .expect("the untraded token's book");
+    assert_eq!(book.last_trade_price, None);
+    let single = clob().get_order_book(untraded).await.unwrap();
+    assert_eq!(single.last_trade_price, None);
+}
+
 // ---- market listings -------------------------------------------------------------------------
 
 #[tokio::test]

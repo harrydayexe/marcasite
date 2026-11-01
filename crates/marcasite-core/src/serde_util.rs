@@ -654,6 +654,44 @@ pub mod decimal_number_option {
     }
 }
 
+/// A [`Decimal`] that the API sends as a JSON **string** which may be empty, for required
+/// string-typed fields that hold a price (such as a best bid or ask, or the last trade price
+/// of a token that has never traded).
+///
+/// `""` and `null` decode to `None`, a numeric string (or number) to `Some`; a **missing
+/// key is an error**, so use it without `#[serde(default)]` on documented required fields.
+/// Serializes `Some` as a decimal string and `None` as `""`, which keeps the re-serialized
+/// field a string, as on the wire.
+pub mod decimal_or_empty {
+    use super::*;
+
+    /// Serializes `Some` as a decimal string and `None` as `""`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates serializer errors.
+    pub fn serialize<S: Serializer>(
+        value: &Option<Decimal>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(decimal) => serde::Serialize::serialize(decimal, serializer),
+            None => serializer.serialize_str(""),
+        }
+    }
+
+    /// Deserializes from a numeric string, a JSON number, `""` or `null`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a non-empty value is not a valid decimal.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Decimal>, D::Error> {
+        string_or_number_option::deserialize(deserializer)
+    }
+}
+
 /// Writes a string identifier as a JSON integer when it is one, otherwise as a string.
 fn serialize_integer_id<S: Serializer>(id: &str, serializer: S) -> Result<S::Ok, S::Error> {
     match id.parse::<i64>() {
@@ -761,6 +799,26 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    #[test]
+    fn decimals_or_empty() {
+        #[derive(Debug, PartialEq, Deserialize, Serialize)]
+        struct Quote {
+            #[serde(with = "decimal_or_empty")]
+            bid: Option<Decimal>,
+        }
+        let quote: Quote = serde_json::from_str(r#"{"bid":"0.5"}"#).unwrap();
+        assert_eq!(quote.bid, Some(Decimal::new(5, 1)));
+        assert_eq!(serde_json::to_string(&quote).unwrap(), r#"{"bid":"0.5"}"#);
+        let empty: Quote = serde_json::from_str(r#"{"bid":""}"#).unwrap();
+        assert_eq!(empty.bid, None);
+        assert_eq!(serde_json::to_string(&empty).unwrap(), r#"{"bid":""}"#);
+        let null: Quote = serde_json::from_str(r#"{"bid":null}"#).unwrap();
+        assert_eq!(null.bid, None);
+        // The key itself is required, and other text is still an error.
+        assert!(serde_json::from_str::<Quote>("{}").is_err());
+        assert!(serde_json::from_str::<Quote>(r#"{"bid":"abc"}"#).is_err());
+    }
 
     #[test]
     fn lenient_datetimes() {

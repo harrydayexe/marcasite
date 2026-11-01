@@ -146,32 +146,6 @@ macro_rules! deserialize_via_from_value {
 }
 pub(crate) use deserialize_via_from_value;
 
-/// A JSON string decimal that may be empty, for required fields typed `string` that hold a
-/// price (such as a best bid or ask): `""` (or `null`) decodes to `None`, a missing key is
-/// an error. Serializes `Some` as a decimal string and `None` as `""`, which keeps the
-/// re-serialized field a string, as the spec types it.
-pub(crate) mod empty_decimal {
-    use marcasite_core::serde_util;
-    use rust_decimal::Decimal;
-    use serde::{Deserializer, Serializer};
-
-    pub(crate) fn serialize<S: Serializer>(
-        value: &Option<Decimal>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(decimal) => serde::Serialize::serialize(decimal, serializer),
-            None => serializer.serialize_str(""),
-        }
-    }
-
-    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Decimal>, D::Error> {
-        serde_util::string_or_number_option::deserialize(deserializer)
-    }
-}
-
 /// A connection plus a queue of decoded events not yet handed out.
 ///
 /// A text frame may decode to several events (a JSON array), so decoded events are queued
@@ -345,24 +319,6 @@ mod tests {
             parse_as::<u32>("book", "event", serde_json::json!(7)).unwrap(),
             7
         );
-    }
-
-    #[test]
-    fn empty_decimals() {
-        #[derive(Debug, PartialEq, Deserialize, serde::Serialize)]
-        struct Quote {
-            #[serde(with = "empty_decimal")]
-            bid: Option<rust_decimal::Decimal>,
-        }
-        let quote: Quote = serde_json::from_str(r#"{"bid":"0.5"}"#).unwrap();
-        assert_eq!(quote.bid, Some(rust_decimal::Decimal::new(5, 1)));
-        assert_eq!(serde_json::to_string(&quote).unwrap(), r#"{"bid":"0.5"}"#);
-        let empty: Quote = serde_json::from_str(r#"{"bid":""}"#).unwrap();
-        assert_eq!(empty.bid, None);
-        assert_eq!(serde_json::to_string(&empty).unwrap(), r#"{"bid":""}"#);
-        // The key itself is required, and other text is still an error.
-        assert!(serde_json::from_str::<Quote>("{}").is_err());
-        assert!(serde_json::from_str::<Quote>(r#"{"bid":"abc"}"#).is_err());
     }
 
     #[test]

@@ -154,6 +154,10 @@ Principles:
 - Keep the public API minimal; `pub(crate)` by default. Avoid leaking dependency types where a
   semver break would follow, unless deliberate (document it).
 - Follow SemVer. No `CHANGELOG.md` until the v1 release; start one then.
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+  (`<type>(<optional scope>): <description>`, e.g. `fix(clob): ...`, `feat(gamma): ...`,
+  `chore: ...`); mark breaking changes with `!` or a `BREAKING CHANGE:` footer. PR titles
+  follow the same format, since a squash merge uses the title as the commit message.
 
 ## Testing
 
