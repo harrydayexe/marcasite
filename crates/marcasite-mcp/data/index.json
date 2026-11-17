@@ -24276,13 +24276,54 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::ws::MarketEvent::timestamp",
+        "marcasite::ws::MarketEvent::market"
+      ],
       "reexported_as": [],
       "doc_urls": [
         "https://docs.polymarket.com/api-reference/wss/market"
       ],
       "related": [
         "marcasite::ws::MarketEvent::Unknown"
+      ]
+    },
+    {
+      "path": "marcasite::ws::MarketEvent::market",
+      "name": "market",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::MarketEvent",
+      "signature": "#[must_use]\npub fn market(&self) -> Option<&ConditionId>",
+      "summary": "The condition id of the market the event is about, for every recognised variant; `None` for [`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown).",
+      "docs": "The condition id of the market the event is about, for every recognised variant;\n`None` for [`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketEvent::Unknown",
+        "marcasite::types::ConditionId"
+      ]
+    },
+    {
+      "path": "marcasite::ws::MarketEvent::timestamp",
+      "name": "timestamp",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::MarketEvent",
+      "signature": "#[must_use]\npub fn timestamp(&self) -> Option<DateTime<Utc>>",
+      "summary": "The exchange timestamp of the event, for every variant.",
+      "docs": "The exchange timestamp of the event, for every variant.\n\nThis is the time the exchange stamped on the message, **not** the time it was\nreceived. `None` when the event carries no timestamp ([`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown)) or\nwhen a string timestamp is not an integer number of Unix milliseconds or is out of\nthe range `DateTime` can represent (see\n[`NewMarketEvent::timestamp_millis`](marcasite::ws::NewMarketEvent::timestamp_millis) and friends).\n\n```rust\nuse marcasite::ws::MarketEvent;\n\nfn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {\n    Some((now - event.timestamp()?).num_milliseconds())\n}\n```",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketEvent::Unknown",
+        "marcasite::ws::NewMarketEvent::timestamp_millis"
       ]
     },
     {

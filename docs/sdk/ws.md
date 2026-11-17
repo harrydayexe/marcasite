@@ -2041,6 +2041,41 @@ See <https://docs.polymarket.com/api-reference/wss/market>.
 
 **Implements:** `Clone`, `Debug`, `Deserialize<'de>`, `Eq`, `PartialEq`, `Serialize`
 
+#### Methods
+
+##### <a id="MarketEvent.fn.timestamp"></a>`timestamp`
+
+```rust
+#[must_use]
+pub fn timestamp(&self) -> Option<DateTime<Utc>>
+```
+
+The exchange timestamp of the event, for every variant.
+
+This is the time the exchange stamped on the message, **not** the time it was
+received. `None` when the event carries no timestamp ([`MarketEvent::Unknown`](ws.md#enum.MarketEvent)) or
+when a string timestamp is not an integer number of Unix milliseconds or is out of
+the range `DateTime` can represent (see
+[`NewMarketEvent::timestamp_millis`](ws.md#NewMarketEvent.fn.timestamp_millis) and friends).
+
+```rust
+use marcasite::ws::MarketEvent;
+
+fn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+    Some((now - event.timestamp()?).num_milliseconds())
+}
+```
+
+##### <a id="MarketEvent.fn.market"></a>`market`
+
+```rust
+#[must_use]
+pub fn market(&self) -> Option<&ConditionId>
+```
+
+The condition id of the market the event is about, for every recognised variant;
+`None` for [`MarketEvent::Unknown`](ws.md#enum.MarketEvent).
+
 ### <a id="enum.PolyBoltChannelName"></a>`enum PolyBoltChannelName`
 
 ```rust

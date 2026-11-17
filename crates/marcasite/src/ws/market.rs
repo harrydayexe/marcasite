@@ -660,6 +660,53 @@ pub enum MarketEvent {
     Unknown(Value),
 }
 
+impl MarketEvent {
+    /// The exchange timestamp of the event, for every variant.
+    ///
+    /// This is the time the exchange stamped on the message, **not** the time it was
+    /// received. `None` when the event carries no timestamp ([`MarketEvent::Unknown`]) or
+    /// when a string timestamp is not an integer number of Unix milliseconds or is out of
+    /// the range [`DateTime`] can represent (see
+    /// [`NewMarketEvent::timestamp_millis`] and friends).
+    ///
+    /// ```
+    /// use marcasite::ws::MarketEvent;
+    ///
+    /// fn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+    ///     Some((now - event.timestamp()?).num_milliseconds())
+    /// }
+    /// ```
+    #[must_use]
+    pub fn timestamp(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Book(e) => Some(e.timestamp),
+            Self::PriceChange(e) => Some(e.timestamp),
+            Self::LastTradePrice(e) => Some(e.timestamp),
+            Self::TickSizeChange(e) => e.timestamp_millis(),
+            Self::BestBidAsk(e) => e.timestamp_millis(),
+            Self::NewMarket(e) => e.timestamp_millis(),
+            Self::MarketResolved(e) => e.timestamp_millis(),
+            Self::Unknown(_) => None,
+        }
+    }
+
+    /// The condition id of the market the event is about, for every recognised variant;
+    /// `None` for [`MarketEvent::Unknown`].
+    #[must_use]
+    pub fn market(&self) -> Option<&ConditionId> {
+        match self {
+            Self::Book(e) => Some(&e.market),
+            Self::PriceChange(e) => Some(&e.market),
+            Self::LastTradePrice(e) => Some(&e.market),
+            Self::TickSizeChange(e) => Some(&e.market),
+            Self::BestBidAsk(e) => Some(&e.market),
+            Self::NewMarket(e) => Some(&e.market),
+            Self::MarketResolved(e) => Some(&e.market),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
 impl ChannelEvent for MarketEvent {
     fn from_value(value: Value) -> std::result::Result<Self, Rejected> {
         fn parse<T: serde::de::DeserializeOwned>(
@@ -1573,5 +1620,46 @@ mod tests {
         assert!(matches!(out[0], Ok(MarketEvent::TickSizeChange(_))));
         assert!(matches!(out[1], Err(Error::WebSocket(_))));
         assert!(matches!(out[2], Ok(MarketEvent::Unknown(_))));
+    }
+
+    #[test]
+    fn event_timestamp_and_market_cover_every_variant() {
+        let ms = |e: &str| event(e).timestamp().map(|t| t.timestamp_millis());
+        let mk = |e: &str| event(e).market().map(|m| m.as_str().to_owned());
+        let cases = [
+            r#"{"event_type":"book","asset_id":"1","market":"0xm","bids":[],"asks":[],"timestamp":"1757908892351","hash":"h"}"#,
+            r#"{"event_type":"price_change","market":"0xm","timestamp":"1757908892351","price_changes":[]}"#,
+            r#"{"event_type":"last_trade_price","asset_id":"1","market":"0xm","price":"0.5","size":"1","side":"BUY","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"best_bid_ask","market":"0xm","asset_id":"1","best_bid":"0.1","best_ask":"0.2","spread":"0.1","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"new_market","id":"1","question":"q","market":"0xm","slug":"s","assets_ids":[],"outcomes":[],"timestamp":"1757908892351"}"#,
+            r#"{"event_type":"market_resolved","id":"1","market":"0xm","assets_ids":[],"winning_asset_id":"1","winning_outcome":"Yes","timestamp":"1757908892351"}"#,
+        ];
+        for raw in cases {
+            assert_eq!(ms(raw), Some(1_757_908_892_351), "{raw}");
+            assert_eq!(mk(raw).as_deref(), Some("0xm"), "{raw}");
+        }
+    }
+
+    #[test]
+    fn event_timestamp_is_none_when_unparseable_or_unknown() {
+        let tick = event(
+            r#"{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"soon"}"#,
+        );
+        assert_eq!(tick.timestamp(), None);
+        assert!(tick.market().is_some());
+        let tick_at = |ts: &str| {
+            event(&format!(
+                r#"{{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"{ts}"}}"#
+            ))
+            .timestamp()
+        };
+        assert_eq!(tick_at("9223372036854775807"), None);
+        assert_eq!(tick_at("99999999999999999999"), None);
+        assert_eq!(tick_at("-1").map(|t| t.timestamp_millis()), Some(-1));
+        let unknown = event(r#"{"event_type":"something_new","timestamp":"1"}"#);
+        assert!(matches!(unknown, MarketEvent::Unknown(_)));
+        assert_eq!(unknown.timestamp(), None);
+        assert_eq!(unknown.market(), None);
     }
 }
