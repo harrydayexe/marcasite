@@ -24,6 +24,10 @@ follows the live API.
 - Use `docs/polymarket/specs/` (OpenAPI/AsyncAPI) for schemas, enums, required/optional fields and types.
   These files are large; `grep -n` for the `operationId` or schema name instead of reading them whole.
 - `docs/polymarket/` is a verbatim copy (fetched 2026-10-01). **Never edit it.** Re-fetch to update.
+- **Every page you fetch from `docs.polymarket.com` gets committed to `docs/polymarket/`**, whether it
+  is new or a newer version of a copied page: save it verbatim at its URL path
+  (`https://docs.polymarket.com/<path>.md` → `docs/polymarket/<path>.md`), add or update its line in
+  `docs/polymarket/INDEX.md` with the fetch date, and commit it with the change that relied on it.
   The exception is `docs/polymarket/AGENTS.md`, this project's navigation guide to the copy.
   `docs/sdk/` is not Polymarket's documentation: it is this SDK's API, generated from rustdoc
   (see [Generated SDK docs](#generated-sdk-docs)).

@@ -185,3 +185,11 @@ Verbatim copies of the official docs (fetched 2026-10-01). One line per page: ti
 - [Get transaction status](api-reference/bridge/get-transaction-status.md) - Returns the deposits and withdrawals seen at a bridge address, newest first. Responses are cursor-paginated: each request returns one...
 - [Create withdrawal addresses](api-reference/bridge/create-withdrawal-addresses.md)
 
+
+## Guides (fetched 2026-11-17)
+
+Not part of the 2026-10-01 API reference snapshot; fetched later because the SDK needed them.
+
+- [Fees](trading/fees.md) - Understanding trading fees on Polymarket
+- [Upcoming Fee and Rebate Changes](programs/fee-and-rebate-changes-november-2026.md) - Prepare for the Polymarket DeFi fee and rebate changes taking effect November 20, 2026 at 23:59 UTC.
+- [Market Details](market-data/market-details.md) - Understand the structure and state of a Polymarket market.
