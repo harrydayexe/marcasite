@@ -6,6 +6,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # chrono is unmaintained (no fix available). It is not a known vulnerability. chrono is in
+    # marcasite's public API (DateTime<Utc>) and also comes in through rmcp/schemars for
+    # marcasite-mcp. Replacing it (jiff or time) is a breaking change, tracked in OPEN_QUESTIONS.md.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; migration tracked in OPEN_QUESTIONS.md" },
+]
 
 [licenses]
 version = 2

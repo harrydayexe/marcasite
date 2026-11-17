@@ -82,3 +82,10 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
     "blocked from placing orders" and separately list close-only jurisdictions (close existing
     positions, no new ones). *Current:* the rustdoc tells callers to treat `true` as "do not open
     new positions" and not to read `false` as proof that every action is allowed.
+
+## Dependencies
+
+23. chrono is unmaintained (RUSTSEC-2026-0543, 2026; no fixed version). *Current:* ignored in
+    `deny.toml` with a reason; it is not a known vulnerability. Migrating the public API from
+    `chrono::DateTime<Utc>` to `jiff` or `time` is a breaking change to plan before v1.
+    `marcasite-mcp` would still pull chrono through `rmcp`/`schemars` until they move.
