@@ -166,6 +166,14 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/polymarket/specs/c
 |---|---|---|---|---|
 | [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/polymarket/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` (page size differs from the spec: see `SPEC_DEVIATIONS.md`) |
 
+## Geoblock
+
+Base URL `https://polymarket.com` (not an API server), docs [`docs/polymarket/api-reference/geoblock.md`](docs/polymarket/api-reference/geoblock.md), feature `geoblock`, module `marcasite::geoblock`. Check only: the SDK never offers a way to bypass a geoblock.
+
+| Status | Method | Path | Docs | Rust |
+|---|---|---|---|---|
+| [x] | `GET` | `/api/geoblock` | [local](docs/polymarket/api-reference/geoblock.md) / [online](https://docs.polymarket.com/api-reference/geoblock) | `GeoblockClient::get_status` |
+
 ## WebSocket channels (public)
 
 Feature `ws`, module `marcasite::ws`. Each channel type is a `Stream` of typed events; URLs are

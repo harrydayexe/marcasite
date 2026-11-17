@@ -27,6 +27,8 @@ mod combos;
 mod data;
 #[cfg(feature = "gamma")]
 mod gamma;
+#[cfg(feature = "geoblock")]
+mod geoblock;
 #[cfg(feature = "relayer")]
 mod relayer;
 #[cfg(feature = "ws")]

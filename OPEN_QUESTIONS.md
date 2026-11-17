@@ -70,3 +70,15 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
 19. Market-channel `new_market` `fee_schedule`: every field is `Option` because few frames were
     seen. Tighten?
 20. PolyBolt: is "64 KB" 64,000 or 65,536 bytes (64,000 used)? Reconnection policy for all channels.
+
+## Geoblock
+
+21. Is `region` always present in `GET /api/geoblock`? The docs list `region` as a plain string and
+    live always sent it (`US`/`OH`, 2026-11-17), but a country without sub-national regions was
+    not observable. *Current:* `GeoblockStatus::region` is a required `String`, so a missing
+    region is a decode error (fails closed). Likewise `ip` is parsed as `std::net::IpAddr`, so
+    an unparseable `ip` fails the whole call.
+22. Does `blocked` report `true` for close-only jurisdictions? The docs define `blocked` as
+    "blocked from placing orders" and separately list close-only jurisdictions (close existing
+    positions, no new ones). *Current:* the rustdoc tells callers to treat `true` as "do not open
+    new positions" and not to read `false` as proof that every action is allowed.

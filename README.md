@@ -35,6 +35,7 @@ Not affiliated with or endorsed by Polymarket.
 | Relayer API: transaction status, nonces, wallet deployment | `marcasite::relayer::RelayerClient` | `relayer` |
 | Bridge API: supported assets, quotes, deposit/withdrawal addresses, status | `marcasite::bridge::BridgeClient` | `bridge` |
 | Combos / RFQ: combo-eligible markets | `marcasite::combos::CombosClient` | `combos` |
+| Geoblock check: is the requesting IP address blocked from trading | `marcasite::geoblock::GeoblockClient` | `geoblock` |
 | WebSockets: market channel, sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
 
 ## Quick start

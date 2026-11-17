@@ -5,13 +5,14 @@
     {
       "path": "marcasite",
       "summary": "Unofficial Rust SDK for the Polymarket Predictions APIs.",
-      "docs": "Unofficial Rust SDK for the Polymarket Predictions APIs.\n\nThis project is not affiliated with or endorsed by Polymarket.\n\nmarcasite gives typed, async access to the **public (unauthenticated)** Polymarket\nPredictions APIs:\n\n| Service | Client | Feature |\n|---|---|---|\n| Gamma API: events, markets, tags, series, comments, sports, search, profiles | [`gamma::GammaClient`](marcasite::gamma::GammaClient) | `gamma` |\n| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates, builder trades | [`clob::ClobClient`](marcasite::clob::ClobClient) | `clob` |\n| Data API v2: positions, PnL, trades, activity, leaderboards, holders | [`data::DataClient`](marcasite::data::DataClient) | `data` |\n| Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`](marcasite::relayer::RelayerClient) | `relayer` |\n| Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](marcasite::bridge::BridgeClient) | `bridge` |\n| Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](marcasite::combos::CombosClient) | `combos` |\n| WebSockets: market channel, sports results, PolyBolt public prices | [`ws`](marcasite::ws) | `ws` |\n\nAll features are enabled by default; disable default features and pick the ones you need\nto reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.\n\n# Quick start\n\n```rust\nuse marcasite::Polymarket;\n\nlet pm = Polymarket::new()?;\nlet tags = pm.gamma().list_tags().limit(5).send().await?;\nfor tag in tags {\n    println!(\"{:?}: {:?}\", tag.id, tag.label);\n}\n```\n\nEach service client can also be created on its own, e.g. [`gamma::GammaClient::new`](marcasite::gamma::GammaClient::new), and\nevery client accepts a custom base URL (for example to point tests at a mock server).\n\n# Requests\n\nEndpoints with only required parameters are plain `async fn`s. Endpoints with optional\nparameters return a request builder: chain setters, then call `.send().await`. Required\nparameters are always arguments of the client method, never builder setters.\n\n# Pagination\n\nPaginated endpoints return one page from `.send()` (including the cursor or offset needed\nfor the next page), and every item of every page from `.into_stream()`, as a\n[`Paginated`](marcasite::Paginated) `Stream` that fetches the pages lazily. It ends after the last page, or\nright after yielding the first error. [`Paginated`](marcasite::Paginated) is `Unpin`, so a plain `while let`\nloop works:\n\n```rust\nuse futures_util::StreamExt as _;\n\nlet pm = marcasite::Polymarket::new()?;\nlet mut tags = pm.gamma().list_tags().limit(100).into_stream();\nwhile let Some(tag) = tags.next().await {\n    println!(\"{:?}\", tag?.label);\n}\n```\n\nThe usual stream adapters apply, for example to collect a bounded number of items:\n\n```rust\nuse futures_util::{StreamExt as _, TryStreamExt as _};\n\nlet pm = marcasite::Polymarket::new()?;\nlet first_200: Vec<_> = pm\n    .gamma()\n    .list_tags()\n    .limit(100)\n    .into_stream()\n    .take(200)\n    .try_collect()\n    .await?;\n```\n\n# Errors\n\nEvery fallible operation returns [`Result<T>`](marcasite::Result), whose error type [`Error`](marcasite::Error) distinguishes\nAPI errors (with the parsed error body and trace id), rate limiting (with `Retry-After`),\ntimeouts, transport failures, decoding failures (with the JSON path of the bad field),\nclient-side validation failures and configuration errors. See [`Error`](marcasite::Error).\n\n# Types\n\nPrices, sizes and amounts are `Decimal`s, never floating point. Values the API sends as\nJSON strings are parsed exactly. Values it sends as JSON numbers are exact if they are\nintegers (within `i64`/`u64`) or have at most 15 significant digits; longer numbers pass\nthrough `f64` while being parsed and may be rounded (see `Decimal`). Timestamps are\n`chrono::DateTime<Utc>`. Identifiers are newtypes (see [`types`](marcasite::types)) so\nthat, for example, a token id cannot be passed where a condition id is expected. String\nenums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the\nserver later never break deserialization.\n\n# Dependencies in the public API\n\nTypes from these crates appear in marcasite's public API, so upgrading any of them to a\nnew major (or, before 1.0, minor) version is a breaking change of marcasite:\n`http` 1 (`StatusCode`, `Method`), `url` 2 (`Url`), `serde_json` 1\n(`serde_json`), `chrono` 0.4 (`chrono`), `rust_decimal` 1 (`Decimal`) and\n`futures-core` 0.3 (`Stream`). The types are re-exported, so you do not need to\ndepend on these crates yourself to name them:\n\n```rust\nuse marcasite::{Method, Url, chrono::Utc, serde_json::Value};\n\nlet _ = (Method::GET, Url::parse(\"https://example.com\"), Value::Null, Utc::now());\n```\n\n# Logging\n\nThis crate emits diagnostics via `tracing`. It never installs a subscriber; install one\nin your application (e.g. with `tracing-subscriber`) to see them. Requests, retries and\nfailures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors\nthat are returned to you are never logged above `DEBUG`, so they are not reported twice.\n\nSpans (all at `DEBUG`), useful with span-based subscribers such as OpenTelemetry exporters:\n\n- `marcasite.request`: one per HTTP request, covering all retries. Fields `service`,\n  `method`, `path`, and on completion `status`, `attempts`, `elapsed_ms` and `trace_id`\n  (when the server sends one).\n- `marcasite.ws`: one per WebSocket connection, covering the handshake and the background\n  task that drives the socket for its whole lifetime. Fields `service`, `host`, `path`.\n\nBoth are children of whatever span is current when the request is sent or the connection\nis opened, so they nest under your application's own spans.\n\n[`ENDPOINTS.md`]: https://github.com/harrydayexe/marcasite/blob/main/ENDPOINTS.md",
+      "docs": "Unofficial Rust SDK for the Polymarket Predictions APIs.\n\nThis project is not affiliated with or endorsed by Polymarket.\n\nmarcasite gives typed, async access to the **public (unauthenticated)** Polymarket\nPredictions APIs:\n\n| Service | Client | Feature |\n|---|---|---|\n| Gamma API: events, markets, tags, series, comments, sports, search, profiles | [`gamma::GammaClient`](marcasite::gamma::GammaClient) | `gamma` |\n| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates, builder trades | [`clob::ClobClient`](marcasite::clob::ClobClient) | `clob` |\n| Data API v2: positions, PnL, trades, activity, leaderboards, holders | [`data::DataClient`](marcasite::data::DataClient) | `data` |\n| Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`](marcasite::relayer::RelayerClient) | `relayer` |\n| Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](marcasite::bridge::BridgeClient) | `bridge` |\n| Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](marcasite::combos::CombosClient) | `combos` |\n| Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`](marcasite::geoblock::GeoblockClient) | `geoblock` |\n| WebSockets: market channel, sports results, PolyBolt public prices | [`ws`](marcasite::ws) | `ws` |\n\nAll features are enabled by default; disable default features and pick the ones you need\nto reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.\n\n# Quick start\n\n```rust\nuse marcasite::Polymarket;\n\nlet pm = Polymarket::new()?;\nlet tags = pm.gamma().list_tags().limit(5).send().await?;\nfor tag in tags {\n    println!(\"{:?}: {:?}\", tag.id, tag.label);\n}\n```\n\nEach service client can also be created on its own, e.g. [`gamma::GammaClient::new`](marcasite::gamma::GammaClient::new), and\nevery client accepts a custom base URL (for example to point tests at a mock server).\n\n# Requests\n\nEndpoints with only required parameters are plain `async fn`s. Endpoints with optional\nparameters return a request builder: chain setters, then call `.send().await`. Required\nparameters are always arguments of the client method, never builder setters.\n\n# Pagination\n\nPaginated endpoints return one page from `.send()` (including the cursor or offset needed\nfor the next page), and every item of every page from `.into_stream()`, as a\n[`Paginated`](marcasite::Paginated) `Stream` that fetches the pages lazily. It ends after the last page, or\nright after yielding the first error. [`Paginated`](marcasite::Paginated) is `Unpin`, so a plain `while let`\nloop works:\n\n```rust\nuse futures_util::StreamExt as _;\n\nlet pm = marcasite::Polymarket::new()?;\nlet mut tags = pm.gamma().list_tags().limit(100).into_stream();\nwhile let Some(tag) = tags.next().await {\n    println!(\"{:?}\", tag?.label);\n}\n```\n\nThe usual stream adapters apply, for example to collect a bounded number of items:\n\n```rust\nuse futures_util::{StreamExt as _, TryStreamExt as _};\n\nlet pm = marcasite::Polymarket::new()?;\nlet first_200: Vec<_> = pm\n    .gamma()\n    .list_tags()\n    .limit(100)\n    .into_stream()\n    .take(200)\n    .try_collect()\n    .await?;\n```\n\n# Errors\n\nEvery fallible operation returns [`Result<T>`](marcasite::Result), whose error type [`Error`](marcasite::Error) distinguishes\nAPI errors (with the parsed error body and trace id), rate limiting (with `Retry-After`),\ntimeouts, transport failures, decoding failures (with the JSON path of the bad field),\nclient-side validation failures and configuration errors. See [`Error`](marcasite::Error).\n\n# Types\n\nPrices, sizes and amounts are `Decimal`s, never floating point. Values the API sends as\nJSON strings are parsed exactly. Values it sends as JSON numbers are exact if they are\nintegers (within `i64`/`u64`) or have at most 15 significant digits; longer numbers pass\nthrough `f64` while being parsed and may be rounded (see `Decimal`). Timestamps are\n`chrono::DateTime<Utc>`. Identifiers are newtypes (see [`types`](marcasite::types)) so\nthat, for example, a token id cannot be passed where a condition id is expected. String\nenums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the\nserver later never break deserialization.\n\n# Dependencies in the public API\n\nTypes from these crates appear in marcasite's public API, so upgrading any of them to a\nnew major (or, before 1.0, minor) version is a breaking change of marcasite:\n`http` 1 (`StatusCode`, `Method`), `url` 2 (`Url`), `serde_json` 1\n(`serde_json`), `chrono` 0.4 (`chrono`), `rust_decimal` 1 (`Decimal`) and\n`futures-core` 0.3 (`Stream`). The types are re-exported, so you do not need to\ndepend on these crates yourself to name them:\n\n```rust\nuse marcasite::{Method, Url, chrono::Utc, serde_json::Value};\n\nlet _ = (Method::GET, Url::parse(\"https://example.com\"), Value::Null, Utc::now());\n```\n\n# Logging\n\nThis crate emits diagnostics via `tracing`. It never installs a subscriber; install one\nin your application (e.g. with `tracing-subscriber`) to see them. Requests, retries and\nfailures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors\nthat are returned to you are never logged above `DEBUG`, so they are not reported twice.\n\nSpans (all at `DEBUG`), useful with span-based subscribers such as OpenTelemetry exporters:\n\n- `marcasite.request`: one per HTTP request, covering all retries. Fields `service`,\n  `method`, `path`, and on completion `status`, `attempts`, `elapsed_ms` and `trace_id`\n  (when the server sends one).\n- `marcasite.ws`: one per WebSocket connection, covering the handshake and the background\n  task that drives the socket for its whole lifetime. Fields `service`, `host`, `path`.\n\nBoth are children of whatever span is current when the request is sent or the connection\nis opened, so they nest under your application's own spans.\n\n[`ENDPOINTS.md`]: https://github.com/harrydayexe/marcasite/blob/main/ENDPOINTS.md",
       "submodules": [
         "marcasite::bridge",
         "marcasite::clob",
         "marcasite::combos",
         "marcasite::data",
         "marcasite::gamma",
+        "marcasite::geoblock",
         "marcasite::relayer",
         "marcasite::types",
         "marcasite::ws"
@@ -465,6 +466,18 @@
           "external": null
         }
       ]
+    },
+    {
+      "path": "marcasite::geoblock",
+      "summary": "Geoblock check (`https://polymarket.com/api/geoblock`).",
+      "docs": "Geoblock check (`https://polymarket.com/api/geoblock`).\n\nPolymarket rejects orders from some jurisdictions. This module asks Polymarket whether the\nIP address the request comes from is blocked, so an application can warn its users before\nthey try to trade. Start from [`GeoblockClient`](marcasite::geoblock::GeoblockClient).\n\n| Endpoint | Method |\n|---|---|\n| `GET /api/geoblock` | [`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status) |\n\nThe endpoint is on `polymarket.com`, not on the API servers, and needs no authentication.\nIt reports the status of the address the request was sent **from**: it is a check only.\nmarcasite never provides, and will not add, any way to bypass a geoblock.\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.",
+      "submodules": [],
+      "items": [
+        "marcasite::geoblock::GeoblockClient",
+        "marcasite::geoblock::GeoblockClientBuilder",
+        "marcasite::geoblock::GeoblockStatus"
+      ],
+      "reexports": []
     },
     {
       "path": "marcasite::relayer",
@@ -1458,7 +1471,8 @@
         "marcasite::Polymarket::data",
         "marcasite::Polymarket::relayer",
         "marcasite::Polymarket::bridge",
-        "marcasite::Polymarket::combos"
+        "marcasite::Polymarket::combos",
+        "marcasite::Polymarket::geoblock"
       ],
       "reexported_as": [],
       "doc_urls": [],
@@ -1576,6 +1590,24 @@
       ]
     },
     {
+      "path": "marcasite::Polymarket::geoblock",
+      "name": "geoblock",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::Polymarket",
+      "signature": "#[must_use]\npub fn geoblock(&self) -> &GeoblockClient",
+      "summary": "The geoblock check client (`polymarket.com/api/geoblock`).",
+      "docs": "The geoblock check client (`polymarket.com/api/geoblock`).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
       "path": "marcasite::Polymarket::http_client",
       "name": "http_client",
       "kind": "method",
@@ -1658,6 +1690,7 @@
         "marcasite::PolymarketBuilder::relayer_base_url",
         "marcasite::PolymarketBuilder::bridge_base_url",
         "marcasite::PolymarketBuilder::combos_base_url",
+        "marcasite::PolymarketBuilder::geoblock_base_url",
         "marcasite::PolymarketBuilder::build"
       ],
       "reexported_as": [],
@@ -1775,6 +1808,22 @@
       "signature": "pub fn gamma_base_url(self, url: impl Into<String>) -> Self",
       "summary": "Overrides the Gamma API base URL.",
       "docs": "Overrides the Gamma API base URL.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::PolymarketBuilder::geoblock_base_url",
+      "name": "geoblock_base_url",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::PolymarketBuilder",
+      "signature": "pub fn geoblock_base_url(self, url: impl Into<String>) -> Self",
+      "summary": "Overrides the geoblock check base URL.",
+      "docs": "Overrides the geoblock check base URL.",
       "deprecated": null,
       "implements": [],
       "members": [],
@@ -2052,7 +2101,7 @@
       "kind": "enum",
       "module": "marcasite",
       "parent": null,
-      "signature": "#[non_exhaustive]\npub enum Service {\n    /// Gamma API (`gamma-api.polymarket.com`).\n    Gamma,\n    /// CLOB API (`clob.polymarket.com`).\n    Clob,\n    /// Data API v2 (`data-api.polymarket.com`).\n    Data,\n    /// Relayer API (`relayer-v2.polymarket.com`).\n    Relayer,\n    /// Bridge API (`bridge.polymarket.com`).\n    Bridge,\n    /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).\n    Combos,\n    /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).\n    MarketChannel,\n    /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).\n    SportsChannel,\n    /// PolyBolt live data WebSocket (`ws-live-v2.polymarket.com/ws`).\n    PolyBolt,\n}",
+      "signature": "#[non_exhaustive]\npub enum Service {\n    /// Gamma API (`gamma-api.polymarket.com`).\n    Gamma,\n    /// CLOB API (`clob.polymarket.com`).\n    Clob,\n    /// Data API v2 (`data-api.polymarket.com`).\n    Data,\n    /// Relayer API (`relayer-v2.polymarket.com`).\n    Relayer,\n    /// Bridge API (`bridge.polymarket.com`).\n    Bridge,\n    /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).\n    Combos,\n    /// Geoblock check (`polymarket.com/api/geoblock`).\n    Geoblock,\n    /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).\n    MarketChannel,\n    /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).\n    SportsChannel,\n    /// PolyBolt live data WebSocket (`ws-live-v2.polymarket.com/ws`).\n    PolyBolt,\n}",
       "summary": "A Polymarket service (REST API or WebSocket channel).",
       "docs": "A Polymarket service (REST API or WebSocket channel).\n\nUsed in errors and logs to say which service a failure relates to.",
       "deprecated": null,
@@ -22003,6 +22052,234 @@
       "related": []
     },
     {
+      "path": "marcasite::geoblock::GeoblockClient",
+      "name": "GeoblockClient",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "pub struct GeoblockClient { /* private fields */ }",
+      "summary": "Client for the Geoblock endpoint (`https://polymarket.com`).",
+      "docs": "Client for the Geoblock endpoint (`https://polymarket.com`).\n\nReports whether the requesting IP address is geoblocked (`GET /api/geoblock`). The endpoint\nlives on `polymarket.com`, not on the API servers. Cheap to clone: clones share one\nconnection pool.\n\nThis is a check only: the SDK never offers a way to route around a geoblock.\n\n```rust\nuse marcasite::geoblock::GeoblockClient;\n\nlet client = GeoblockClient::new()?;\n```",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug"
+      ],
+      "members": [
+        "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL",
+        "marcasite::geoblock::GeoblockClient::new",
+        "marcasite::geoblock::GeoblockClient::builder",
+        "marcasite::geoblock::GeoblockClient::base_url",
+        "marcasite::geoblock::GeoblockClient::get_status"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL",
+      "name": "DEFAULT_BASE_URL",
+      "kind": "associated_const",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub const DEFAULT_BASE_URL: &'static str = \"https://polymarket.com\";",
+      "summary": "The production base URL.",
+      "docs": "The production base URL.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::base_url",
+      "name": "base_url",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "#[must_use]\npub fn base_url(&self) -> &Url",
+      "summary": "The base URL requests are sent to.",
+      "docs": "The base URL requests are sent to.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::builder",
+      "name": "builder",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub fn builder() -> GeoblockClientBuilder",
+      "summary": "Returns a builder for setting a custom base URL or HTTP client.",
+      "docs": "Returns a builder for setting a custom base URL or HTTP client.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClientBuilder"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::get_status",
+      "name": "get_status",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub async fn get_status(&self) -> Result<GeoblockStatus>",
+      "summary": "Checks the geographic eligibility of the IP address this request is sent from (`GET /api/geoblock`).",
+      "docs": "Checks the geographic eligibility of the IP address this request is sent from\n(`GET /api/geoblock`).\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.\n\n```rust\nlet status = marcasite::geoblock::GeoblockClient::new()?.get_status().await?;\nif status.blocked {\n    println!(\"trading not available in {}\", status.country);\n}\n```\n\n# Errors\n\n[`Error::Api`](marcasite::Error::Api) on a non-2xx status,\n[`Error::RateLimited`](marcasite::Error::RateLimited) on `429`, or any other\n[`Error`](marcasite::Error) for transport or decoding failures.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "related": [
+        "marcasite::Error",
+        "marcasite::Error::Api",
+        "marcasite::Error::RateLimited",
+        "marcasite::Result",
+        "marcasite::geoblock::GeoblockStatus"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub fn new() -> Result<Self>",
+      "summary": "Creates a client with the default HTTP settings and base URL.",
+      "docs": "Creates a client with the default HTTP settings and base URL.\n\n# Errors\n\nReturns [`Error::Config`](marcasite::Error::Config) if the HTTP client cannot be built.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder",
+      "name": "GeoblockClientBuilder",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "#[must_use]\npub struct GeoblockClientBuilder { /* private fields */ }",
+      "summary": "Builder for [`GeoblockClient`](marcasite::geoblock::GeoblockClient).",
+      "docs": "Builder for [`GeoblockClient`](marcasite::geoblock::GeoblockClient).",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug",
+        "Default"
+      ],
+      "members": [
+        "marcasite::geoblock::GeoblockClientBuilder::base_url",
+        "marcasite::geoblock::GeoblockClientBuilder::http_client",
+        "marcasite::geoblock::GeoblockClientBuilder::build"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::base_url",
+      "name": "base_url",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn base_url(self, url: impl Into<String>) -> Self",
+      "summary": "Overrides the base URL (default [`GeoblockClient::DEFAULT_BASE_URL`](marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL)), e.g. to target a mock server in tests. A path prefix is preserved.",
+      "docs": "Overrides the base URL (default [`GeoblockClient::DEFAULT_BASE_URL`](marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL)), e.g. to target a\nmock server in tests. A path prefix is preserved.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::build",
+      "name": "build",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn build(self) -> Result<GeoblockClient>",
+      "summary": "Builds the client.",
+      "docs": "Builds the client.\n\n# Errors\n\nReturns [`Error::Config`](marcasite::Error::Config) if the base URL is invalid or the HTTP\nclient cannot be built.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Result",
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::http_client",
+      "name": "http_client",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn http_client(self, http: HttpClient) -> Self",
+      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient) (and its timeouts, user agent and retry policy).",
+      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient) (and its timeouts, user agent and retry policy).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockStatus",
+      "name": "GeoblockStatus",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "#[non_exhaustive]\npub struct GeoblockStatus {\n    /// Whether the address is blocked from placing orders (the docs' wording).\n    ///\n    /// The docs also describe *close-only* jurisdictions, where existing positions can be\n    /// closed but no new ones opened. Whether those report `true` here is not documented\n    /// (see `OPEN_QUESTIONS.md`), so treat `true` as \"do not open new positions\" and do not\n    /// read `false` as proof that every action is allowed.\n    pub blocked: bool,\n    /// The IP address Polymarket detected for the request.\n    pub ip: IpAddr,\n    /// ISO 3166-1 alpha-2 country code, e.g. `\"US\"`.\n    pub country: String,\n    /// Region or state code, e.g. `\"OH\"`.\n    pub region: String,\n}",
+      "summary": "The geoblock status of the requesting IP address, returned by [`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status).",
+      "docs": "The geoblock status of the requesting IP address, returned by\n[`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status).\n\nThis is a check only; see the [module documentation](marcasite::geoblock). Every field is\nrequired, as the docs list them without any optionality. Whether `region` can be absent\nfor countries without sub-national regions has not been observed (see `OPEN_QUESTIONS.md`).\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug",
+        "Deserialize<'de>",
+        "Eq",
+        "PartialEq",
+        "Serialize"
+      ],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "related": [
+        "marcasite::geoblock",
+        "marcasite::geoblock::GeoblockClient::get_status"
+      ]
+    },
+    {
       "path": "marcasite::relayer::CheckDeployed",
       "name": "CheckDeployed",
       "kind": "struct",
@@ -28121,6 +28398,25 @@
       "rust": "`CombosClient::list_combo_markets` (page size differs from the spec: see `SPEC_DEVIATIONS.md`)",
       "items": [
         "marcasite::combos::CombosClient::list_combo_markets"
+      ]
+    },
+    {
+      "service": "Geoblock",
+      "module": "marcasite::geoblock",
+      "status": "implemented",
+      "method": "GET",
+      "path": "/api/geoblock",
+      "channel": null,
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "local_docs": [
+        "docs/polymarket/api-reference/geoblock.md"
+      ],
+      "operation_id": null,
+      "rust": "`GeoblockClient::get_status`",
+      "items": [
+        "marcasite::geoblock::GeoblockClient::get_status"
       ]
     },
     {

@@ -38,6 +38,8 @@ pub struct Polymarket {
     bridge: crate::bridge::BridgeClient,
     #[cfg(feature = "combos")]
     combos: crate::combos::CombosClient,
+    #[cfg(feature = "geoblock")]
+    geoblock: crate::geoblock::GeoblockClient,
     http: HttpClient,
 }
 
@@ -110,6 +112,14 @@ impl Polymarket {
     pub fn combos(&self) -> &crate::combos::CombosClient {
         &self.combos
     }
+
+    /// The geoblock check client (`polymarket.com/api/geoblock`).
+    #[cfg(feature = "geoblock")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+    #[must_use]
+    pub fn geoblock(&self) -> &crate::geoblock::GeoblockClient {
+        &self.geoblock
+    }
 }
 
 /// Builder for [`Polymarket`].
@@ -130,6 +140,8 @@ pub struct PolymarketBuilder {
     bridge_base_url: Option<String>,
     #[cfg(feature = "combos")]
     combos_base_url: Option<String>,
+    #[cfg(feature = "geoblock")]
+    geoblock_base_url: Option<String>,
 }
 
 impl PolymarketBuilder {
@@ -219,6 +231,14 @@ impl PolymarketBuilder {
         self
     }
 
+    /// Overrides the geoblock check base URL.
+    #[cfg(feature = "geoblock")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+    pub fn geoblock_base_url(mut self, url: impl Into<String>) -> Self {
+        self.geoblock_base_url = Some(url.into());
+        self
+    }
+
     /// Builds the client.
     ///
     /// # Errors
@@ -271,6 +291,13 @@ impl PolymarketBuilder {
                 crate::combos::CombosClient::builder().http_client(http.clone()),
                 self.combos_base_url,
                 crate::combos::CombosClientBuilder::base_url,
+            )
+            .build()?,
+            #[cfg(feature = "geoblock")]
+            geoblock: with_base_url(
+                crate::geoblock::GeoblockClient::builder().http_client(http.clone()),
+                self.geoblock_base_url,
+                crate::geoblock::GeoblockClientBuilder::base_url,
             )
             .build()?,
             http,

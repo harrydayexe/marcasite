@@ -13,6 +13,7 @@
 //! | Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`] | `relayer` |
 //! | Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`] | `bridge` |
 //! | Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`] | `combos` |
+//! | Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`] | `geoblock` |
 //! | WebSockets: market channel, sports results, PolyBolt public prices | [`ws`] | `ws` |
 //!
 //! All features are enabled by default; disable default features and pick the ones you need
@@ -158,6 +159,9 @@ pub mod data;
 #[cfg(feature = "gamma")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gamma")))]
 pub mod gamma;
+#[cfg(feature = "geoblock")]
+#[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+pub mod geoblock;
 #[cfg(feature = "relayer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "relayer")))]
 pub mod relayer;

@@ -17,6 +17,7 @@ Predictions APIs:
 | Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`](relayer.md#struct.RelayerClient) | `relayer` |
 | Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](bridge.md#struct.BridgeClient) | `bridge` |
 | Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](combos.md#struct.CombosClient) | `combos` |
+| Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`](geoblock.md#struct.GeoblockClient) | `geoblock` |
 | WebSockets: market channel, sports results, PolyBolt public prices | [`ws`](ws.md) | `ws` |
 
 All features are enabled by default; disable default features and pick the ones you need
@@ -132,7 +133,7 @@ is opened, so they nest under your application's own spans.
 
 ## Index
 
-- **Modules:** [`bridge`](bridge.md), [`clob`](clob.md), [`combos`](combos.md), [`data`](data.md), [`gamma`](gamma.md), [`relayer`](relayer.md), [`types`](types.md), [`ws`](ws.md)
+- **Modules:** [`bridge`](bridge.md), [`clob`](clob.md), [`combos`](combos.md), [`data`](data.md), [`gamma`](gamma.md), [`geoblock`](geoblock.md), [`relayer`](relayer.md), [`types`](types.md), [`ws`](ws.md)
 - **Re-exports:** `Decimal`, `Method`, `StatusCode`, `Url`, `chrono`, `serde_json`
 - **Structs:** [`ApiError`](#struct.ApiError), [`ConfigError`](#struct.ConfigError), [`DecodeError`](#struct.DecodeError), [`HttpClient`](#struct.HttpClient), [`HttpClientBuilder`](#struct.HttpClientBuilder), [`Paginated`](#struct.Paginated), [`Polymarket`](#struct.Polymarket), [`PolymarketBuilder`](#struct.PolymarketBuilder), [`RetryPolicy`](#struct.RetryPolicy), [`TransportError`](#struct.TransportError), [`ValidationError`](#struct.ValidationError), [`WebSocketError`](#struct.WebSocketError)
 - **Enums:** [`Error`](#enum.Error), [`Service`](#enum.Service), [`WebSocketErrorKind`](#enum.WebSocketErrorKind)
@@ -145,6 +146,7 @@ is opened, so they nest under your application's own spans.
 - [`combos`](combos.md): Combos / RFQ REST API client (`https://combos-rfq-api.polymarket.com`).
 - [`data`](data.md): Data API v2 client (`https://data-api.polymarket.com`, routes under `/v2`).
 - [`gamma`](gamma.md): Gamma API client (`https://gamma-api.polymarket.com`).
+- [`geoblock`](geoblock.md): Geoblock check (`https://polymarket.com/api/geoblock`).
 - [`relayer`](relayer.md): Relayer API client (`https://relayer-v2.polymarket.com`).
 - [`types`](types.md): Identifier newtypes and enums shared by several services.
 - [`ws`](ws.md): Public (unauthenticated) WebSocket channels.
@@ -714,6 +716,15 @@ pub fn combos(&self) -> &CombosClient
 
 The Combos / RFQ REST client (public endpoints).
 
+##### <a id="Polymarket.fn.geoblock"></a>`geoblock`
+
+```rust
+#[must_use]
+pub fn geoblock(&self) -> &GeoblockClient
+```
+
+The geoblock check client (`polymarket.com/api/geoblock`).
+
 ### <a id="struct.PolymarketBuilder"></a>`struct PolymarketBuilder`
 
 ```rust
@@ -824,6 +835,14 @@ pub fn combos_base_url(self, url: impl Into<String>) -> Self
 ```
 
 Overrides the Combos / RFQ REST base URL.
+
+##### <a id="PolymarketBuilder.fn.geoblock_base_url"></a>`geoblock_base_url`
+
+```rust
+pub fn geoblock_base_url(self, url: impl Into<String>) -> Self
+```
+
+Overrides the geoblock check base URL.
 
 ##### <a id="PolymarketBuilder.fn.build"></a>`build`
 
@@ -1303,6 +1322,8 @@ pub enum Service {
     Bridge,
     /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).
     Combos,
+    /// Geoblock check (`polymarket.com/api/geoblock`).
+    Geoblock,
     /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).
     MarketChannel,
     /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).
