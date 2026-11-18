@@ -608,12 +608,29 @@ impl MarketChannelBuilder {
             .config(
                 Service::MarketChannel,
                 MarketChannel::DEFAULT_URL,
-                self.heartbeat_interval
-                    .saturating_mul(3)
-                    .max(MarketChannel::DEFAULT_IDLE_TIMEOUT),
+                self.default_idle_timeout(),
             )?
             .heartbeat(self.heartbeat_interval, PING)
             .ignore(PONG))
+    }
+}
+
+impl MarketChannelBuilder {
+    /// The idle timeout used when none is set: three heartbeats, at least
+    /// [`MarketChannel::DEFAULT_IDLE_TIMEOUT`].
+    fn default_idle_timeout(&self) -> Duration {
+        self.heartbeat_interval
+            .saturating_mul(3)
+            .max(MarketChannel::DEFAULT_IDLE_TIMEOUT)
+    }
+
+    /// The idle timeout connections from this builder use, if any.
+    pub(super) fn effective_idle_timeout(&self) -> Option<Duration> {
+        match self.options.idle_timeout {
+            IdleTimeout::Default => Some(self.default_idle_timeout()),
+            IdleTimeout::After(timeout) => Some(timeout),
+            IdleTimeout::Disabled => None,
+        }
     }
 }
 

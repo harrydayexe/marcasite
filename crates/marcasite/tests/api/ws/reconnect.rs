@@ -804,3 +804,96 @@ fn polling_outside_a_runtime_is_an_error_not_a_panic() {
     ));
     assert!(handle.subscribe([ASSET_B]).is_err());
 }
+
+#[tokio::test]
+async fn a_connection_that_goes_silent_is_not_stable() {
+    // The server accepts, reads the subscription, then sends nothing (not even PONG): every
+    // connection ends with the idle timeout. That must not count as a stable connection, or
+    // `max_attempts` would never take effect.
+    let (url, _, server) = serve_script(vec![ws(|mut socket| async move {
+        let _ = recv_json(&mut socket).await;
+        drain(&mut socket).await;
+    })])
+    .await;
+    let mut ch = MarketChannel::builder()
+        .url(&url)
+        .idle_timeout(Duration::from_millis(300))
+        .reconnecting()
+        .policy(
+            policy(5, 10)
+                .stable_after(Duration::from_millis(100))
+                .max_attempts(NonZeroU32::MIN),
+        )
+        .build(MarketSubscription::new([ASSET_A]))
+        .unwrap();
+    expect_connected(&mut ch, &[ASSET_A], 1).await;
+    let error = expect_disconnected(&mut ch, &[ASSET_A]).await;
+    assert!(
+        matches!(&error, Some(Error::WebSocket(e)) if e.kind() == WebSocketErrorKind::Timeout),
+        "{error:?}"
+    );
+    match next(&mut ch).await {
+        Some(Err(Error::WebSocket(e))) => assert!(e.message().contains("gave up"), "{e}"),
+        other => panic!("expected to give up, got {other:?}"),
+    }
+    assert!(next(&mut ch).await.is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn changes_made_before_the_first_poll_go_in_the_initial_message() {
+    let (url, _, server) = serve_script(vec![ws(|mut socket| async move {
+        assert_eq!(
+            recv_json(&mut socket).await,
+            json!({"assets_ids": [ASSET_A, ASSET_B], "type": "market"})
+        );
+        drain(&mut socket).await;
+    })])
+    .await;
+    let mut ch = channel(&url, policy(10, 20), MarketSubscription::new([ASSET_A]));
+    ch.handle().subscribe([ASSET_B]).unwrap();
+    expect_connected(&mut ch, &[ASSET_A, ASSET_B], 1).await;
+    ch.close();
+    assert!(next(&mut ch).await.is_none());
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn an_unsubscribe_does_not_change_the_tracked_level() {
+    let (url, _, server) = serve_script(vec![
+        ws(|mut socket| async move {
+            let _ = recv_json(&mut socket).await;
+            // The update is forwarded as given.
+            assert_eq!(
+                recv_json(&mut socket).await,
+                json!({"operation": "unsubscribe", "assets_ids": [ASSET_B], "level": 1})
+            );
+            drop(socket);
+        }),
+        ws(|mut socket| async move {
+            assert_eq!(
+                recv_json(&mut socket).await,
+                json!({"assets_ids": [ASSET_A], "type": "market", "level": 3})
+            );
+            drain(&mut socket).await;
+        }),
+    ])
+    .await;
+    let mut ch = channel(
+        &url,
+        policy(10, 20),
+        MarketSubscription::new([ASSET_A]).level(SubscriptionLevel::Level3),
+    );
+    let handle = ch.handle();
+    expect_connected(&mut ch, &[ASSET_A], 1).await;
+    handle
+        .update_subscription(
+            MarketSubscriptionUpdate::unsubscribe([ASSET_B]).level(SubscriptionLevel::Level1),
+        )
+        .unwrap();
+    expect_disconnected(&mut ch, &[ASSET_A]).await;
+    expect_connected(&mut ch, &[ASSET_A], 2).await;
+    ch.close();
+    assert!(next(&mut ch).await.is_none());
+    server.await.unwrap();
+}

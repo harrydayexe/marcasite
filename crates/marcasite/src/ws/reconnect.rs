@@ -42,7 +42,10 @@ use super::market::{
 /// server is backed off from like an unreachable one. Receiving messages does not make a
 /// connection stable: the server sends the initial snapshots right away. Stability is
 /// measured up to the moment the loss is *observed* (the stream is polled and sees the
-/// connection end), which for a connection that died silently is when the idle timeout fires.
+/// connection end). A connection ended by a `Timeout` (the idle timeout: nothing, not even a
+/// heartbeat reply, arrived for that long) is only credited with the time up to the start of
+/// that silence, so a server that accepts connections and then goes silent is backed off from
+/// and counts against [`max_attempts`](Self::max_attempts).
 ///
 /// [`max_attempts`](Self::max_attempts), if set, bounds the number of attempts without a
 /// stable connection in between; by default the channel retries forever.
@@ -375,11 +378,15 @@ impl ReconnectingMarketChannelHandle {
                 }
             }
         }
-        if update.level.is_some() {
-            tracked.level = update.level;
-        }
-        if update.custom_feature_enabled.is_some() {
-            tracked.custom_feature_enabled = update.custom_feature_enabled;
+        // Settings only take effect with a subscribe; an unsubscribe does not change what the
+        // remaining assets are subscribed with.
+        if update.operation == Operation::Subscribe {
+            if update.level.is_some() {
+                tracked.level = update.level;
+            }
+            if update.custom_feature_enabled.is_some() {
+                tracked.custom_feature_enabled = update.custom_feature_enabled;
+            }
         }
         tracked.version = tracked.version.wrapping_add(1);
         if let Some(live) = &tracked.live {
@@ -448,6 +455,9 @@ struct Sent {
 
 #[derive(Debug)]
 enum State {
+    /// Built but not yet polled: the first attempt starts at the first poll, so that it sends
+    /// the subscription as it is then (including changes made through a handle before).
+    Idle,
     /// Connecting; `sent` is the tracked subscription the attempt sent, `version` its version.
     Connecting {
         connect: SyncFuture,
@@ -473,6 +483,13 @@ enum State {
 /// [handle](ReconnectingMarketChannelHandle)), `level`, `initial_dump` and
 /// `custom_feature_enabled`. If you set `initial_dump(false)`, the server does not send
 /// `book` snapshots after a reconnection either.
+///
+/// `level` and `custom_feature_enabled` are tracked per channel, not per asset: the last
+/// value set by the initial subscription or a *subscribe* update is sent for **every** tracked
+/// asset on reconnection (the initial message carries one value for all of them). If you
+/// subscribe assets with different settings, they converge on the latest after a reconnect.
+/// Whether the server applies these settings per asset or per connection is undocumented
+/// (see `OPEN_QUESTIONS.md`).
 ///
 /// Created with [`new`](Self::new) or [`MarketChannelBuilder::reconnecting`]; it does not
 /// connect before it is polled, so nothing blocks and a Tokio runtime is only needed from the
@@ -510,6 +527,12 @@ enum State {
 /// A consumer that keeps local order books should mark the assets of every `Disconnected`
 /// untrusted and trust an asset again at its first `book` after the following `Connected`.
 ///
+/// A message that fails to decode may be a lost delta, and it does not end the connection,
+/// so no `Disconnected` or fresh `book` follows on its own. Mark every tracked asset
+/// untrusted on a decode error until its next `book`. A reconnection sends fresh snapshots
+/// (unless `initial_dump(false)`); whether a subscribe update through the handle does is
+/// undocumented.
+///
 /// ```no_run
 /// # async fn run() -> marcasite::Result<()> {
 /// use std::{collections::HashSet, time::Duration};
@@ -533,8 +556,12 @@ enum State {
 /// while let Some(item) = channel.next().await {
 ///     let event = match item {
 ///         Ok(event) => event,
-///         // One message did not decode: not fatal, the stream continues.
-///         Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => continue,
+///         // One message did not decode: not fatal, the stream continues, but it may have
+///         // been a lost delta. Distrust every book until its next snapshot.
+///         Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {
+///             untrusted.extend(handle.asset_ids());
+///             continue;
+///         }
 ///         // The policy gave up, or the error cannot be fixed by retrying.
 ///         Err(err) => return Err(err),
 ///     };
@@ -558,7 +585,6 @@ enum State {
 ///         _ => {}
 ///     }
 /// }
-/// # drop(handle);
 /// # Ok(())
 /// # }
 /// ```
@@ -715,8 +741,17 @@ impl ReconnectingMarketChannel {
             self.state = State::Done;
             return Poll::Ready(None);
         }
-        // Measured up to the moment the loss is observed.
-        if since.elapsed() >= self.policy.stable_after {
+        // Measured up to the moment the loss is observed; a connection that timed out was
+        // silent for (at least) the idle timeout before that.
+        let mut up_for = since.elapsed();
+        let timed_out = matches!(
+            &error,
+            Some(Error::WebSocket(ws)) if ws.kind() == WebSocketErrorKind::Timeout
+        );
+        if timed_out && let Some(idle) = self.builder.effective_idle_timeout() {
+            up_for = up_for.saturating_sub(idle);
+        }
+        if up_for >= self.policy.stable_after {
             self.attempts = 0;
         }
         self.state = if self.policy.exhausted(self.attempts) {
@@ -844,6 +879,7 @@ impl Stream for ReconnectingMarketChannel {
             match std::mem::replace(&mut this.state, State::Done) {
                 State::Done => return Poll::Ready(None),
                 State::GaveUp(error) => return Poll::Ready(Some(Err(error))),
+                State::Idle => this.state = this.begin_connect(),
                 State::Waiting(mut sleep) => {
                     if this.poll_closed(cx.waker()) {
                         return Poll::Ready(None);
@@ -965,14 +1001,13 @@ impl ReconnectingMarketChannelBuilder {
             live: None,
             waker: None,
         }));
-        let mut channel = ReconnectingMarketChannel {
+        let channel = ReconnectingMarketChannel {
             builder: self.channel,
             policy: self.policy,
             shared,
-            state: State::Done,
+            state: State::Idle,
             attempts: 0,
         };
-        channel.state = channel.begin_connect();
         Ok(channel)
     }
 }

@@ -106,3 +106,11 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
     has `e: 2`. *Current:* `taker_fee` raises the whole `price x (1 - price)` term to the
     exponent, documented as unverified for exponents other than 1. Live (2026-11-18, about
     1,600 Gamma markets and CLOB `fd`) only ever sends exponent 1.
+
+26. Are the market channel's `level` and `custom_feature_enabled` per asset or per
+    connection? The docs and AsyncAPI spec accept them on the initial message and on subscribe
+    updates but do not say what an update does to assets subscribed earlier. Also undocumented:
+    whether a subscribe update sends `book` snapshots for the added assets. *Current:*
+    `ReconnectingMarketChannel` tracks one value per channel (the last set by the initial
+    subscription or a subscribe update; unsubscribe updates do not change it) and sends it for
+    every asset on reconnection, as documented on the type.
