@@ -48,7 +48,7 @@ All features are on by default. To compile only what you use:
 
 ```toml
 [dependencies]
-marcasite = { version = "0.2", default-features = false, features = ["gamma", "clob"] }
+marcasite = { version = "0.3", default-features = false, features = ["gamma", "clob"] }
 ```
 
 The examples use [`tokio`](https://docs.rs/tokio) (with the `macros` and `rt-multi-thread`
@@ -56,7 +56,7 @@ features) and [`futures-util`](https://docs.rs/futures-util) for stream combinat
 
 ```toml
 [dependencies]
-marcasite = "0.2"
+marcasite = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 futures-util = "0.3"
 ```

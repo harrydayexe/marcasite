@@ -1,6 +1,6 @@
 # Module `marcasite::gamma`
 
-> Generated from marcasite 0.2.0 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.3.0 (all features) by `just docs-md`. Do not edit.
 
 Gamma API client (`https://gamma-api.polymarket.com`).
 
