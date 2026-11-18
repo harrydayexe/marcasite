@@ -99,3 +99,10 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
     (`shares x rate x (price x (1 - price)) ^ exponent`, computed in `Decimal`, accurate to about
     28 significant digits); `fees::FEE_DECIMALS` (5) is exposed so
     callers can round. The docs' worked tables (rounded to cents) are reproduced.
+
+25. How does the fee exponent enter the formula? `market-details` calls it the "exponent
+    applied to the price component", but every documented formula is
+    `shares x rate x price x (1 - price)` (exponent 1), and the CLOB spec's `FeeDetails` example
+    has `e: 2`. *Current:* `taker_fee` raises the whole `price x (1 - price)` term to the
+    exponent, documented as unverified for exponents other than 1. Live (2026-11-18, about
+    1,600 Gamma markets and CLOB `fd`) only ever sends exponent 1.

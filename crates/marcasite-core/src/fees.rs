@@ -12,11 +12,18 @@
 //! See <https://docs.polymarket.com/trading/fees> and
 //! <https://docs.polymarket.com/market-data/market-details#trading-fees>; the latter documents
 //! the exponent as "exponent applied to the price component". Observed live
-//! (2026-11-17, 200 top markets): the exponent is always `1`.
+//! (2026-11-17, 200 top markets; 2026-11-18, about 1,600 markets): the exponent is always `1`.
 //!
-//! **Rates change.** Category rates change on 2026-11-20 (see
+//! **Exponents other than `1` are unverified.** No documentation gives the formula with the
+//! exponent: the docs' formula is `shares × rate × price × (1 − price)`, which this matches
+//! for exponent `1`. Raising the whole `price × (1 − price)` term to the exponent is this
+//! SDK's reading of "exponent applied to the price component", not a documented formula; treat
+//! fees for any other exponent as an estimate. See `OPEN_QUESTIONS.md`.
+//!
+//! **Rates change.** Category rates change on 2026-11-20 at 23:59 UTC (see
 //! <https://docs.polymarket.com/programs/fee-and-rebate-changes-november-2026>). Read
-//! the rate and exponent from the market being traded, not from a hard-coded table.
+//! the rate and exponent from the market being traded, not from a hard-coded table, and
+//! re-fetch them after a change: a rate read before it is stale afterwards.
 //!
 //! # Rounding
 //!
@@ -44,7 +51,8 @@ use crate::error::{Result, ValidationError};
 /// fee charged is 0.00001 USDC). The rounding mode is not documented.
 pub const FEE_DECIMALS: u32 = 5;
 
-/// Largest exponent [`taker_fee`] accepts. Live markets use `1`; the cap only bounds the
+/// Largest exponent [`taker_fee`] accepts. Live markets use `1`, the only exponent whose
+/// formula is documented (see the [module documentation](self)); the cap only bounds the
 /// work and rejects nonsense values.
 pub const MAX_EXPONENT: u32 = 8;
 
