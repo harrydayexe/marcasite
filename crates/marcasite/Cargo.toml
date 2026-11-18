@@ -14,7 +14,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["gamma", "clob", "data", "relayer", "bridge", "combos", "ws"]
+default = ["gamma", "clob", "data", "relayer", "bridge", "combos", "geoblock", "ws"]
 ## Gamma API: events, markets, tags, series, comments, sports, search, profiles.
 gamma = []
 ## CLOB API public market data: order books, prices, spreads, markets, rewards, rebates.
@@ -27,8 +27,10 @@ relayer = []
 bridge = []
 ## Combos / RFQ REST public endpoints.
 combos = []
+## Geoblock check (`polymarket.com/api/geoblock`).
+geoblock = []
 ## Public WebSocket channels: CLOB market channel, sports results, PolyBolt public prices.
-ws = ["marcasite-core/ws"]
+ws = ["marcasite-core/ws", "dep:tokio"]
 
 [dependencies]
 chrono.workspace = true
@@ -38,6 +40,7 @@ rust_decimal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tokio = { workspace = true, features = ["rt", "time"], optional = true }
 
 [dev-dependencies]
 futures-util.workspace = true

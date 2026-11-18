@@ -85,10 +85,10 @@ impl Serialize for SubscriptionLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct MarketSubscription {
-    asset_ids: Vec<TokenId>,
-    initial_dump: Option<bool>,
-    level: Option<SubscriptionLevel>,
-    custom_feature_enabled: Option<bool>,
+    pub(super) asset_ids: Vec<TokenId>,
+    pub(super) initial_dump: Option<bool>,
+    pub(super) level: Option<SubscriptionLevel>,
+    pub(super) custom_feature_enabled: Option<bool>,
 }
 
 impl MarketSubscription {
@@ -137,7 +137,7 @@ impl MarketSubscription {
         &self.asset_ids
     }
 
-    fn to_json(&self) -> Result<String> {
+    pub(super) fn to_json(&self) -> Result<String> {
         #[derive(Serialize)]
         struct Wire<'a> {
             assets_ids: &'a [TokenId],
@@ -162,7 +162,7 @@ impl MarketSubscription {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum Operation {
+pub(super) enum Operation {
     Subscribe,
     Unsubscribe,
 }
@@ -182,10 +182,10 @@ enum Operation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct MarketSubscriptionUpdate {
-    operation: Operation,
-    asset_ids: Vec<TokenId>,
-    level: Option<SubscriptionLevel>,
-    custom_feature_enabled: Option<bool>,
+    pub(super) operation: Operation,
+    pub(super) asset_ids: Vec<TokenId>,
+    pub(super) level: Option<SubscriptionLevel>,
+    pub(super) custom_feature_enabled: Option<bool>,
 }
 
 impl MarketSubscriptionUpdate {
@@ -585,19 +585,7 @@ impl MarketChannelBuilder {
     /// Returns [`Error::Config`] if the URL is invalid or the heartbeat interval or idle
     /// timeout is zero, or [`Error::WebSocket`] if the connection cannot be established.
     pub async fn connect(self, subscription: MarketSubscription) -> Result<MarketChannel> {
-        check_interval(self.heartbeat_interval)?;
-        let config = self
-            .options
-            .config(
-                Service::MarketChannel,
-                MarketChannel::DEFAULT_URL,
-                self.heartbeat_interval
-                    .saturating_mul(3)
-                    .max(MarketChannel::DEFAULT_IDLE_TIMEOUT),
-            )?
-            .heartbeat(self.heartbeat_interval, PING)
-            .ignore(PONG)
-            .initial_message(subscription.to_json()?);
+        let config = self.config()?.initial_message(subscription.to_json()?);
         let conn = WsConnection::connect(config).await?;
         let handle = MarketChannelHandle {
             sender: conn.sender(),
@@ -606,6 +594,43 @@ impl MarketChannelBuilder {
             events: EventStream::new(conn),
             handle,
         })
+    }
+}
+
+impl MarketChannelBuilder {
+    /// The driver configuration for this builder, without the initial message. Fails like
+    /// [`connect`](Self::connect) does for invalid settings, so it also validates a builder
+    /// before any connection is attempted.
+    pub(super) fn config(&self) -> Result<marcasite_core::ws::WsConfig> {
+        check_interval(self.heartbeat_interval)?;
+        Ok(self
+            .options
+            .config(
+                Service::MarketChannel,
+                MarketChannel::DEFAULT_URL,
+                self.default_idle_timeout(),
+            )?
+            .heartbeat(self.heartbeat_interval, PING)
+            .ignore(PONG))
+    }
+}
+
+impl MarketChannelBuilder {
+    /// The idle timeout used when none is set: three heartbeats, at least
+    /// [`MarketChannel::DEFAULT_IDLE_TIMEOUT`].
+    fn default_idle_timeout(&self) -> Duration {
+        self.heartbeat_interval
+            .saturating_mul(3)
+            .max(MarketChannel::DEFAULT_IDLE_TIMEOUT)
+    }
+
+    /// The idle timeout connections from this builder use, if any.
+    pub(super) fn effective_idle_timeout(&self) -> Option<Duration> {
+        match self.options.idle_timeout {
+            IdleTimeout::Default => Some(self.default_idle_timeout()),
+            IdleTimeout::After(timeout) => Some(timeout),
+            IdleTimeout::Disabled => None,
+        }
     }
 }
 
@@ -658,6 +683,53 @@ pub enum MarketEvent {
     /// is not JSON is kept as a JSON string).
     #[serde(untagged)]
     Unknown(Value),
+}
+
+impl MarketEvent {
+    /// The exchange timestamp of the event, for every variant.
+    ///
+    /// This is the time the exchange stamped on the message, **not** the time it was
+    /// received. `None` when the event carries no timestamp ([`MarketEvent::Unknown`]) or
+    /// when a string timestamp is not an integer number of Unix milliseconds or is out of
+    /// the range [`DateTime`] can represent (see
+    /// [`NewMarketEvent::timestamp_millis`] and friends).
+    ///
+    /// ```
+    /// use marcasite::ws::MarketEvent;
+    ///
+    /// fn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+    ///     Some((now - event.timestamp()?).num_milliseconds())
+    /// }
+    /// ```
+    #[must_use]
+    pub fn timestamp(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Book(e) => Some(e.timestamp),
+            Self::PriceChange(e) => Some(e.timestamp),
+            Self::LastTradePrice(e) => Some(e.timestamp),
+            Self::TickSizeChange(e) => e.timestamp_millis(),
+            Self::BestBidAsk(e) => e.timestamp_millis(),
+            Self::NewMarket(e) => e.timestamp_millis(),
+            Self::MarketResolved(e) => e.timestamp_millis(),
+            Self::Unknown(_) => None,
+        }
+    }
+
+    /// The condition id of the market the event is about, for every recognised variant;
+    /// `None` for [`MarketEvent::Unknown`].
+    #[must_use]
+    pub fn market(&self) -> Option<&ConditionId> {
+        match self {
+            Self::Book(e) => Some(&e.market),
+            Self::PriceChange(e) => Some(&e.market),
+            Self::LastTradePrice(e) => Some(&e.market),
+            Self::TickSizeChange(e) => Some(&e.market),
+            Self::BestBidAsk(e) => Some(&e.market),
+            Self::NewMarket(e) => Some(&e.market),
+            Self::MarketResolved(e) => Some(&e.market),
+            Self::Unknown(_) => None,
+        }
+    }
 }
 
 impl ChannelEvent for MarketEvent {
@@ -1000,6 +1072,22 @@ pub struct FeeSchedule {
     pub rebate_rate: Option<Decimal>,
 }
 
+impl FeeSchedule {
+    /// Computes the taker fee in USDC for trading `shares` at `price`, from this market's
+    /// rate and exponent.
+    ///
+    /// This always computes the taker fee (makers pay none) and is unrounded. See the
+    /// [`fees`](marcasite_core::fees) module for the formula, rounding and rate changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error if the rate or exponent is missing or invalid, or `price`
+    /// or `shares` is out of range.
+    pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> marcasite_core::Result<Decimal> {
+        marcasite_core::fees::taker_fee_from_parameters(shares, price, self.rate, self.exponent)
+    }
+}
+
 impl NewMarketEvent {
     /// [`Self::timestamp`] interpreted as Unix milliseconds, as in the documented example;
     /// `None` if it is not an integer.
@@ -1051,6 +1139,18 @@ mod tests {
 
     use super::*;
     use crate::ws::frame::decode_frame;
+
+    #[test]
+    fn fee_schedule_taker_fee() {
+        let schedule: FeeSchedule = serde_json::from_str(
+            r#"{"exponent":"1","rate":"0.07","taker_only":true,"rebate_rate":"0.2"}"#,
+        )
+        .unwrap();
+        let fee = schedule
+            .taker_fee(Decimal::from(100), "0.05".parse().unwrap())
+            .unwrap();
+        assert_eq!(fee, "0.3325".parse().unwrap());
+    }
 
     fn event(json: &str) -> MarketEvent {
         serde_json::from_str(json).unwrap()
@@ -1573,5 +1673,46 @@ mod tests {
         assert!(matches!(out[0], Ok(MarketEvent::TickSizeChange(_))));
         assert!(matches!(out[1], Err(Error::WebSocket(_))));
         assert!(matches!(out[2], Ok(MarketEvent::Unknown(_))));
+    }
+
+    #[test]
+    fn event_timestamp_and_market_cover_every_variant() {
+        let ms = |e: &str| event(e).timestamp().map(|t| t.timestamp_millis());
+        let mk = |e: &str| event(e).market().map(|m| m.as_str().to_owned());
+        let cases = [
+            r#"{"event_type":"book","asset_id":"1","market":"0xm","bids":[],"asks":[],"timestamp":"1757908892351","hash":"h"}"#,
+            r#"{"event_type":"price_change","market":"0xm","timestamp":"1757908892351","price_changes":[]}"#,
+            r#"{"event_type":"last_trade_price","asset_id":"1","market":"0xm","price":"0.5","size":"1","side":"BUY","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"best_bid_ask","market":"0xm","asset_id":"1","best_bid":"0.1","best_ask":"0.2","spread":"0.1","timestamp":"1757908892351"}"#,
+            r#"{"event_type":"new_market","id":"1","question":"q","market":"0xm","slug":"s","assets_ids":[],"outcomes":[],"timestamp":"1757908892351"}"#,
+            r#"{"event_type":"market_resolved","id":"1","market":"0xm","assets_ids":[],"winning_asset_id":"1","winning_outcome":"Yes","timestamp":"1757908892351"}"#,
+        ];
+        for raw in cases {
+            assert_eq!(ms(raw), Some(1_757_908_892_351), "{raw}");
+            assert_eq!(mk(raw).as_deref(), Some("0xm"), "{raw}");
+        }
+    }
+
+    #[test]
+    fn event_timestamp_is_none_when_unparseable_or_unknown() {
+        let tick = event(
+            r#"{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"soon"}"#,
+        );
+        assert_eq!(tick.timestamp(), None);
+        assert!(tick.market().is_some());
+        let tick_at = |ts: &str| {
+            event(&format!(
+                r#"{{"event_type":"tick_size_change","asset_id":"1","market":"0xm","old_tick_size":"0.01","new_tick_size":"0.001","timestamp":"{ts}"}}"#
+            ))
+            .timestamp()
+        };
+        assert_eq!(tick_at("9223372036854775807"), None);
+        assert_eq!(tick_at("99999999999999999999"), None);
+        assert_eq!(tick_at("-1").map(|t| t.timestamp_millis()), Some(-1));
+        let unknown = event(r#"{"event_type":"something_new","timestamp":"1"}"#);
+        assert!(matches!(unknown, MarketEvent::Unknown(_)));
+        assert_eq!(unknown.timestamp(), None);
+        assert_eq!(unknown.market(), None);
     }
 }

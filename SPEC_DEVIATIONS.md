@@ -676,6 +676,13 @@ Checked and **not** a deviation: the `/v2/positions` `title` limit is 200 *chara
 
 (`volume` is an integer for some markets and a float for others; `serde_util::decimal_number` handles both. Ids are full length live, the docs' example abbreviates them.)
 
+## Geoblock
+
+No deviation: `GET https://polymarket.com/api/geoblock` matched `docs/polymarket/api-reference/geoblock.md`
+on 2026-11-17 (`{"blocked":true,"ip":"203.0.113.7","country":"US","region":"OH"}`, `application/json`; the IP is replaced with a documentation address (RFC 5737); same four
+fields, same types, no extra keys). Pinned by `geoblock::get_status` (live). Open: whether `region` can be
+absent (see `OPEN_QUESTIONS.md` 21).
+
 ## WebSocket channels
 
 ### Sports channel: the update shape is not the spec's

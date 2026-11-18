@@ -31,6 +31,9 @@ pub const BRIDGE: &str = "https://bridge.polymarket.com";
 /// Combos / RFQ REST base URL.
 pub const COMBOS: &str = "https://combos-rfq-api.polymarket.com";
 
+/// Geoblock check base URL (the route is `/api/geoblock`).
+pub const GEOBLOCK: &str = "https://polymarket.com";
+
 /// A client for the production APIs.
 pub fn pm() -> marcasite::Polymarket {
     marcasite::Polymarket::new().expect("client builds")

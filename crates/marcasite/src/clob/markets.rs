@@ -193,6 +193,22 @@ pub struct FeeDetails {
     pub takers_only: Option<bool>,
 }
 
+impl FeeDetails {
+    /// Computes the taker fee in USDC for trading `shares` at `price`, from this market's
+    /// rate and exponent.
+    ///
+    /// This always computes the taker fee (makers pay none) and is unrounded. See the
+    /// [`fees`](marcasite_core::fees) module for the formula, rounding and rate changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error if the rate or exponent is missing or invalid, or `price`
+    /// or `shares` is out of range.
+    pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> marcasite_core::Result<Decimal> {
+        marcasite_core::fees::taker_fee_from_parameters(shares, price, self.rate, self.exponent)
+    }
+}
+
 /// All CLOB-level parameters of a market (`components/schemas/ClobMarketDetails`): tokens,
 /// tick size, base fees, rewards, RFQ status and fee details.
 ///
@@ -568,6 +584,20 @@ markets_listing!(
 mod tests {
     use super::*;
     use crate::clob::types::test_util::round_trip;
+
+    #[test]
+    fn fee_details_taker_fee() {
+        // Live capture, 2026-11-17: `fd` of a top market.
+        let fd: FeeDetails = serde_json::from_str(r#"{"r":0.05,"e":1,"to":true}"#).unwrap();
+        let fee = fd
+            .taker_fee(Decimal::from(100), "0.30".parse().unwrap())
+            .unwrap();
+        assert_eq!(fee, "1.05".parse().unwrap());
+        let missing: FeeDetails = serde_json::from_str(r#"{"r":0.05}"#).unwrap();
+        assert!(missing.taker_fee(Decimal::ONE, Decimal::ONE).is_err());
+        let fractional: FeeDetails = serde_json::from_str(r#"{"r":0.05,"e":1.5}"#).unwrap();
+        assert!(fractional.taker_fee(Decimal::ONE, Decimal::ONE).is_err());
+    }
 
     fn d(s: &str) -> Decimal {
         s.parse().unwrap()

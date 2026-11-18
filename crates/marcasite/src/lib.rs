@@ -13,7 +13,8 @@
 //! | Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`] | `relayer` |
 //! | Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`] | `bridge` |
 //! | Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`] | `combos` |
-//! | WebSockets: market channel, sports results, PolyBolt public prices | [`ws`] | `ws` |
+//! | Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`] | `geoblock` |
+//! | WebSockets: market channel (optionally auto-reconnecting), sports results, PolyBolt public prices | [`ws`] | `ws` |
 //!
 //! All features are enabled by default; disable default features and pick the ones you need
 //! to reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.
@@ -143,6 +144,8 @@
 
 mod client;
 
+pub use marcasite_core::fees;
+
 #[cfg(feature = "bridge")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bridge")))]
 pub mod bridge;
@@ -158,6 +161,9 @@ pub mod data;
 #[cfg(feature = "gamma")]
 #[cfg_attr(docsrs, doc(cfg(feature = "gamma")))]
 pub mod gamma;
+#[cfg(feature = "geoblock")]
+#[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+pub mod geoblock;
 #[cfg(feature = "relayer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "relayer")))]
 pub mod relayer;
@@ -168,8 +174,8 @@ pub mod ws;
 pub use client::{Polymarket, PolymarketBuilder};
 pub use marcasite_core::pagination::Paginated;
 pub use marcasite_core::{
-    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Method, Result,
-    RetryPolicy, Service, StatusCode, TransportError, Url, ValidationError,
+    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Method, RateLimit,
+    Result, RetryPolicy, Service, StatusCode, TransportError, Url, ValidationError,
 };
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]

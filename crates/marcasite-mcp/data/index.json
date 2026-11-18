@@ -1,17 +1,19 @@
 {
   "format_version": 1,
-  "marcasite_version": "0.2.0",
+  "marcasite_version": "0.3.0",
   "modules": [
     {
       "path": "marcasite",
       "summary": "Unofficial Rust SDK for the Polymarket Predictions APIs.",
-      "docs": "Unofficial Rust SDK for the Polymarket Predictions APIs.\n\nThis project is not affiliated with or endorsed by Polymarket.\n\nmarcasite gives typed, async access to the **public (unauthenticated)** Polymarket\nPredictions APIs:\n\n| Service | Client | Feature |\n|---|---|---|\n| Gamma API: events, markets, tags, series, comments, sports, search, profiles | [`gamma::GammaClient`](marcasite::gamma::GammaClient) | `gamma` |\n| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates, builder trades | [`clob::ClobClient`](marcasite::clob::ClobClient) | `clob` |\n| Data API v2: positions, PnL, trades, activity, leaderboards, holders | [`data::DataClient`](marcasite::data::DataClient) | `data` |\n| Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`](marcasite::relayer::RelayerClient) | `relayer` |\n| Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](marcasite::bridge::BridgeClient) | `bridge` |\n| Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](marcasite::combos::CombosClient) | `combos` |\n| WebSockets: market channel, sports results, PolyBolt public prices | [`ws`](marcasite::ws) | `ws` |\n\nAll features are enabled by default; disable default features and pick the ones you need\nto reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.\n\n# Quick start\n\n```rust\nuse marcasite::Polymarket;\n\nlet pm = Polymarket::new()?;\nlet tags = pm.gamma().list_tags().limit(5).send().await?;\nfor tag in tags {\n    println!(\"{:?}: {:?}\", tag.id, tag.label);\n}\n```\n\nEach service client can also be created on its own, e.g. [`gamma::GammaClient::new`](marcasite::gamma::GammaClient::new), and\nevery client accepts a custom base URL (for example to point tests at a mock server).\n\n# Requests\n\nEndpoints with only required parameters are plain `async fn`s. Endpoints with optional\nparameters return a request builder: chain setters, then call `.send().await`. Required\nparameters are always arguments of the client method, never builder setters.\n\n# Pagination\n\nPaginated endpoints return one page from `.send()` (including the cursor or offset needed\nfor the next page), and every item of every page from `.into_stream()`, as a\n[`Paginated`](marcasite::Paginated) `Stream` that fetches the pages lazily. It ends after the last page, or\nright after yielding the first error. [`Paginated`](marcasite::Paginated) is `Unpin`, so a plain `while let`\nloop works:\n\n```rust\nuse futures_util::StreamExt as _;\n\nlet pm = marcasite::Polymarket::new()?;\nlet mut tags = pm.gamma().list_tags().limit(100).into_stream();\nwhile let Some(tag) = tags.next().await {\n    println!(\"{:?}\", tag?.label);\n}\n```\n\nThe usual stream adapters apply, for example to collect a bounded number of items:\n\n```rust\nuse futures_util::{StreamExt as _, TryStreamExt as _};\n\nlet pm = marcasite::Polymarket::new()?;\nlet first_200: Vec<_> = pm\n    .gamma()\n    .list_tags()\n    .limit(100)\n    .into_stream()\n    .take(200)\n    .try_collect()\n    .await?;\n```\n\n# Errors\n\nEvery fallible operation returns [`Result<T>`](marcasite::Result), whose error type [`Error`](marcasite::Error) distinguishes\nAPI errors (with the parsed error body and trace id), rate limiting (with `Retry-After`),\ntimeouts, transport failures, decoding failures (with the JSON path of the bad field),\nclient-side validation failures and configuration errors. See [`Error`](marcasite::Error).\n\n# Types\n\nPrices, sizes and amounts are `Decimal`s, never floating point. Values the API sends as\nJSON strings are parsed exactly. Values it sends as JSON numbers are exact if they are\nintegers (within `i64`/`u64`) or have at most 15 significant digits; longer numbers pass\nthrough `f64` while being parsed and may be rounded (see `Decimal`). Timestamps are\n`chrono::DateTime<Utc>`. Identifiers are newtypes (see [`types`](marcasite::types)) so\nthat, for example, a token id cannot be passed where a condition id is expected. String\nenums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the\nserver later never break deserialization.\n\n# Dependencies in the public API\n\nTypes from these crates appear in marcasite's public API, so upgrading any of them to a\nnew major (or, before 1.0, minor) version is a breaking change of marcasite:\n`http` 1 (`StatusCode`, `Method`), `url` 2 (`Url`), `serde_json` 1\n(`serde_json`), `chrono` 0.4 (`chrono`), `rust_decimal` 1 (`Decimal`) and\n`futures-core` 0.3 (`Stream`). The types are re-exported, so you do not need to\ndepend on these crates yourself to name them:\n\n```rust\nuse marcasite::{Method, Url, chrono::Utc, serde_json::Value};\n\nlet _ = (Method::GET, Url::parse(\"https://example.com\"), Value::Null, Utc::now());\n```\n\n# Logging\n\nThis crate emits diagnostics via `tracing`. It never installs a subscriber; install one\nin your application (e.g. with `tracing-subscriber`) to see them. Requests, retries and\nfailures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors\nthat are returned to you are never logged above `DEBUG`, so they are not reported twice.\n\nSpans (all at `DEBUG`), useful with span-based subscribers such as OpenTelemetry exporters:\n\n- `marcasite.request`: one per HTTP request, covering all retries. Fields `service`,\n  `method`, `path`, and on completion `status`, `attempts`, `elapsed_ms` and `trace_id`\n  (when the server sends one).\n- `marcasite.ws`: one per WebSocket connection, covering the handshake and the background\n  task that drives the socket for its whole lifetime. Fields `service`, `host`, `path`.\n\nBoth are children of whatever span is current when the request is sent or the connection\nis opened, so they nest under your application's own spans.\n\n[`ENDPOINTS.md`]: https://github.com/harrydayexe/marcasite/blob/main/ENDPOINTS.md",
+      "docs": "Unofficial Rust SDK for the Polymarket Predictions APIs.\n\nThis project is not affiliated with or endorsed by Polymarket.\n\nmarcasite gives typed, async access to the **public (unauthenticated)** Polymarket\nPredictions APIs:\n\n| Service | Client | Feature |\n|---|---|---|\n| Gamma API: events, markets, tags, series, comments, sports, search, profiles | [`gamma::GammaClient`](marcasite::gamma::GammaClient) | `gamma` |\n| CLOB API: order books, prices, spreads, markets, price history, rewards, rebates, builder trades | [`clob::ClobClient`](marcasite::clob::ClobClient) | `clob` |\n| Data API v2: positions, PnL, trades, activity, leaderboards, holders | [`data::DataClient`](marcasite::data::DataClient) | `data` |\n| Relayer API: transaction status, nonces, wallet deployment | [`relayer::RelayerClient`](marcasite::relayer::RelayerClient) | `relayer` |\n| Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](marcasite::bridge::BridgeClient) | `bridge` |\n| Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](marcasite::combos::CombosClient) | `combos` |\n| Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`](marcasite::geoblock::GeoblockClient) | `geoblock` |\n| WebSockets: market channel (optionally auto-reconnecting), sports results, PolyBolt public prices | [`ws`](marcasite::ws) | `ws` |\n\nAll features are enabled by default; disable default features and pick the ones you need\nto reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.\n\n# Quick start\n\n```rust\nuse marcasite::Polymarket;\n\nlet pm = Polymarket::new()?;\nlet tags = pm.gamma().list_tags().limit(5).send().await?;\nfor tag in tags {\n    println!(\"{:?}: {:?}\", tag.id, tag.label);\n}\n```\n\nEach service client can also be created on its own, e.g. [`gamma::GammaClient::new`](marcasite::gamma::GammaClient::new), and\nevery client accepts a custom base URL (for example to point tests at a mock server).\n\n# Requests\n\nEndpoints with only required parameters are plain `async fn`s. Endpoints with optional\nparameters return a request builder: chain setters, then call `.send().await`. Required\nparameters are always arguments of the client method, never builder setters.\n\n# Pagination\n\nPaginated endpoints return one page from `.send()` (including the cursor or offset needed\nfor the next page), and every item of every page from `.into_stream()`, as a\n[`Paginated`](marcasite::Paginated) `Stream` that fetches the pages lazily. It ends after the last page, or\nright after yielding the first error. [`Paginated`](marcasite::Paginated) is `Unpin`, so a plain `while let`\nloop works:\n\n```rust\nuse futures_util::StreamExt as _;\n\nlet pm = marcasite::Polymarket::new()?;\nlet mut tags = pm.gamma().list_tags().limit(100).into_stream();\nwhile let Some(tag) = tags.next().await {\n    println!(\"{:?}\", tag?.label);\n}\n```\n\nThe usual stream adapters apply, for example to collect a bounded number of items:\n\n```rust\nuse futures_util::{StreamExt as _, TryStreamExt as _};\n\nlet pm = marcasite::Polymarket::new()?;\nlet first_200: Vec<_> = pm\n    .gamma()\n    .list_tags()\n    .limit(100)\n    .into_stream()\n    .take(200)\n    .try_collect()\n    .await?;\n```\n\n# Errors\n\nEvery fallible operation returns [`Result<T>`](marcasite::Result), whose error type [`Error`](marcasite::Error) distinguishes\nAPI errors (with the parsed error body and trace id), rate limiting (with `Retry-After`),\ntimeouts, transport failures, decoding failures (with the JSON path of the bad field),\nclient-side validation failures and configuration errors. See [`Error`](marcasite::Error).\n\n# Types\n\nPrices, sizes and amounts are `Decimal`s, never floating point. Values the API sends as\nJSON strings are parsed exactly. Values it sends as JSON numbers are exact if they are\nintegers (within `i64`/`u64`) or have at most 15 significant digits; longer numbers pass\nthrough `f64` while being parsed and may be rounded (see `Decimal`). Timestamps are\n`chrono::DateTime<Utc>`. Identifiers are newtypes (see [`types`](marcasite::types)) so\nthat, for example, a token id cannot be passed where a condition id is expected. String\nenums are `#[non_exhaustive]` and have an `Unknown(String)` variant, so values added by the\nserver later never break deserialization.\n\n# Dependencies in the public API\n\nTypes from these crates appear in marcasite's public API, so upgrading any of them to a\nnew major (or, before 1.0, minor) version is a breaking change of marcasite:\n`http` 1 (`StatusCode`, `Method`), `url` 2 (`Url`), `serde_json` 1\n(`serde_json`), `chrono` 0.4 (`chrono`), `rust_decimal` 1 (`Decimal`) and\n`futures-core` 0.3 (`Stream`). The types are re-exported, so you do not need to\ndepend on these crates yourself to name them:\n\n```rust\nuse marcasite::{Method, Url, chrono::Utc, serde_json::Value};\n\nlet _ = (Method::GET, Url::parse(\"https://example.com\"), Value::Null, Utc::now());\n```\n\n# Logging\n\nThis crate emits diagnostics via `tracing`. It never installs a subscriber; install one\nin your application (e.g. with `tracing-subscriber`) to see them. Requests, retries and\nfailures are logged at `DEBUG`, response bodies and WebSocket frames at `TRACE`. Errors\nthat are returned to you are never logged above `DEBUG`, so they are not reported twice.\n\nSpans (all at `DEBUG`), useful with span-based subscribers such as OpenTelemetry exporters:\n\n- `marcasite.request`: one per HTTP request, covering all retries. Fields `service`,\n  `method`, `path`, and on completion `status`, `attempts`, `elapsed_ms` and `trace_id`\n  (when the server sends one).\n- `marcasite.ws`: one per WebSocket connection, covering the handshake and the background\n  task that drives the socket for its whole lifetime. Fields `service`, `host`, `path`.\n\nBoth are children of whatever span is current when the request is sent or the connection\nis opened, so they nest under your application's own spans.\n\n[`ENDPOINTS.md`]: https://github.com/harrydayexe/marcasite/blob/main/ENDPOINTS.md",
       "submodules": [
         "marcasite::bridge",
         "marcasite::clob",
         "marcasite::combos",
         "marcasite::data",
+        "marcasite::fees",
         "marcasite::gamma",
+        "marcasite::geoblock",
         "marcasite::relayer",
         "marcasite::types",
         "marcasite::ws"
@@ -26,6 +28,7 @@
         "marcasite::Paginated",
         "marcasite::Polymarket",
         "marcasite::PolymarketBuilder",
+        "marcasite::RateLimit",
         "marcasite::Result",
         "marcasite::RetryPolicy",
         "marcasite::Service",
@@ -378,6 +381,19 @@
       ]
     },
     {
+      "path": "marcasite::fees",
+      "summary": "Taker fee computation.",
+      "docs": "Taker fee computation.\n\nPolymarket charges a fee to the taker of a trade, on markets that have fees enabled:\n\n```text\nfee = shares × rate × (price × (1 − price)) ^ exponent\n```\n\n`shares` is the number of shares traded, `price` the fill price (`0..=1`), and `rate` and\n`exponent` are the market's fee parameters (CLOB `fd.r` / `fd.e`, Gamma\n`feeSchedule.rate` / `feeSchedule.exponent`). The fee is in USDC, and makers pay no fee.\nSee <https://docs.polymarket.com/trading/fees> and\n<https://docs.polymarket.com/market-data/market-details#trading-fees>; the latter documents\nthe exponent as \"exponent applied to the price component\". Observed live\n(2026-11-17, 200 top markets; 2026-11-18, about 1,600 markets): the exponent is always `1`.\n\n**Exponents other than `1` are unverified.** No documentation gives the formula with the\nexponent: the docs' formula is `shares × rate × price × (1 − price)`, which this matches\nfor exponent `1`. Raising the whole `price × (1 − price)` term to the exponent is this\nSDK's reading of \"exponent applied to the price component\", not a documented formula; treat\nfees for any other exponent as an estimate. See `OPEN_QUESTIONS.md`.\n\n**Rates change.** Category rates change on 2026-11-20 at 23:59 UTC (see\n<https://docs.polymarket.com/programs/fee-and-rebate-changes-november-2026>). Read\nthe rate and exponent from the market being traded, not from a hard-coded table, and\nre-fetch them after a change: a rate read before it is stale afterwards.\n\n# Rounding\n\nThe documentation says \"Fees are rounded to 5 decimal places. The smallest fee charged is\n0.00001 USDC. Anything smaller rounds to zero\" ([`FEE_DECIMALS`](marcasite::fees::FEE_DECIMALS)) but does not say which\nrounding mode is used. [`taker_fee`](marcasite::fees::taker_fee) therefore returns the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) value; it is\nan estimate of the charged fee to within [`FEE_DECIMALS`](marcasite::fees::FEE_DECIMALS) decimal places. See\n`OPEN_QUESTIONS.md`.\n\n```rust\nuse marcasite_core::fees::taker_fee;\nuse rust_decimal::Decimal;\n\n// 100 shares at 0.50 with rate 0.07 and exponent 1: $1.75 (docs, trading/fees).\nlet fee = taker_fee(Decimal::from(100), \"0.50\".parse()?, \"0.07\".parse()?, 1)?;\nassert_eq!(fee, \"1.75\".parse()?);\n```",
+      "submodules": [],
+      "items": [
+        "marcasite::fees::FEE_DECIMALS",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::fees::exponent_from_decimal",
+        "marcasite::fees::taker_fee"
+      ],
+      "reexports": []
+    },
+    {
       "path": "marcasite::gamma",
       "summary": "Gamma API client (`https://gamma-api.polymarket.com`).",
       "docs": "Gamma API client (`https://gamma-api.polymarket.com`).\n\nCovers events, markets, tags, series, comments, sports, search and public profiles.\nStart from [`GammaClient`](marcasite::gamma::GammaClient); every endpoint is a method on it.\n\n| Endpoint | Method |\n|---|---|\n| `GET /status` | [`get_status`](marcasite::gamma::GammaClient::get_status) |\n| `GET /markets` | [`list_markets`](marcasite::gamma::GammaClient::list_markets) |\n| `GET /markets/keyset` | [`list_markets_keyset`](marcasite::gamma::GammaClient::list_markets_keyset) |\n| `GET /markets/{id}` | [`get_market`](marcasite::gamma::GammaClient::get_market) |\n| `GET /markets/slug/{slug}` | [`get_market_by_slug`](marcasite::gamma::GammaClient::get_market_by_slug) |\n| `GET /markets/{id}/tags` | [`get_market_tags`](marcasite::gamma::GammaClient::get_market_tags) |\n| `GET /markets/{id}/description` | [`get_market_description`](marcasite::gamma::GammaClient::get_market_description) |\n| `POST /markets/information` | [`get_markets_information`](marcasite::gamma::GammaClient::get_markets_information) |\n| `POST /markets/abridged` | [`get_abridged_markets`](marcasite::gamma::GammaClient::get_abridged_markets) |\n| `GET /events` | [`list_events`](marcasite::gamma::GammaClient::list_events) |\n| `GET /events/keyset` | [`list_events_keyset`](marcasite::gamma::GammaClient::list_events_keyset) |\n| `GET /events/pagination` | [`list_events_paginated`](marcasite::gamma::GammaClient::list_events_paginated) |\n| `GET /events/results` | [`list_sport_event_results`](marcasite::gamma::GammaClient::list_sport_event_results) |\n| `GET /events/{id}` | [`get_event`](marcasite::gamma::GammaClient::get_event) |\n| `GET /events/slug/{slug}` | [`get_event_by_slug`](marcasite::gamma::GammaClient::get_event_by_slug) |\n| `GET /events/{id}/tags` | [`get_event_tags`](marcasite::gamma::GammaClient::get_event_tags) |\n| `GET /events/{id}/tweet-count` | [`get_event_tweet_count`](marcasite::gamma::GammaClient::get_event_tweet_count) |\n| `GET /events/{id}/comments/count` | [`get_event_comment_count`](marcasite::gamma::GammaClient::get_event_comment_count) |\n| `GET /events/creators` | [`list_event_creators`](marcasite::gamma::GammaClient::list_event_creators) |\n| `GET /events/creators/{id}` | [`get_event_creator`](marcasite::gamma::GammaClient::get_event_creator) |\n| `GET /tags` | [`list_tags`](marcasite::gamma::GammaClient::list_tags) |\n| `GET /tags/{id}` | [`get_tag`](marcasite::gamma::GammaClient::get_tag) |\n| `GET /tags/slug/{slug}` | [`get_tag_by_slug`](marcasite::gamma::GammaClient::get_tag_by_slug) |\n| `GET /tags/{id}/related-tags` | [`get_related_tag_relationships`](marcasite::gamma::GammaClient::get_related_tag_relationships) |\n| `GET /tags/slug/{slug}/related-tags` | [`get_related_tag_relationships_by_slug`](marcasite::gamma::GammaClient::get_related_tag_relationships_by_slug) |\n| `GET /tags/{id}/related-tags/tags` | [`get_related_tags`](marcasite::gamma::GammaClient::get_related_tags) |\n| `GET /tags/slug/{slug}/related-tags/tags` | [`get_related_tags_by_slug`](marcasite::gamma::GammaClient::get_related_tags_by_slug) |\n| `GET /series` | [`list_series`](marcasite::gamma::GammaClient::list_series) |\n| `GET /series/{id}` | [`get_series`](marcasite::gamma::GammaClient::get_series) |\n| `GET /series/{id}/comments/count` | [`get_series_comment_count`](marcasite::gamma::GammaClient::get_series_comment_count) |\n| `GET /series-summary/{id}` | [`get_series_summary`](marcasite::gamma::GammaClient::get_series_summary) |\n| `GET /series-summary/slug/{slug}` | [`get_series_summary_by_slug`](marcasite::gamma::GammaClient::get_series_summary_by_slug) |\n| `GET /comments` | [`list_comments`](marcasite::gamma::GammaClient::list_comments) |\n| `GET /comments/{id}` | [`get_comments_by_id`](marcasite::gamma::GammaClient::get_comments_by_id) |\n| `GET /comments/user_address/{user_address}` | [`list_comments_by_user`](marcasite::gamma::GammaClient::list_comments_by_user) |\n| `GET /teams` | [`list_teams`](marcasite::gamma::GammaClient::list_teams) |\n| `GET /teams/{id}` | [`get_team`](marcasite::gamma::GammaClient::get_team) |\n| `GET /sports` | [`get_sports_metadata`](marcasite::gamma::GammaClient::get_sports_metadata) |\n| `GET /sports/market-types` | [`get_sports_market_types`](marcasite::gamma::GammaClient::get_sports_market_types) |\n| `GET /public-search` | [`search`](marcasite::gamma::GammaClient::search) |\n| `GET /public-profile` | [`get_public_profile`](marcasite::gamma::GammaClient::get_public_profile) |\n| `GET /profiles/user_address/{user_address}` | [`get_profile`](marcasite::gamma::GammaClient::get_profile) |\n\n# Conventions\n\n- **Responses.** The Gamma spec marks no response field as required, so every field of\n  the response types is an `Option`. Fields the spec types as `number` are\n  `Decimal`s that serialize back as JSON numbers; the few amounts the\n  spec types as `string` (such as [`Market::liquidity`](marcasite::gamma::Market::liquidity)) are decimals that serialize back\n  as JSON strings. Date-time fields (`format: date-time`) are parsed leniently: besides\n  RFC 3339, a value without a UTC offset, or a bare date, is read as UTC.\n- **Live over docs.** Where the live API differs from the spec, this module follows the\n  live API: the market lists `outcomes`, `outcomePrices`, `clobTokenIds` and\n  `umaResolutionStatuses` are typed lists (decoded from the JSON-encoded string the API\n  sends, or from the real array of the optimized search), `order` takes camelCase field\n  names, offsets are capped (2000 for markets and events, 200 for comments), and fields the\n  spec omits are modelled (marked \"undocumented; observed live\"). Every departure is listed\n  in `SPEC_DEVIATIONS.md` in the repository root.\n- **Pagination.** Offset listings return a plain `Vec` from `send()` and walk every page\n  with `into_stream()`. The keyset listings return a page type with `items()` and\n  `next_cursor()`; pass the cursor back with `cursor()`.\n- **Ids.** Path and query ids the spec types as `integer` (market, event, tag, series,\n  comment, team and creator ids) are id newtypes holding the digits as a string. They are\n  checked before sending: an id that is not one or more ASCII digits is an\n  [`Error::Validation`](marcasite::Error::Validation) naming the parameter. Slugs must be\n  non-empty and not `.` or `..`.\n- **Errors.** Where the spec documents an error body (`422`, `500` and `503` of the\n  keyset listings, `400` and `404` of [`get_public_profile`](marcasite::gamma::GammaClient::get_public_profile)),\n  it carries a `type` and an `error` field, exposed as\n  [`ApiError::error_type`](marcasite::ApiError::error_type) and\n  [`ApiError::message`](marcasite::ApiError::message). Other errors, such as the `404` of the\n  lookups by id or slug, are documented by status only.\n\nSee <https://docs.polymarket.com/api-reference/predictions/overview>.",
@@ -467,6 +483,18 @@
       ]
     },
     {
+      "path": "marcasite::geoblock",
+      "summary": "Geoblock check (`https://polymarket.com/api/geoblock`).",
+      "docs": "Geoblock check (`https://polymarket.com/api/geoblock`).\n\nPolymarket rejects orders from some jurisdictions. This module asks Polymarket whether the\nIP address the request comes from is blocked, so an application can warn its users before\nthey try to trade. Start from [`GeoblockClient`](marcasite::geoblock::GeoblockClient).\n\n| Endpoint | Method |\n|---|---|\n| `GET /api/geoblock` | [`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status) |\n\nThe endpoint is on `polymarket.com`, not on the API servers, and needs no authentication.\nIt reports the status of the address the request was sent **from**: it is a check only.\nmarcasite never provides, and will not add, any way to bypass a geoblock.\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.",
+      "submodules": [],
+      "items": [
+        "marcasite::geoblock::GeoblockClient",
+        "marcasite::geoblock::GeoblockClientBuilder",
+        "marcasite::geoblock::GeoblockStatus"
+      ],
+      "reexports": []
+    },
+    {
       "path": "marcasite::relayer",
       "summary": "Relayer API client (`https://relayer-v2.polymarket.com`).",
       "docs": "Relayer API client (`https://relayer-v2.polymarket.com`).\n\nThe Relayer submits and tracks gasless transactions for Polymarket wallets. This module\ncovers its public (unauthenticated) endpoints. Start from [`RelayerClient`](marcasite::relayer::RelayerClient).\n\n| Endpoint | Method |\n|---|---|\n| `GET /transaction` | [`RelayerClient::get_transaction`](marcasite::relayer::RelayerClient::get_transaction) |\n| `GET /nonce` | [`RelayerClient::get_nonce`](marcasite::relayer::RelayerClient::get_nonce) |\n| `GET /relay-payload` | [`RelayerClient::get_relay_payload`](marcasite::relayer::RelayerClient::get_relay_payload) |\n| `GET /deployed` | [`RelayerClient::check_deployed`](marcasite::relayer::RelayerClient::check_deployed) |\n\nEndpoints that require Builder API key or Relayer API key authentication\n(`POST /submit`, `GET /transactions`, `GET /relayer/api/keys`) are not supported yet.\n\nAddresses passed to these endpoints are checked client-side against the spec's\n`Address` pattern (`0x` followed by 40 hex digits) and rejected with\n[`Error::Validation`](marcasite::Error::Validation) before any request is sent.\n\nSee <https://docs.polymarket.com/api-reference/relayer/get-a-transaction-by-id>.",
@@ -491,7 +519,7 @@
     {
       "path": "marcasite::ws",
       "summary": "Public (unauthenticated) WebSocket channels.",
-      "docs": "Public (unauthenticated) WebSocket channels.\n\n| Channel | Type | URL | Docs |\n|---|---|---|---|\n| CLOB market channel: order books, price level deltas, trades, tick sizes, market lifecycle | [`MarketChannel`](marcasite::ws::MarketChannel) | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | <https://docs.polymarket.com/api-reference/wss/market> |\n| Sports results: live scores and periods | [`SportsChannel`](marcasite::ws::SportsChannel) | `wss://sports-api.polymarket.com/ws` | <https://docs.polymarket.com/api-reference/wss/sports> |\n| PolyBolt live data, `price.polymarket` only: best bid and ask per token | [`PolyBoltChannel`](marcasite::ws::PolyBoltChannel) | `wss://ws-live-v2.polymarket.com/ws` | <https://docs.polymarket.com/api-reference/wss/polybolt> |\n\nEach channel type is a `Stream` of typed events (`Item = marcasite::Result<Event>`).\nConnect with defaults via `connect`, or use `builder()` to override the URL (e.g. for a\nmock server), the receive buffer size, the handshake timeout and the idle timeout.\nConnecting must happen inside a Tokio runtime with the I/O and time drivers enabled (as\n`#[tokio::main]` does); outside a runtime, `connect` fails with an error of kind\n[`Connect`](marcasite::WebSocketErrorKind::Connect).\n\nTo change subscriptions from another task while the stream is consumed, take a\ncloneable handle with [`MarketChannel::handle`](marcasite::ws::MarketChannel::handle) ([`MarketChannelHandle`](marcasite::ws::MarketChannelHandle)) or\n[`PolyBoltChannel::handle`](marcasite::ws::PolyBoltChannel::handle) ([`PolyBoltChannelHandle`](marcasite::ws::PolyBoltChannelHandle)).\n\n```rust\nuse std::time::Duration;\n\nuse futures_util::StreamExt as _;\nuse marcasite::ws::{MarketChannel, MarketSubscription};\n\nlet mut channel = MarketChannel::builder()\n    .connect_timeout(Duration::from_secs(5))\n    .connect(MarketSubscription::new([\n        \"65818619657568813474341868652308942079804919287380422192892211131408793125422\",\n    ]))\n    .await?;\nwhile let Some(event) = channel.next().await {\n    println!(\"{:?}\", event?);\n}\n```\n\n# Heartbeats\n\nHandled automatically, as documented for each channel; heartbeat frames are never\nyielded as events.\n\n- **Market channel**: the client sends `PING` every 10 seconds and the server answers\n  `PONG` (configurable with [`MarketChannelBuilder::heartbeat_interval`](marcasite::ws::MarketChannelBuilder::heartbeat_interval)).\n- **Sports channel**: the spec says the server sends a text `ping` every 5 seconds and the\n  client must answer `pong` within 10 seconds. Live, the server sends protocol-level ping\n  frames every 15 seconds instead (never a text `ping`); both are answered\n  automatically.\n- **PolyBolt**: the server sends protocol-level ping frames every 25 seconds, answered\n  automatically (two missed pongs close the connection with `4002`). The optional\n  application-level ping is [`PolyBoltChannel::ping`](marcasite::ws::PolyBoltChannel::ping).\n\n# Liveness and timeouts\n\nA connection can die without being closed (the server vanishes, a NAT mapping is\ndropped), which would leave a stream pending forever. Every channel therefore has an\n**idle timeout**: if no frame of any kind (data, heartbeat or heartbeat reply) arrives\nfor that long, the stream yields a final error of kind [`Timeout`](marcasite::WebSocketErrorKind::Timeout) and ends. The\ndefaults are three times the heartbeat cadence (as documented, or as observed live where it\ndiffers):\n\n| Channel | Heartbeat | Default idle timeout |\n|---|---|---|\n| Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::MarketChannel::DEFAULT_IDLE_TIMEOUT) (30 s; three heartbeat intervals if a longer interval is configured) |\n| Sports | documented: server text `ping` every 5 s; live: protocol ping every 15 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::SportsChannel::DEFAULT_IDLE_TIMEOUT) (45 s) |\n| PolyBolt | server protocol ping every 25 s | [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::PolyBoltChannel::DEFAULT_IDLE_TIMEOUT) (75 s) |\n\nChange it with the builders' `idle_timeout`, or disable it with `no_idle_timeout`.\n\nWriting a frame to the socket may take at most 10 seconds; a write that does not\ncomplete in time (e.g. because the peer of a half-open connection stopped reading) also\nends the stream with an error of kind [`Timeout`](marcasite::WebSocketErrorKind::Timeout). When either side closes the\nconnection, the close handshake is completed, waiting at most 2 seconds for the other\nside.\n\n# Back-pressure\n\nReceived frames wait in a bounded buffer (the builders' `buffer`, default\n[`DEFAULT_BUFFER`](marcasite::ws::DEFAULT_BUFFER)) until the stream is polled. When the buffer is full, the connection\nstops reading from the socket until there is room again, but keeps sending: heartbeats,\nsubscription changes and a close still go out. Server pings that arrive meanwhile are\nonly answered once the stream is polled again, so a consumer that stalls for longer\nthan the server tolerates (a `pong` within 10 s for the sports `ping`; two missed pongs\nfor PolyBolt, which then closes with `4002`) is disconnected by the server. The idle\ntimeout does not run while reading is paused.\n\n# Events and errors\n\n- Every documented server message has a typed variant. A message the library does not\n  recognise (new message type, or a frame that is not JSON) is yielded as the\n  `Unknown(serde_json::Value)` variant, so server-side additions never break the stream.\n- A frame holding a JSON array is flattened into one event per element. (None of the\n  channels documents array frames; they are accepted defensively.)\n- A recognised message that does not match its documented schema is yielded as an\n  `Err(`[`Error::WebSocket`](marcasite::Error::WebSocket)`)` of kind [`WebSocketErrorKind::Decode`](marcasite::WebSocketErrorKind::Decode) whose message\n  quotes the offending JSON and says why it did not decode. This is **not** fatal: the\n  stream continues with the next message.\n- A connection failure is yielded as one final `Err(`[`Error::WebSocket`](marcasite::Error::WebSocket)`)`, after\n  which the stream ends. Its [`kind`](marcasite::WebSocketError::kind) is [`Closed`](marcasite::WebSocketErrorKind::Closed) for an\n  abnormal close (with the server's close code and reason when there is one) or a\n  connection that dropped, [`Protocol`](marcasite::WebSocketErrorKind::Protocol) for a socket or protocol error, [`Send`](marcasite::WebSocketErrorKind::Send) if a\n  frame could not be written, or [`Timeout`](marcasite::WebSocketErrorKind::Timeout) for an idle or stalled connection (see\n  [Liveness and timeouts](#liveness-and-timeouts)). A normal close ends the stream\n  without an error. Every channel implements `FusedStream`: `is_terminated()` reports\n  whether the stream has ended.\n- `connect` fails with kind [`Connect`](marcasite::WebSocketErrorKind::Connect) if the connection cannot be established. If the\n  server refused the handshake with an HTTP status, the error carries it\n  ([`WebSocketError::http_status`](marcasite::WebSocketError::http_status), also\n  [`Error::status`](marcasite::Error::status)) and the `Retry-After` delay\n  ([`Error::retry_after`](marcasite::Error::retry_after)). Sending on a connection that has\n  ended (e.g. [`MarketChannel::subscribe`](marcasite::ws::MarketChannel::subscribe)) fails with kind [`Closed`](marcasite::WebSocketErrorKind::Closed).\n- Requests that break a documented constraint (for example an empty PolyBolt\n  subscription, or more than 64 active PolyBolt subscriptions) fail with\n  [`Error::Validation`](marcasite::Error::Validation) before anything is sent.\n\n```rust\nuse futures_util::StreamExt as _;\nuse marcasite::{\n    Error, WebSocketErrorKind,\n    ws::{SportsChannel, SportsEvent},\n};\n\nlet mut channel = SportsChannel::connect().await?;\nwhile let Some(item) = channel.next().await {\n    match item {\n        Ok(SportsEvent::Update(result)) => println!(\"{}: {}\", result.league_abbreviation, result.score),\n        Ok(_) => {}\n        // Not fatal: skip the malformed message.\n        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {\n            eprintln!(\"skipping a message: {err}\");\n        }\n        // Terminal: the stream ends after this item.\n        Err(err) => return Err(err),\n    }\n}\n```\n\n# Reconnecting\n\nConnections are not re-established automatically. When a stream ends (with or without a\nfinal error), connect again and re-send the subscriptions. Subscription state and\nsequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from\nthe new snapshots.\n\nThe PolyBolt documentation specifies a policy per close code (see\n[`PolyBoltCloseCode`](marcasite::ws::PolyBoltCloseCode)): `4003` (draining) reconnect after a random 0 to 10 s delay;\n`4002` (slow consumer) and abnormal disconnects retry with exponential backoff and\njitter (1 s up to 30 s); `4001` and `4008` need a client fix before reconnecting. If the\nhandshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay\n([`Error::retry_after`](marcasite::Error::retry_after)).\nThe market and sports channel documentation specifies no reconnection policy;\nexponential backoff with jitter is a reasonable default.\n\n```rust\nuse std::time::Duration;\n\nuse futures_util::StreamExt as _;\nuse marcasite::ws::{PolyBoltChannel, PolyBoltCloseCode, PolyBoltSubscription};\n\nlet assets = [\"21742633143463906290569050155826241533067272736897614950488156847949938836455\"];\nlet mut backoff = Duration::from_secs(1);\nloop {\n    let mut delay = backoff;\n    match PolyBoltChannel::connect().await {\n        Ok(mut channel) => {\n            channel.subscribe(PolyBoltSubscription::price_polymarket(assets))?;\n            while let Some(event) = channel.next().await {\n                match event {\n                    Ok(event) => {\n                        backoff = Duration::from_secs(1);\n                        println!(\"{event:?}\");\n                    }\n                    Err(err) => match PolyBoltCloseCode::from_error(&err) {\n                        // Reconnecting cannot help until the client is fixed.\n                        Some(\n                            PolyBoltCloseCode::AuthenticationFailed\n                            | PolyBoltCloseCode::PolicyViolation,\n                        ) => return Err(err),\n                        // Documented: a uniformly random 0 to 10 s delay.\n                        Some(PolyBoltCloseCode::Draining) => delay = Duration::from_secs(5),\n                        // A decode error (the stream goes on) or a connection failure.\n                        _ => eprintln!(\"{err}\"),\n                    },\n                }\n            }\n        }\n        Err(err) => {\n            eprintln!(\"failed to connect: {err}\");\n            // A handshake refused with HTTP 429 or 503 may say how long to wait.\n            if let Some(retry_after) = err.retry_after() {\n                delay = delay.max(retry_after);\n            }\n        }\n    }\n    // Add random jitter to `delay` in real code.\n    tokio::time::sleep(delay).await;\n    backoff = (backoff * 2).min(Duration::from_secs(30));\n}\n```\n\n# Not supported yet\n\nThe authenticated channels are not implemented: the CLOB user channel\n(`/ws/user`), the RFQ quoter gateway, PolyBolt authentication (`auth`, `challenge`) and\nthe gated PolyBolt channels (`price.crypto`, `price.equity`, `price.crypto.twap`,\n`price.equity.twap`).",
+      "docs": "Public (unauthenticated) WebSocket channels.\n\n| Channel | Type | URL | Docs |\n|---|---|---|---|\n| CLOB market channel: order books, price level deltas, trades, tick sizes, market lifecycle | [`MarketChannel`](marcasite::ws::MarketChannel) | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | <https://docs.polymarket.com/api-reference/wss/market> |\n| Sports results: live scores and periods | [`SportsChannel`](marcasite::ws::SportsChannel) | `wss://sports-api.polymarket.com/ws` | <https://docs.polymarket.com/api-reference/wss/sports> |\n| PolyBolt live data, `price.polymarket` only: best bid and ask per token | [`PolyBoltChannel`](marcasite::ws::PolyBoltChannel) | `wss://ws-live-v2.polymarket.com/ws` | <https://docs.polymarket.com/api-reference/wss/polybolt> |\n\nEach channel type is a `Stream` of typed events (`Item = marcasite::Result<Event>`).\nConnect with defaults via `connect`, or use `builder()` to override the URL (e.g. for a\nmock server), the receive buffer size, the handshake timeout and the idle timeout.\nConnecting must happen inside a Tokio runtime with the I/O and time drivers enabled (as\n`#[tokio::main]` does); outside a runtime, `connect` fails with an error of kind\n[`Connect`](marcasite::WebSocketErrorKind::Connect).\n\nTo change subscriptions from another task while the stream is consumed, take a\ncloneable handle with [`MarketChannel::handle`](marcasite::ws::MarketChannel::handle) ([`MarketChannelHandle`](marcasite::ws::MarketChannelHandle)) or\n[`PolyBoltChannel::handle`](marcasite::ws::PolyBoltChannel::handle) ([`PolyBoltChannelHandle`](marcasite::ws::PolyBoltChannelHandle)).\n\n```rust\nuse std::time::Duration;\n\nuse futures_util::StreamExt as _;\nuse marcasite::ws::{MarketChannel, MarketSubscription};\n\nlet mut channel = MarketChannel::builder()\n    .connect_timeout(Duration::from_secs(5))\n    .connect(MarketSubscription::new([\n        \"65818619657568813474341868652308942079804919287380422192892211131408793125422\",\n    ]))\n    .await?;\nwhile let Some(event) = channel.next().await {\n    println!(\"{:?}\", event?);\n}\n```\n\n# Heartbeats\n\nHandled automatically, as documented for each channel; heartbeat frames are never\nyielded as events.\n\n- **Market channel**: the client sends `PING` every 10 seconds and the server answers\n  `PONG` (configurable with [`MarketChannelBuilder::heartbeat_interval`](marcasite::ws::MarketChannelBuilder::heartbeat_interval)).\n- **Sports channel**: the spec says the server sends a text `ping` every 5 seconds and the\n  client must answer `pong` within 10 seconds. Live, the server sends protocol-level ping\n  frames every 15 seconds instead (never a text `ping`); both are answered\n  automatically.\n- **PolyBolt**: the server sends protocol-level ping frames every 25 seconds, answered\n  automatically (two missed pongs close the connection with `4002`). The optional\n  application-level ping is [`PolyBoltChannel::ping`](marcasite::ws::PolyBoltChannel::ping).\n\n# Liveness and timeouts\n\nA connection can die without being closed (the server vanishes, a NAT mapping is\ndropped), which would leave a stream pending forever. Every channel therefore has an\n**idle timeout**: if no frame of any kind (data, heartbeat or heartbeat reply) arrives\nfor that long, the stream yields a final error of kind [`Timeout`](marcasite::WebSocketErrorKind::Timeout) and ends. The\ndefaults are three times the heartbeat cadence (as documented, or as observed live where it\ndiffers):\n\n| Channel | Heartbeat | Default idle timeout |\n|---|---|---|\n| Market | client `PING` every 10 s, answered with `PONG` | [`MarketChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::MarketChannel::DEFAULT_IDLE_TIMEOUT) (30 s; three heartbeat intervals if a longer interval is configured) |\n| Sports | documented: server text `ping` every 5 s; live: protocol ping every 15 s | [`SportsChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::SportsChannel::DEFAULT_IDLE_TIMEOUT) (45 s) |\n| PolyBolt | server protocol ping every 25 s | [`PolyBoltChannel::DEFAULT_IDLE_TIMEOUT`](marcasite::ws::PolyBoltChannel::DEFAULT_IDLE_TIMEOUT) (75 s) |\n\nChange it with the builders' `idle_timeout`, or disable it with `no_idle_timeout`.\n\nWriting a frame to the socket may take at most 10 seconds; a write that does not\ncomplete in time (e.g. because the peer of a half-open connection stopped reading) also\nends the stream with an error of kind [`Timeout`](marcasite::WebSocketErrorKind::Timeout). When either side closes the\nconnection, the close handshake is completed, waiting at most 2 seconds for the other\nside.\n\n# Back-pressure\n\nReceived frames wait in a bounded buffer (the builders' `buffer`, default\n[`DEFAULT_BUFFER`](marcasite::ws::DEFAULT_BUFFER)) until the stream is polled. When the buffer is full, the connection\nstops reading from the socket until there is room again, but keeps sending: heartbeats,\nsubscription changes and a close still go out. Server pings that arrive meanwhile are\nonly answered once the stream is polled again, so a consumer that stalls for longer\nthan the server tolerates (a `pong` within 10 s for the sports `ping`; two missed pongs\nfor PolyBolt, which then closes with `4002`) is disconnected by the server. The idle\ntimeout does not run while reading is paused.\n\n# Events and errors\n\n- Every documented server message has a typed variant. A message the library does not\n  recognise (new message type, or a frame that is not JSON) is yielded as the\n  `Unknown(serde_json::Value)` variant, so server-side additions never break the stream.\n- A frame holding a JSON array is flattened into one event per element. (None of the\n  channels documents array frames; they are accepted defensively.)\n- A recognised message that does not match its documented schema is yielded as an\n  `Err(`[`Error::WebSocket`](marcasite::Error::WebSocket)`)` of kind [`WebSocketErrorKind::Decode`](marcasite::WebSocketErrorKind::Decode) whose message\n  quotes the offending JSON and says why it did not decode. This is **not** fatal: the\n  stream continues with the next message.\n- A connection failure is yielded as one final `Err(`[`Error::WebSocket`](marcasite::Error::WebSocket)`)`, after\n  which the stream ends. Its [`kind`](marcasite::WebSocketError::kind) is [`Closed`](marcasite::WebSocketErrorKind::Closed) for an\n  abnormal close (with the server's close code and reason when there is one) or a\n  connection that dropped, [`Protocol`](marcasite::WebSocketErrorKind::Protocol) for a socket or protocol error, [`Send`](marcasite::WebSocketErrorKind::Send) if a\n  frame could not be written, or [`Timeout`](marcasite::WebSocketErrorKind::Timeout) for an idle or stalled connection (see\n  [Liveness and timeouts](#liveness-and-timeouts)). A normal close ends the stream\n  without an error. Every channel implements `FusedStream`: `is_terminated()` reports\n  whether the stream has ended.\n- `connect` fails with kind [`Connect`](marcasite::WebSocketErrorKind::Connect) if the connection cannot be established. If the\n  server refused the handshake with an HTTP status, the error carries it\n  ([`WebSocketError::http_status`](marcasite::WebSocketError::http_status), also\n  [`Error::status`](marcasite::Error::status)) and the `Retry-After` delay\n  ([`Error::retry_after`](marcasite::Error::retry_after)). Sending on a connection that has\n  ended (e.g. [`MarketChannel::subscribe`](marcasite::ws::MarketChannel::subscribe)) fails with kind [`Closed`](marcasite::WebSocketErrorKind::Closed).\n- Requests that break a documented constraint (for example an empty PolyBolt\n  subscription, or more than 64 active PolyBolt subscriptions) fail with\n  [`Error::Validation`](marcasite::Error::Validation) before anything is sent.\n\n```rust\nuse futures_util::StreamExt as _;\nuse marcasite::{\n    Error, WebSocketErrorKind,\n    ws::{SportsChannel, SportsEvent},\n};\n\nlet mut channel = SportsChannel::connect().await?;\nwhile let Some(item) = channel.next().await {\n    match item {\n        Ok(SportsEvent::Update(result)) => println!(\"{}: {}\", result.league_abbreviation, result.score),\n        Ok(_) => {}\n        // Not fatal: skip the malformed message.\n        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {\n            eprintln!(\"skipping a message: {err}\");\n        }\n        // Terminal: the stream ends after this item.\n        Err(err) => return Err(err),\n    }\n}\n```\n\n# Reconnecting\n\nConnections are not re-established automatically, except by the opt-in\n[`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) for the market channel (below). When a stream ends (with or\nwithout a final error), connect again and re-send the subscriptions. Subscription state\nand sequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from\nthe new snapshots.\n\n## Market channel: `ReconnectingMarketChannel`\n\n[`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) (from `MarketChannel::builder().reconnecting()`) wraps the\nmarket channel: when the connection is lost it waits (deterministic exponential backoff,\nsee [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy)), connects again and re-sends the tracked subscription, including\n`level`, `initial_dump` and `custom_feature_enabled`. Its items are [`ReconnectEvent`](marcasite::ws::ReconnectEvent)s:\n`Connected` and `Disconnected` carry the asset ids concerned, so a consumer that keeps\nlocal order books can mark exactly those untrusted on `Disconnected` and trust each again\nat its first `book` after `Connected`. A handshake refused with `Retry-After` is honoured\n(up to an hour), a decode error is passed through without reconnecting, and\n[`ReconnectingMarketChannelHandle::close`](marcasite::ws::ReconnectingMarketChannelHandle::close) ends the stream for good.\n\nThe sports and PolyBolt channels have no such wrapper yet.\n\n## Documented reconnection policies\n\nThe PolyBolt documentation specifies a policy per close code (see\n[`PolyBoltCloseCode`](marcasite::ws::PolyBoltCloseCode)): `4003` (draining) reconnect after a random 0 to 10 s delay;\n`4002` (slow consumer) and abnormal disconnects retry with exponential backoff and\njitter (1 s up to 30 s); `4001` and `4008` need a client fix before reconnecting. If the\nhandshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay\n([`Error::retry_after`](marcasite::Error::retry_after)).\nThe market and sports channel documentation specifies no reconnection policy;\nexponential backoff is a reasonable default, ideally with random jitter. The\nreconnecting market channel uses a deterministic backoff without jitter.\n\nThe same loop by hand, for PolyBolt:\n\n```rust\nuse std::time::Duration;\n\nuse futures_util::StreamExt as _;\nuse marcasite::ws::{PolyBoltChannel, PolyBoltCloseCode, PolyBoltSubscription};\n\nlet assets = [\"21742633143463906290569050155826241533067272736897614950488156847949938836455\"];\nlet mut backoff = Duration::from_secs(1);\nloop {\n    let mut delay = backoff;\n    match PolyBoltChannel::connect().await {\n        Ok(mut channel) => {\n            channel.subscribe(PolyBoltSubscription::price_polymarket(assets))?;\n            while let Some(event) = channel.next().await {\n                match event {\n                    Ok(event) => {\n                        backoff = Duration::from_secs(1);\n                        println!(\"{event:?}\");\n                    }\n                    Err(err) => match PolyBoltCloseCode::from_error(&err) {\n                        // Reconnecting cannot help until the client is fixed.\n                        Some(\n                            PolyBoltCloseCode::AuthenticationFailed\n                            | PolyBoltCloseCode::PolicyViolation,\n                        ) => return Err(err),\n                        // Documented: a uniformly random 0 to 10 s delay.\n                        Some(PolyBoltCloseCode::Draining) => delay = Duration::from_secs(5),\n                        // A decode error (the stream goes on) or a connection failure.\n                        _ => eprintln!(\"{err}\"),\n                    },\n                }\n            }\n        }\n        Err(err) => {\n            eprintln!(\"failed to connect: {err}\");\n            // A handshake refused with HTTP 429 or 503 may say how long to wait.\n            if let Some(retry_after) = err.retry_after() {\n                delay = delay.max(retry_after);\n            }\n        }\n    }\n    // Add random jitter to `delay` in real code.\n    tokio::time::sleep(delay).await;\n    backoff = (backoff * 2).min(Duration::from_secs(30));\n}\n```\n\n# Not supported yet\n\nThe authenticated channels are not implemented: the CLOB user channel\n(`/ws/user`), the RFQ quoter gateway, PolyBolt authentication (`auth`, `challenge`) and\nthe gated PolyBolt channels (`price.crypto`, `price.equity`, `price.crypto.twap`,\n`price.equity.twap`).",
       "submodules": [],
       "items": [
         "marcasite::ws::BestBidAsk",
@@ -526,6 +554,11 @@
         "marcasite::ws::PriceChangeEvent",
         "marcasite::ws::PricePolymarketEnvelope",
         "marcasite::ws::PriceProvider",
+        "marcasite::ws::ReconnectEvent",
+        "marcasite::ws::ReconnectPolicy",
+        "marcasite::ws::ReconnectingMarketChannel",
+        "marcasite::ws::ReconnectingMarketChannelBuilder",
+        "marcasite::ws::ReconnectingMarketChannelHandle",
         "marcasite::ws::SportResult",
         "marcasite::ws::SportsChannel",
         "marcasite::ws::SportsChannelBuilder",
@@ -1168,6 +1201,7 @@
         "marcasite::HttpClient::new",
         "marcasite::HttpClient::builder",
         "marcasite::HttpClient::retry_policy",
+        "marcasite::HttpClient::has_rate_limit",
         "marcasite::HttpClient::max_response_size"
       ],
       "reexported_as": [],
@@ -1190,6 +1224,24 @@
       "doc_urls": [],
       "related": [
         "marcasite::HttpClientBuilder"
+      ]
+    },
+    {
+      "path": "marcasite::HttpClient::has_rate_limit",
+      "name": "has_rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::HttpClient",
+      "signature": "#[must_use]\npub fn has_rate_limit(&self) -> bool",
+      "summary": "Whether a client-side [`RateLimit`](marcasite::RateLimit) is in effect.",
+      "docs": "Whether a client-side [`RateLimit`](marcasite::RateLimit) is in effect.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::RateLimit"
       ]
     },
     {
@@ -1268,6 +1320,7 @@
         "marcasite::HttpClientBuilder::connect_timeout",
         "marcasite::HttpClientBuilder::user_agent",
         "marcasite::HttpClientBuilder::retry_policy",
+        "marcasite::HttpClientBuilder::rate_limit",
         "marcasite::HttpClientBuilder::max_response_size",
         "marcasite::HttpClientBuilder::build"
       ],
@@ -1346,6 +1399,26 @@
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::HttpClientBuilder::rate_limit",
+      "name": "rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::HttpClientBuilder",
+      "signature": "pub fn rate_limit(self, limit: RateLimit) -> Self",
+      "summary": "Sets a client-side request budget (default: none).",
+      "docs": "Sets a client-side request budget (default: none).\n\nEvery HTTP attempt, retries included, waits for its turn under the limit; see\n[`RateLimit`](marcasite::RateLimit). The budget is shared by all clones of the built [`HttpClient`](marcasite::HttpClient), so one\nlimit spans every service client created from it; separate `HttpClient`s have\nseparate budgets. REST requests only: WebSocket connections are not limited.\n\nTimeouts: the wait for the limiter does not count against the per-request\n[`timeout`](marcasite::HttpClientBuilder::timeout), but a timeout the caller wraps around a request does\ninclude it. A `429` / `Retry-After` is not fed back into the limiter: a retry sleeps\nfor its backoff first and then waits for a slot, so the two delays add up.\n\n```rust\nuse std::num::NonZeroU32;\nuse marcasite_core::{HttpClient, RateLimit};\n\nlet http = HttpClient::builder()\n    .rate_limit(RateLimit::per_second(NonZeroU32::new(10).unwrap()))\n    .build()?;\n```",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient",
+        "marcasite::HttpClientBuilder::timeout",
+        "marcasite::RateLimit"
+      ]
     },
     {
       "path": "marcasite::HttpClientBuilder::retry_policy",
@@ -1458,7 +1531,8 @@
         "marcasite::Polymarket::data",
         "marcasite::Polymarket::relayer",
         "marcasite::Polymarket::bridge",
-        "marcasite::Polymarket::combos"
+        "marcasite::Polymarket::combos",
+        "marcasite::Polymarket::geoblock"
       ],
       "reexported_as": [],
       "doc_urls": [],
@@ -1576,6 +1650,24 @@
       ]
     },
     {
+      "path": "marcasite::Polymarket::geoblock",
+      "name": "geoblock",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::Polymarket",
+      "signature": "#[must_use]\npub fn geoblock(&self) -> &GeoblockClient",
+      "summary": "The geoblock check client (`polymarket.com/api/geoblock`).",
+      "docs": "The geoblock check client (`polymarket.com/api/geoblock`).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
       "path": "marcasite::Polymarket::http_client",
       "name": "http_client",
       "kind": "method",
@@ -1651,6 +1743,7 @@
         "marcasite::PolymarketBuilder::connect_timeout",
         "marcasite::PolymarketBuilder::user_agent",
         "marcasite::PolymarketBuilder::retry_policy",
+        "marcasite::PolymarketBuilder::rate_limit",
         "marcasite::PolymarketBuilder::max_response_size",
         "marcasite::PolymarketBuilder::gamma_base_url",
         "marcasite::PolymarketBuilder::clob_base_url",
@@ -1658,6 +1751,7 @@
         "marcasite::PolymarketBuilder::relayer_base_url",
         "marcasite::PolymarketBuilder::bridge_base_url",
         "marcasite::PolymarketBuilder::combos_base_url",
+        "marcasite::PolymarketBuilder::geoblock_base_url",
         "marcasite::PolymarketBuilder::build"
       ],
       "reexported_as": [],
@@ -1783,14 +1877,30 @@
       "related": []
     },
     {
+      "path": "marcasite::PolymarketBuilder::geoblock_base_url",
+      "name": "geoblock_base_url",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::PolymarketBuilder",
+      "signature": "pub fn geoblock_base_url(self, url: impl Into<String>) -> Self",
+      "summary": "Overrides the geoblock check base URL.",
+      "docs": "Overrides the geoblock check base URL.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
       "path": "marcasite::PolymarketBuilder::http_client",
       "name": "http_client",
       "kind": "method",
       "module": "marcasite",
       "parent": "marcasite::PolymarketBuilder",
       "signature": "pub fn http_client(self, http: HttpClient) -> Self",
-      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry and response size settings of this builder are then ignored.",
-      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry and response size\nsettings of this builder are then ignored.",
+      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry, rate limit and response size settings of this builder are then ignored.",
+      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry, rate limit and\nresponse size settings of this builder are then ignored.",
       "deprecated": null,
       "implements": [],
       "members": [],
@@ -1816,6 +1926,25 @@
       "doc_urls": [],
       "related": [
         "marcasite::HttpClientBuilder::max_response_size"
+      ]
+    },
+    {
+      "path": "marcasite::PolymarketBuilder::rate_limit",
+      "name": "rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::PolymarketBuilder",
+      "signature": "pub fn rate_limit(self, limit: RateLimit) -> Self",
+      "summary": "Sets a client-side request budget shared by every service of this client (default: none); see [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).",
+      "docs": "Sets a client-side request budget shared by every service of this client (default:\nnone); see [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClientBuilder::rate_limit",
+        "marcasite::RateLimit"
       ]
     },
     {
@@ -1877,6 +2006,141 @@
       "signature": "pub fn user_agent(self, user_agent: impl Into<String>) -> Self",
       "summary": "Sets the `User-Agent` header (default `marcasite/<version>`).",
       "docs": "Sets the `User-Agent` header (default `marcasite/<version>`).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit",
+      "name": "RateLimit",
+      "kind": "struct",
+      "module": "marcasite",
+      "parent": null,
+      "signature": "pub struct RateLimit { /* private fields */ }",
+      "summary": "A client-side request budget: at most `requests` HTTP requests per period, with an optional burst allowance.",
+      "docs": "A client-side request budget: at most `requests` HTTP requests per period, with an\noptional burst allowance.\n\nInstall it with [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).\nEvery HTTP attempt, **including automatic retries**, takes one slot before it is sent;\nwhen the budget is exhausted the request waits (asynchronously, on `tokio::time`) for\nits turn instead of failing. Waiting callers are served in the order they arrived, and a\ncaller that stops polling its request (for example a pagination stream left unpolled)\ndoes not hold up the others.\n\nThe limiter is a token bucket in its GCRA form: requests are spaced `per / requests`\napart, and up to `burst` requests may be sent back to back after an idle period. The\ndefault burst is `1`, which spaces requests evenly and never sends two at once; raise it\nwith [`with_burst`](marcasite::RateLimit::with_burst) to allow short spikes while keeping the same\naverage rate.\n\nThe budget is shared by every clone of the [`HttpClient`](marcasite::HttpClient) it was\nconfigured on, so one limit spans all service clients built from that client. Separate\n`HttpClient`s (including those a service client builds for itself) have separate\nbudgets. It covers REST requests only; WebSocket connections do not go through it.\n\nCancellation is free: a request that is dropped while waiting for its turn (for example\nby a caller's own timeout) gives its slot to the next new request, so no capacity is\nlost. Requests already waiting keep their own turns.\n\nSpacing is `per / requests` rounded down to whole nanoseconds (at least 1 ns), so at odd\nrates it can be marginally faster than configured, and rates above one request per\nnanosecond are capped at that rate.\n\n# Timeouts\n\n- The wait for the limiter does **not** count against the per-request\n  [`timeout`](marcasite::HttpClientBuilder::timeout), which starts when the request is sent.\n- A timeout the caller wraps around a request (e.g. `tokio::time::timeout`) **does**\n  include the wait.\n- A `429` / `Retry-After` is not fed back into the limiter: a retry first sleeps for the\n  backoff and then waits for a slot, so the two delays add up.\n\n```rust\nuse std::num::NonZeroU32;\nuse marcasite_core::{HttpClient, RateLimit};\n\n// 10 requests per second, bursts of up to 5, shared by every service client built\n// from `http` (in the `marcasite` crate, pass it to `Polymarket::builder().http_client`).\nlet limit = RateLimit::per_second(NonZeroU32::new(10).unwrap())\n    .with_burst(NonZeroU32::new(5).unwrap());\nlet http = HttpClient::builder().rate_limit(limit).build()?;\nassert!(http.has_rate_limit());\n```",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Copy",
+        "Debug",
+        "Eq",
+        "Hash",
+        "PartialEq"
+      ],
+      "members": [
+        "marcasite::RateLimit::per_second",
+        "marcasite::RateLimit::new",
+        "marcasite::RateLimit::with_burst",
+        "marcasite::RateLimit::requests",
+        "marcasite::RateLimit::per",
+        "marcasite::RateLimit::burst"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient",
+        "marcasite::HttpClientBuilder::rate_limit",
+        "marcasite::HttpClientBuilder::timeout",
+        "marcasite::RateLimit::with_burst"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::burst",
+      "name": "burst",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn burst(&self) -> NonZeroU32",
+      "summary": "The number of requests that may be sent back to back.",
+      "docs": "The number of requests that may be sent back to back.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "pub fn new(requests: NonZeroU32, per: Duration) -> Result<Self, ValidationError>",
+      "summary": "At most `requests` requests per `per`, with a burst of one.",
+      "docs": "At most `requests` requests per `per`, with a burst of one.\n\n# Errors\n\nReturns a [`ValidationError`](marcasite::ValidationError) if `per` is zero or longer than 24 hours.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ValidationError"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::per",
+      "name": "per",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn per(&self) -> Duration",
+      "summary": "The period the request count refers to.",
+      "docs": "The period the request count refers to.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::per_second",
+      "name": "per_second",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn per_second(requests: NonZeroU32) -> Self",
+      "summary": "At most `requests` requests per second, with a burst of one.",
+      "docs": "At most `requests` requests per second, with a burst of one.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::requests",
+      "name": "requests",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn requests(&self) -> NonZeroU32",
+      "summary": "The number of requests allowed per [`per`](marcasite::RateLimit::per).",
+      "docs": "The number of requests allowed per [`per`](marcasite::RateLimit::per).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::RateLimit::per"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::with_burst",
+      "name": "with_burst",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn with_burst(self, burst: NonZeroU32) -> Self",
+      "summary": "Allows up to `burst` requests to be sent back to back after an idle period (default 1). The average rate is unchanged. The effective burst is capped so that `(burst - 1) * interval` is at most 24 hours.",
+      "docs": "Allows up to `burst` requests to be sent back to back after an idle period (default\n1). The average rate is unchanged. The effective burst is capped so that\n`(burst - 1) * interval` is at most 24 hours.",
       "deprecated": null,
       "implements": [],
       "members": [],
@@ -2052,7 +2316,7 @@
       "kind": "enum",
       "module": "marcasite",
       "parent": null,
-      "signature": "#[non_exhaustive]\npub enum Service {\n    /// Gamma API (`gamma-api.polymarket.com`).\n    Gamma,\n    /// CLOB API (`clob.polymarket.com`).\n    Clob,\n    /// Data API v2 (`data-api.polymarket.com`).\n    Data,\n    /// Relayer API (`relayer-v2.polymarket.com`).\n    Relayer,\n    /// Bridge API (`bridge.polymarket.com`).\n    Bridge,\n    /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).\n    Combos,\n    /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).\n    MarketChannel,\n    /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).\n    SportsChannel,\n    /// PolyBolt live data WebSocket (`ws-live-v2.polymarket.com/ws`).\n    PolyBolt,\n}",
+      "signature": "#[non_exhaustive]\npub enum Service {\n    /// Gamma API (`gamma-api.polymarket.com`).\n    Gamma,\n    /// CLOB API (`clob.polymarket.com`).\n    Clob,\n    /// Data API v2 (`data-api.polymarket.com`).\n    Data,\n    /// Relayer API (`relayer-v2.polymarket.com`).\n    Relayer,\n    /// Bridge API (`bridge.polymarket.com`).\n    Bridge,\n    /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).\n    Combos,\n    /// Geoblock check (`polymarket.com/api/geoblock`).\n    Geoblock,\n    /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).\n    MarketChannel,\n    /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).\n    SportsChannel,\n    /// PolyBolt live data WebSocket (`ws-live-v2.polymarket.com/ws`).\n    PolyBolt,\n}",
       "summary": "A Polymarket service (REST API or WebSocket channel).",
       "docs": "A Polymarket service (REST API or WebSocket channel).\n\nUsed in errors and logs to say which service a failure relates to.",
       "deprecated": null,
@@ -5129,10 +5393,31 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::clob::FeeDetails::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::clob::FeeDetails::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::clob",
+      "parent": "marcasite::clob::FeeDetails",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
+      ]
     },
     {
       "path": "marcasite::clob::FeeRate",
@@ -14307,6 +14592,83 @@
       "related": []
     },
     {
+      "path": "marcasite::fees::FEE_DECIMALS",
+      "name": "FEE_DECIMALS",
+      "kind": "constant",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub const FEE_DECIMALS: u32 = 5;",
+      "summary": "Number of decimal places the documentation says fees are rounded to (5, so the smallest fee charged is 0.00001 USDC). The rounding mode is not documented.",
+      "docs": "Number of decimal places the documentation says fees are rounded to (5, so the smallest\nfee charged is 0.00001 USDC). The rounding mode is not documented.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::fees::MAX_EXPONENT",
+      "name": "MAX_EXPONENT",
+      "kind": "constant",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub const MAX_EXPONENT: u32 = 8;",
+      "summary": "Largest exponent [`taker_fee`](marcasite::fees::taker_fee) accepts. Live markets use `1`, the only exponent whose formula is documented (see the [module documentation](marcasite::fees)); the cap only bounds the work and rejects nonsense values.",
+      "docs": "Largest exponent [`taker_fee`](marcasite::fees::taker_fee) accepts. Live markets use `1`, the only exponent whose\nformula is documented (see the [module documentation](marcasite::fees)); the cap only bounds the\nwork and rejects nonsense values.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::fees::taker_fee"
+      ]
+    },
+    {
+      "path": "marcasite::fees::exponent_from_decimal",
+      "name": "exponent_from_decimal",
+      "kind": "fn",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub fn exponent_from_decimal(exponent: Decimal) -> Result<u32>",
+      "summary": "Converts a wire exponent (a JSON number, read as `Decimal`) into the integer [`taker_fee`](marcasite::fees::taker_fee) takes.",
+      "docs": "Converts a wire exponent (a JSON number, read as `Decimal`) into the integer\n[`taker_fee`](marcasite::fees::taker_fee) takes.\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `exponent` is negative, not an\ninteger, or above [`MAX_EXPONENT`](marcasite::fees::MAX_EXPONENT).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::fees::taker_fee",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::fees::taker_fee",
+      "name": "taker_fee",
+      "kind": "fn",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub fn taker_fee(shares: Decimal, price: Decimal, rate: Decimal, exponent: u32) -> Result<Decimal>",
+      "summary": "Computes the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) taker fee in USDC: `shares × rate × (price × (1 − price)) ^ exponent`.",
+      "docs": "Computes the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) taker fee in USDC:\n`shares × rate × (price × (1 − price)) ^ exponent`.\n\nSee the [module documentation](marcasite::fees) for the sources, rounding and rate changes.\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `price` is outside `0..=1`,\n`shares` or `rate` is negative, `exponent` exceeds [`MAX_EXPONENT`](marcasite::fees::MAX_EXPONENT), or an intermediate\nproduct overflows `Decimal`.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::fees",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::Result"
+      ]
+    },
+    {
       "path": "marcasite::gamma::Category",
       "name": "Category",
       "kind": "struct",
@@ -15019,10 +15381,31 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::gamma::FeeSchedule::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::gamma::FeeSchedule::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::gamma",
+      "parent": "marcasite::gamma::FeeSchedule",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
+      ]
     },
     {
       "path": "marcasite::gamma::GammaClient",
@@ -22003,6 +22386,234 @@
       "related": []
     },
     {
+      "path": "marcasite::geoblock::GeoblockClient",
+      "name": "GeoblockClient",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "pub struct GeoblockClient { /* private fields */ }",
+      "summary": "Client for the Geoblock endpoint (`https://polymarket.com`).",
+      "docs": "Client for the Geoblock endpoint (`https://polymarket.com`).\n\nReports whether the requesting IP address is geoblocked (`GET /api/geoblock`). The endpoint\nlives on `polymarket.com`, not on the API servers. Cheap to clone: clones share one\nconnection pool.\n\nThis is a check only: the SDK never offers a way to route around a geoblock.\n\n```rust\nuse marcasite::geoblock::GeoblockClient;\n\nlet client = GeoblockClient::new()?;\n```",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug"
+      ],
+      "members": [
+        "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL",
+        "marcasite::geoblock::GeoblockClient::new",
+        "marcasite::geoblock::GeoblockClient::builder",
+        "marcasite::geoblock::GeoblockClient::base_url",
+        "marcasite::geoblock::GeoblockClient::get_status"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL",
+      "name": "DEFAULT_BASE_URL",
+      "kind": "associated_const",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub const DEFAULT_BASE_URL: &'static str = \"https://polymarket.com\";",
+      "summary": "The production base URL.",
+      "docs": "The production base URL.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::base_url",
+      "name": "base_url",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "#[must_use]\npub fn base_url(&self) -> &Url",
+      "summary": "The base URL requests are sent to.",
+      "docs": "The base URL requests are sent to.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::builder",
+      "name": "builder",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub fn builder() -> GeoblockClientBuilder",
+      "summary": "Returns a builder for setting a custom base URL or HTTP client.",
+      "docs": "Returns a builder for setting a custom base URL or HTTP client.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClientBuilder"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::get_status",
+      "name": "get_status",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub async fn get_status(&self) -> Result<GeoblockStatus>",
+      "summary": "Checks the geographic eligibility of the IP address this request is sent from (`GET /api/geoblock`).",
+      "docs": "Checks the geographic eligibility of the IP address this request is sent from\n(`GET /api/geoblock`).\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.\n\n```rust\nlet status = marcasite::geoblock::GeoblockClient::new()?.get_status().await?;\nif status.blocked {\n    println!(\"trading not available in {}\", status.country);\n}\n```\n\n# Errors\n\n[`Error::Api`](marcasite::Error::Api) on a non-2xx status,\n[`Error::RateLimited`](marcasite::Error::RateLimited) on `429`, or any other\n[`Error`](marcasite::Error) for transport or decoding failures.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "related": [
+        "marcasite::Error",
+        "marcasite::Error::Api",
+        "marcasite::Error::RateLimited",
+        "marcasite::Result",
+        "marcasite::geoblock::GeoblockStatus"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClient::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClient",
+      "signature": "pub fn new() -> Result<Self>",
+      "summary": "Creates a client with the default HTTP settings and base URL.",
+      "docs": "Creates a client with the default HTTP settings and base URL.\n\n# Errors\n\nReturns [`Error::Config`](marcasite::Error::Config) if the HTTP client cannot be built.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder",
+      "name": "GeoblockClientBuilder",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "#[must_use]\npub struct GeoblockClientBuilder { /* private fields */ }",
+      "summary": "Builder for [`GeoblockClient`](marcasite::geoblock::GeoblockClient).",
+      "docs": "Builder for [`GeoblockClient`](marcasite::geoblock::GeoblockClient).",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug",
+        "Default"
+      ],
+      "members": [
+        "marcasite::geoblock::GeoblockClientBuilder::base_url",
+        "marcasite::geoblock::GeoblockClientBuilder::http_client",
+        "marcasite::geoblock::GeoblockClientBuilder::build"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::base_url",
+      "name": "base_url",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn base_url(self, url: impl Into<String>) -> Self",
+      "summary": "Overrides the base URL (default [`GeoblockClient::DEFAULT_BASE_URL`](marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL)), e.g. to target a mock server in tests. A path prefix is preserved.",
+      "docs": "Overrides the base URL (default [`GeoblockClient::DEFAULT_BASE_URL`](marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL)), e.g. to target a\nmock server in tests. A path prefix is preserved.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::geoblock::GeoblockClient::DEFAULT_BASE_URL"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::build",
+      "name": "build",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn build(self) -> Result<GeoblockClient>",
+      "summary": "Builds the client.",
+      "docs": "Builds the client.\n\n# Errors\n\nReturns [`Error::Config`](marcasite::Error::Config) if the base URL is invalid or the HTTP\nclient cannot be built.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Result",
+        "marcasite::geoblock::GeoblockClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockClientBuilder::http_client",
+      "name": "http_client",
+      "kind": "method",
+      "module": "marcasite::geoblock",
+      "parent": "marcasite::geoblock::GeoblockClientBuilder",
+      "signature": "pub fn http_client(self, http: HttpClient) -> Self",
+      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient) (and its timeouts, user agent and retry policy).",
+      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient) (and its timeouts, user agent and retry policy).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient"
+      ]
+    },
+    {
+      "path": "marcasite::geoblock::GeoblockStatus",
+      "name": "GeoblockStatus",
+      "kind": "struct",
+      "module": "marcasite::geoblock",
+      "parent": null,
+      "signature": "#[non_exhaustive]\npub struct GeoblockStatus {\n    /// Whether the address is blocked from placing orders (the docs' wording).\n    ///\n    /// The docs also describe *close-only* jurisdictions, where existing positions can be\n    /// closed but no new ones opened. Whether those report `true` here is not documented\n    /// (see `OPEN_QUESTIONS.md`), so treat `true` as \"do not open new positions\" and do not\n    /// read `false` as proof that every action is allowed.\n    pub blocked: bool,\n    /// The IP address Polymarket detected for the request.\n    pub ip: IpAddr,\n    /// ISO 3166-1 alpha-2 country code, e.g. `\"US\"`.\n    pub country: String,\n    /// Region or state code, e.g. `\"OH\"`.\n    pub region: String,\n}",
+      "summary": "The geoblock status of the requesting IP address, returned by [`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status).",
+      "docs": "The geoblock status of the requesting IP address, returned by\n[`GeoblockClient::get_status`](marcasite::geoblock::GeoblockClient::get_status).\n\nThis is a check only; see the [module documentation](marcasite::geoblock). Every field is\nrequired, as the docs list them without any optionality. Whether `region` can be absent\nfor countries without sub-national regions has not been observed (see `OPEN_QUESTIONS.md`).\n\nSee <https://docs.polymarket.com/api-reference/geoblock>.",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug",
+        "Deserialize<'de>",
+        "Eq",
+        "PartialEq",
+        "Serialize"
+      ],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "related": [
+        "marcasite::geoblock",
+        "marcasite::geoblock::GeoblockClient::get_status"
+      ]
+    },
+    {
       "path": "marcasite::relayer::CheckDeployed",
       "name": "CheckDeployed",
       "kind": "struct",
@@ -23731,11 +24342,32 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::ws::FeeSchedule::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": [
         "marcasite::ws::NewMarketEvent::fee_schedule"
+      ]
+    },
+    {
+      "path": "marcasite::ws::FeeSchedule::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::FeeSchedule",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
       ]
     },
     {
@@ -24011,7 +24643,8 @@
         "marcasite::ws::MarketChannelBuilder::heartbeat_interval",
         "marcasite::ws::MarketChannelBuilder::idle_timeout",
         "marcasite::ws::MarketChannelBuilder::no_idle_timeout",
-        "marcasite::ws::MarketChannelBuilder::connect"
+        "marcasite::ws::MarketChannelBuilder::connect",
+        "marcasite::ws::MarketChannelBuilder::reconnecting"
       ],
       "reexported_as": [],
       "doc_urls": [],
@@ -24133,6 +24766,26 @@
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::ws::MarketChannelBuilder::reconnecting",
+      "name": "reconnecting",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::MarketChannelBuilder",
+      "signature": "pub fn reconnecting(self) -> ReconnectingMarketChannelBuilder",
+      "summary": "Turns this builder into one for a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), with the default [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy). The settings of this builder apply to every connection.",
+      "docs": "Turns this builder into one for a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), with the default\n[`ReconnectPolicy`](marcasite::ws::ReconnectPolicy). The settings of this builder apply to every connection.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectPolicy",
+        "marcasite::ws::ReconnectingMarketChannel",
+        "marcasite::ws::ReconnectingMarketChannelBuilder"
+      ]
     },
     {
       "path": "marcasite::ws::MarketChannelBuilder::url",
@@ -24276,13 +24929,54 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::ws::MarketEvent::timestamp",
+        "marcasite::ws::MarketEvent::market"
+      ],
       "reexported_as": [],
       "doc_urls": [
         "https://docs.polymarket.com/api-reference/wss/market"
       ],
       "related": [
         "marcasite::ws::MarketEvent::Unknown"
+      ]
+    },
+    {
+      "path": "marcasite::ws::MarketEvent::market",
+      "name": "market",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::MarketEvent",
+      "signature": "#[must_use]\npub fn market(&self) -> Option<&ConditionId>",
+      "summary": "The condition id of the market the event is about, for every recognised variant; `None` for [`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown).",
+      "docs": "The condition id of the market the event is about, for every recognised variant;\n`None` for [`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketEvent::Unknown",
+        "marcasite::types::ConditionId"
+      ]
+    },
+    {
+      "path": "marcasite::ws::MarketEvent::timestamp",
+      "name": "timestamp",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::MarketEvent",
+      "signature": "#[must_use]\npub fn timestamp(&self) -> Option<DateTime<Utc>>",
+      "summary": "The exchange timestamp of the event, for every variant.",
+      "docs": "The exchange timestamp of the event, for every variant.\n\nThis is the time the exchange stamped on the message, **not** the time it was\nreceived. `None` when the event carries no timestamp ([`MarketEvent::Unknown`](marcasite::ws::MarketEvent::Unknown)) or\nwhen a string timestamp is not an integer number of Unix milliseconds or is out of\nthe range `DateTime` can represent (see\n[`NewMarketEvent::timestamp_millis`](marcasite::ws::NewMarketEvent::timestamp_millis) and friends).\n\n```rust\nuse marcasite::ws::MarketEvent;\n\nfn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {\n    Some((now - event.timestamp()?).num_milliseconds())\n}\n```",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketEvent::Unknown",
+        "marcasite::ws::NewMarketEvent::timestamp_millis"
       ]
     },
     {
@@ -25702,6 +26396,687 @@
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectEvent",
+      "name": "ReconnectEvent",
+      "kind": "enum",
+      "module": "marcasite::ws",
+      "parent": null,
+      "signature": "#[non_exhaustive]\npub enum ReconnectEvent {\n    /// The channel is connected and subscribed: on the first connection and after every\n    /// reconnection. The server sends a fresh `book` snapshot per asset next (unless\n    /// [`MarketSubscription::initial_dump`](marcasite::ws::MarketSubscription::initial_dump) was set to `false`).\n    Connected {\n        /// The assets subscribed on the new connection.\n        asset_ids: Vec<TokenId>,\n        /// Which connection attempt since the last stable connection this was (`1` for the\n        /// first connection; see [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy)).\n        attempt: u32,\n    },\n    /// The connection was lost: the stream ended, with the error that ended it (or `None`\n    /// for a close the server finished normally). Emitted exactly once per lost connection,\n    /// after every message received before the loss and before any reconnection attempt.\n    /// Nothing is received for these assets until the next [`Connected`](marcasite::ws::ReconnectEvent::Connected).\n    Disconnected {\n        /// The tracked subscription when the loss was observed.\n        asset_ids: Vec<TokenId>,\n        /// Why the connection ended, if it ended with an error.\n        error: Option<Error>,\n    },\n    /// A connection attempt failed; the channel waits `retry_in` and tries again. Not\n    /// emitted for the last attempt when [`ReconnectPolicy::max_attempts`](marcasite::ws::ReconnectPolicy::max_attempts) is exhausted: the\n    /// stream yields that error as an `Err` item instead.\n    ConnectFailed {\n        /// The failed attempt, counted as in [`Connected`](marcasite::ws::ReconnectEvent::Connected).\n        attempt: u32,\n        /// Why it failed.\n        error: Error,\n        /// How long the channel waits before the next attempt.\n        retry_in: Duration,\n    },\n    /// An event of the market channel.\n    Market(MarketEvent),\n}",
+      "summary": "An item of a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel): a connection lifecycle signal or a market event.",
+      "docs": "An item of a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel): a connection lifecycle signal or a market\nevent.\n\nThe `asset_ids` of the lifecycle events are the subscription the channel tracks at that\nmoment (sorted), including changes made through the\n[handle](marcasite::ws::ReconnectingMarketChannelHandle) while disconnected.",
+      "deprecated": null,
+      "implements": [
+        "Debug"
+      ],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectingMarketChannel",
+        "marcasite::ws::ReconnectingMarketChannelHandle"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy",
+      "name": "ReconnectPolicy",
+      "kind": "struct",
+      "module": "marcasite::ws",
+      "parent": null,
+      "signature": "#[must_use]\npub struct ReconnectPolicy { /* private fields */ }",
+      "summary": "How a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) waits between connection attempts.",
+      "docs": "How a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) waits between connection attempts.\n\nThe delay before each attempt grows exponentially (doubling) from\n[`initial_backoff`](marcasite::ws::ReconnectPolicy::initial_backoff) up to [`max_backoff`](marcasite::ws::ReconnectPolicy::max_backoff). It is\ndeterministic: there is no jitter.\n\n# Attempts and stability\n\nThe policy counts connection *attempts* since the last *stable* connection. A connection\nis stable if it stayed up for at least [`stable_after`](marcasite::ws::ReconnectPolicy::stable_after)\n(default [`DEFAULT_STABLE_AFTER`](marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER)); when a stable connection is\nlost the count and the backoff start over. A connection that is lost sooner (a server that\naccepts and immediately drops, for example) does **not** reset them, so a flapping\nserver is backed off from like an unreachable one. Receiving messages does not make a\nconnection stable: the server sends the initial snapshots right away. Stability is\nmeasured up to the moment the loss is *observed* (the stream is polled and sees the\nconnection end). A connection ended by a `Timeout` (the idle timeout: nothing, not even a\nheartbeat reply, arrived for that long) is only credited with the time up to the start of\nthat silence, so a server that accepts connections and then goes silent is backed off from\nand counts against [`max_attempts`](marcasite::ws::ReconnectPolicy::max_attempts).\n\n[`max_attempts`](marcasite::ws::ReconnectPolicy::max_attempts), if set, bounds the number of attempts without a\nstable connection in between; by default the channel retries forever.\n\n# Refused handshakes\n\nIf the server refuses the handshake with a `Retry-After` delay (HTTP `429` or `503`, see\n[`Error::retry_after`](marcasite::Error::retry_after)), the next attempt waits for the longer of the backoff and that delay,\nbut never more than [`MAX_RETRY_AFTER`](marcasite::ws::ReconnectPolicy::MAX_RETRY_AFTER) (one hour), so that a\nbogus header cannot park the channel indefinitely.\n\n```rust\nuse std::{num::NonZeroU32, time::Duration};\n\nuse marcasite::ws::ReconnectPolicy;\n\nlet policy = ReconnectPolicy::new(Duration::from_millis(500), Duration::from_secs(20))?\n    .max_attempts(NonZeroU32::MIN.saturating_add(9));\nassert_eq!(policy.max_backoff(), Duration::from_secs(20));\n```",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Copy",
+        "Debug",
+        "Default",
+        "Eq",
+        "PartialEq"
+      ],
+      "members": [
+        "marcasite::ws::ReconnectPolicy::DEFAULT_INITIAL_BACKOFF",
+        "marcasite::ws::ReconnectPolicy::DEFAULT_MAX_BACKOFF",
+        "marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER",
+        "marcasite::ws::ReconnectPolicy::MAX_RETRY_AFTER",
+        "marcasite::ws::ReconnectPolicy::new",
+        "marcasite::ws::ReconnectPolicy::max_attempts",
+        "marcasite::ws::ReconnectPolicy::unlimited_attempts",
+        "marcasite::ws::ReconnectPolicy::stable_after",
+        "marcasite::ws::ReconnectPolicy::retry_client_errors",
+        "marcasite::ws::ReconnectPolicy::initial_backoff",
+        "marcasite::ws::ReconnectPolicy::max_backoff",
+        "marcasite::ws::ReconnectPolicy::attempt_limit",
+        "marcasite::ws::ReconnectPolicy::retries_client_errors",
+        "marcasite::ws::ReconnectPolicy::stable_period"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::retry_after",
+        "marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER",
+        "marcasite::ws::ReconnectPolicy::MAX_RETRY_AFTER",
+        "marcasite::ws::ReconnectPolicy::initial_backoff",
+        "marcasite::ws::ReconnectPolicy::max_attempts",
+        "marcasite::ws::ReconnectPolicy::max_backoff",
+        "marcasite::ws::ReconnectPolicy::stable_after",
+        "marcasite::ws::ReconnectingMarketChannel"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::DEFAULT_INITIAL_BACKOFF",
+      "name": "DEFAULT_INITIAL_BACKOFF",
+      "kind": "associated_const",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub const DEFAULT_INITIAL_BACKOFF: Duration = _;",
+      "summary": "The default delay before the first reconnection attempt: 1 second.",
+      "docs": "The default delay before the first reconnection attempt: 1 second.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::DEFAULT_MAX_BACKOFF",
+      "name": "DEFAULT_MAX_BACKOFF",
+      "kind": "associated_const",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub const DEFAULT_MAX_BACKOFF: Duration = _;",
+      "summary": "The default upper bound of the delay: 30 seconds.",
+      "docs": "The default upper bound of the delay: 30 seconds.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER",
+      "name": "DEFAULT_STABLE_AFTER",
+      "kind": "associated_const",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub const DEFAULT_STABLE_AFTER: Duration = _;",
+      "summary": "The default time a connection must stay up to count as stable: 30 seconds (the default [idle timeout](marcasite::ws::MarketChannel::DEFAULT_IDLE_TIMEOUT) of the market channel).",
+      "docs": "The default time a connection must stay up to count as stable: 30 seconds (the\ndefault [idle timeout](marcasite::ws::MarketChannel::DEFAULT_IDLE_TIMEOUT) of the market channel).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketChannel::DEFAULT_IDLE_TIMEOUT"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::MAX_RETRY_AFTER",
+      "name": "MAX_RETRY_AFTER",
+      "kind": "associated_const",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub const MAX_RETRY_AFTER: Duration = _;",
+      "summary": "The longest `Retry-After` delay that is honoured: one hour.",
+      "docs": "The longest `Retry-After` delay that is honoured: one hour.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::attempt_limit",
+      "name": "attempt_limit",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "#[must_use]\npub fn attempt_limit(&self) -> Option<NonZeroU32>",
+      "summary": "The attempt limit, if any.",
+      "docs": "The attempt limit, if any.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::initial_backoff",
+      "name": "initial_backoff",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "#[must_use]\npub fn initial_backoff(&self) -> Duration",
+      "summary": "The delay before the first reconnection attempt.",
+      "docs": "The delay before the first reconnection attempt.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::max_attempts",
+      "name": "max_attempts",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub fn max_attempts(self, max_attempts: NonZeroU32) -> Self",
+      "summary": "Gives up after this many connection attempts without a stable connection in between (default: retry forever). See [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) for what the stream yields then.",
+      "docs": "Gives up after this many connection attempts without a stable connection in\nbetween (default: retry forever). See [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel) for what the\nstream yields then.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectingMarketChannel"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::max_backoff",
+      "name": "max_backoff",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "#[must_use]\npub fn max_backoff(&self) -> Duration",
+      "summary": "The upper bound of the delay between attempts.",
+      "docs": "The upper bound of the delay between attempts.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub fn new(initial_backoff: Duration, max_backoff: Duration) -> Result<Self>",
+      "summary": "A policy with the given initial and maximum backoff, retrying forever, with the default [`stable_after`](marcasite::ws::ReconnectPolicy::stable_after).",
+      "docs": "A policy with the given initial and maximum backoff, retrying forever, with the\ndefault [`stable_after`](marcasite::ws::ReconnectPolicy::stable_after).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `initial_backoff` is zero or `max_backoff` is\nshorter than `initial_backoff`.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::ws::ReconnectPolicy::stable_after",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::retries_client_errors",
+      "name": "retries_client_errors",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "#[must_use]\npub fn retries_client_errors(&self) -> bool",
+      "summary": "Whether handshakes refused with a `4xx` status are retried.",
+      "docs": "Whether handshakes refused with a `4xx` status are retried.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::retry_client_errors",
+      "name": "retry_client_errors",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub fn retry_client_errors(self, retry: bool) -> Self",
+      "summary": "Whether to keep retrying when the server refuses the handshake with an HTTP `4xx` status other than `408` and `429` (default `false`).",
+      "docs": "Whether to keep retrying when the server refuses the handshake with an HTTP `4xx`\nstatus other than `408` and `429` (default `false`).\n\nSuch a refusal (`401`, `403` for a geoblock, `404`, ...) is not fixed by trying again,\nso by default the stream yields the error and ends. `408`, `429` and every `5xx` are\nalways retried. Set this to `true` to retry regardless, e.g. behind a flaky proxy.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::stable_after",
+      "name": "stable_after",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub fn stable_after(self, stable_after: Duration) -> Self",
+      "summary": "How long a connection must stay up to count as stable, which resets the attempt count and the backoff when it is lost (default [`DEFAULT_STABLE_AFTER`](marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER)). Zero makes every connection stable.",
+      "docs": "How long a connection must stay up to count as stable, which resets the attempt count\nand the backoff when it is lost (default\n[`DEFAULT_STABLE_AFTER`](marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER)). Zero makes every connection\nstable.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectPolicy::DEFAULT_STABLE_AFTER"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::stable_period",
+      "name": "stable_period",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "#[must_use]\npub fn stable_period(&self) -> Duration",
+      "summary": "How long a connection must stay up to count as stable.",
+      "docs": "How long a connection must stay up to count as stable.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectPolicy::unlimited_attempts",
+      "name": "unlimited_attempts",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectPolicy",
+      "signature": "pub fn unlimited_attempts(self) -> Self",
+      "summary": "Retries forever (the default).",
+      "docs": "Retries forever (the default).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel",
+      "name": "ReconnectingMarketChannel",
+      "kind": "struct",
+      "module": "marcasite::ws",
+      "parent": null,
+      "signature": "#[must_use = \"streams do nothing unless polled\"]\npub struct ReconnectingMarketChannel { /* private fields */ }",
+      "summary": "A [`MarketChannel`](marcasite::ws::MarketChannel) that reconnects by itself, with explicit connection lifecycle events.",
+      "docs": "A [`MarketChannel`](marcasite::ws::MarketChannel) that reconnects by itself, with explicit connection lifecycle events.\n\nThe channel is a `Stream` of [`ReconnectEvent`](marcasite::ws::ReconnectEvent)s. It connects when first polled and,\nwhenever the connection is lost, waits per its [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy), connects again and\nre-sends the subscription: the tracked asset ids (the initial ones, changed by the\n[handle](marcasite::ws::ReconnectingMarketChannelHandle)), `level`, `initial_dump` and\n`custom_feature_enabled`. If you set `initial_dump(false)`, the server does not send\n`book` snapshots after a reconnection either.\n\n`level` and `custom_feature_enabled` are tracked per channel, not per asset: the last\nvalue set by the initial subscription or a *subscribe* update is sent for **every** tracked\nasset on reconnection (the initial message carries one value for all of them). If you\nsubscribe assets with different settings, they converge on the latest after a reconnect.\nWhether the server applies these settings per asset or per connection is undocumented\n(see `OPEN_QUESTIONS.md`).\n\nCreated with [`new`](marcasite::ws::ReconnectingMarketChannel::new) or [`MarketChannelBuilder::reconnecting`](marcasite::ws::MarketChannelBuilder::reconnecting); it does not\nconnect before it is polled, so nothing blocks and a Tokio runtime is only needed from the\nfirst poll on.\n\n# Stream items\n\n- `Ok(`[`ReconnectEvent::Connected`](marcasite::ws::ReconnectEvent::Connected)`)`: connected and subscribed (first connection and\n  every reconnection).\n- `Ok(`[`ReconnectEvent::Market`](marcasite::ws::ReconnectEvent::Market)`)`: an event of the live connection.\n- `Ok(`[`ReconnectEvent::Disconnected`](marcasite::ws::ReconnectEvent::Disconnected)`)`: the connection was lost, exactly once per lost\n  connection, with the assets that were subscribed. Every message that arrived before the\n  loss is yielded before it. A connection counts as lost when the stream of the inner\n  [`MarketChannel`](marcasite::ws::MarketChannel) ends for any reason: an error (kinds `Closed`, `Protocol`, `Send` or\n  `Timeout`, including the idle timeout) or a close the server finished **normally**, which is\n  also followed by a reconnection (a market channel has no reason to end on purpose).\n- `Ok(`[`ReconnectEvent::ConnectFailed`](marcasite::ws::ReconnectEvent::ConnectFailed)`)`: an attempt to (re)connect failed (any error of\n  kind `Connect`, including a handshake refused with `408`, `429` or a `5xx` status).\n  A refusal with another `4xx` status (`401`, `403` for a geoblock, `404`) is **not**\n  retried unless [`ReconnectPolicy::retry_client_errors`](marcasite::ws::ReconnectPolicy::retry_client_errors) is set: it ends the stream as an\n  `Err`. Use [`ReconnectPolicy::max_attempts`](marcasite::ws::ReconnectPolicy::max_attempts) or\n  [`close`](marcasite::ws::ReconnectingMarketChannelHandle::close) to stop earlier.\n- `Err(`[`Error::WebSocket`](marcasite::Error::WebSocket)`)` of kind\n  [`Decode`](marcasite::WebSocketErrorKind::Decode): one message did not decode. Not fatal,\n  exactly as on [`MarketChannel`](marcasite::ws::MarketChannel): the connection stays up and nothing is reconnected.\n- Any other `Err` is the last item: the policy ran out of attempts (the last connection\n  error; if the last attempt was a connection that was then lost, an error of kind\n  `Closed` after its `Disconnected`), or a connection error that retrying cannot fix\n  ([`Error::Config`](marcasite::Error::Config), e.g. TLS could not be set up, or polling outside a Tokio runtime;\n  or a refused handshake with a permanent `4xx` status). The stream then ends and the\n  handles fail with `Closed`.\n\n# Tracking books\n\nA consumer that keeps local order books should mark the assets of every `Disconnected`\nuntrusted and trust an asset again at its first `book` after the following `Connected`.\n\nA message that fails to decode may be a lost delta, and it does not end the connection,\nso no `Disconnected` or fresh `book` follows on its own. Mark every tracked asset\nuntrusted on a decode error until its next `book`. A reconnection sends fresh snapshots\n(unless `initial_dump(false)`); whether a subscribe update through the handle does is\nundocumented.\n\n```rust\nuse std::{collections::HashSet, time::Duration};\n\nuse futures_util::StreamExt as _;\nuse marcasite::{\n    Error, WebSocketErrorKind,\n    ws::{MarketChannel, MarketEvent, MarketSubscription, ReconnectEvent, ReconnectPolicy},\n};\n\nlet policy = ReconnectPolicy::new(Duration::from_millis(500), Duration::from_secs(30))?;\nlet mut channel = MarketChannel::builder()\n    .reconnecting()\n    .policy(policy)\n    .build(MarketSubscription::new([\n        \"65818619657568813474341868652308942079804919287380422192892211131408793125422\",\n    ]))?;\nlet handle = channel.handle(); // e.g. for `handle.subscribe(..)` from other tasks\n\nlet mut untrusted = HashSet::new();\nwhile let Some(item) = channel.next().await {\n    let event = match item {\n        Ok(event) => event,\n        // One message did not decode: not fatal, the stream continues, but it may have\n        // been a lost delta. Distrust every book until its next snapshot.\n        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {\n            untrusted.extend(handle.asset_ids());\n            continue;\n        }\n        // The policy gave up, or the error cannot be fixed by retrying.\n        Err(err) => return Err(err),\n    };\n    match event {\n        ReconnectEvent::Connected { asset_ids, attempt } => {\n            println!(\"connected (attempt {attempt}); waiting for books of {asset_ids:?}\");\n            untrusted.extend(asset_ids);\n        }\n        ReconnectEvent::Disconnected { asset_ids, error } => {\n            eprintln!(\"lost the connection: {error:?}\");\n            untrusted.extend(asset_ids);\n        }\n        ReconnectEvent::ConnectFailed { attempt, error, retry_in } => {\n            eprintln!(\"attempt {attempt} failed ({error}); retrying in {retry_in:?}\");\n        }\n        ReconnectEvent::Market(MarketEvent::Book(book)) => {\n            untrusted.remove(&book.asset_id); // a fresh snapshot: trust the book again\n            // ... replace the local book ...\n        }\n        ReconnectEvent::Market(_) => { /* apply deltas to books that are not untrusted */ }\n        _ => {}\n    }\n}\n```\n\n# Ending\n\n[`ReconnectingMarketChannelHandle::close`](marcasite::ws::ReconnectingMarketChannelHandle::close) ends the stream for good (after the events\nalready received, without a `Disconnected`); dropping the stream closes the connection and\nmakes the handles fail. No background task is spawned by this type itself (the live\nconnection has its own driver task, which ends with it), and all buffers are bounded: the\nreceive buffer of the underlying channel is the only queue fed by the network.\n\nSee <https://docs.polymarket.com/api-reference/wss/market>.",
+      "deprecated": null,
+      "implements": [
+        "Debug",
+        "Drop",
+        "FusedStream",
+        "Stream<Item = Result<ReconnectEvent, Error>>"
+      ],
+      "members": [
+        "marcasite::ws::ReconnectingMarketChannel::new",
+        "marcasite::ws::ReconnectingMarketChannel::builder",
+        "marcasite::ws::ReconnectingMarketChannel::handle",
+        "marcasite::ws::ReconnectingMarketChannel::subscribe",
+        "marcasite::ws::ReconnectingMarketChannel::unsubscribe",
+        "marcasite::ws::ReconnectingMarketChannel::update_subscription",
+        "marcasite::ws::ReconnectingMarketChannel::close"
+      ],
+      "reexported_as": [],
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/wss/market"
+      ],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Error::WebSocket",
+        "marcasite::WebSocketErrorKind::Decode",
+        "marcasite::ws::MarketChannel",
+        "marcasite::ws::MarketChannelBuilder::reconnecting",
+        "marcasite::ws::ReconnectEvent",
+        "marcasite::ws::ReconnectEvent::ConnectFailed",
+        "marcasite::ws::ReconnectEvent::Connected",
+        "marcasite::ws::ReconnectEvent::Disconnected",
+        "marcasite::ws::ReconnectEvent::Market",
+        "marcasite::ws::ReconnectPolicy",
+        "marcasite::ws::ReconnectPolicy::max_attempts",
+        "marcasite::ws::ReconnectPolicy::retry_client_errors",
+        "marcasite::ws::ReconnectingMarketChannel::new",
+        "marcasite::ws::ReconnectingMarketChannelHandle",
+        "marcasite::ws::ReconnectingMarketChannelHandle::close"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::builder",
+      "name": "builder",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn builder() -> ReconnectingMarketChannelBuilder",
+      "summary": "Returns a builder for a custom URL, timeouts or policy; same as `MarketChannel::builder().reconnecting()`.",
+      "docs": "Returns a builder for a custom URL, timeouts or policy; same as\n`MarketChannel::builder().reconnecting()`.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectingMarketChannelBuilder"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::close",
+      "name": "close",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn close(&self)",
+      "summary": "Closes the channel for good; see [`ReconnectingMarketChannelHandle::close`](marcasite::ws::ReconnectingMarketChannelHandle::close).",
+      "docs": "Closes the channel for good; see [`ReconnectingMarketChannelHandle::close`](marcasite::ws::ReconnectingMarketChannelHandle::close).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectingMarketChannelHandle::close"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::handle",
+      "name": "handle",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn handle(&self) -> ReconnectingMarketChannelHandle",
+      "summary": "A cloneable handle to change the subscription or close the channel from other tasks.",
+      "docs": "A cloneable handle to change the subscription or close the channel from other tasks.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectingMarketChannelHandle"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn new(subscription: MarketSubscription) -> Result<Self>",
+      "summary": "A channel with the default endpoint, options and [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy); it connects when first polled.",
+      "docs": "A channel with the default endpoint, options and [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy); it connects when\nfirst polled.\n\n# Errors\n\nNever fails for the default settings; the signature matches\n[`ReconnectingMarketChannelBuilder::build`](marcasite::ws::ReconnectingMarketChannelBuilder::build).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectPolicy",
+        "marcasite::ws::ReconnectingMarketChannelBuilder::build",
+        "marcasite::Result",
+        "marcasite::ws::MarketSubscription"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::subscribe",
+      "name": "subscribe",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn subscribe<I>(&self, asset_ids: I) -> Result<()>\nwhere\n    I: IntoIterator,\n    <I as >::Item: Into<TokenId>,",
+      "summary": "Starts following more asset ids; see [`ReconnectingMarketChannelHandle::subscribe`](marcasite::ws::ReconnectingMarketChannelHandle::subscribe).",
+      "docs": "Starts following more asset ids; see [`ReconnectingMarketChannelHandle::subscribe`](marcasite::ws::ReconnectingMarketChannelHandle::subscribe).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite::Error::WebSocket) if the\nchannel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::ws::ReconnectingMarketChannelHandle::subscribe",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::unsubscribe",
+      "name": "unsubscribe",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn unsubscribe<I>(&self, asset_ids: I) -> Result<()>\nwhere\n    I: IntoIterator,\n    <I as >::Item: Into<TokenId>,",
+      "summary": "Stops following some asset ids; see [`ReconnectingMarketChannelHandle::unsubscribe`](marcasite::ws::ReconnectingMarketChannelHandle::unsubscribe).",
+      "docs": "Stops following some asset ids; see [`ReconnectingMarketChannelHandle::unsubscribe`](marcasite::ws::ReconnectingMarketChannelHandle::unsubscribe).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite::Error::WebSocket) if the\nchannel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::ws::ReconnectingMarketChannelHandle::unsubscribe",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannel::update_subscription",
+      "name": "update_subscription",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannel",
+      "signature": "pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()>",
+      "summary": "Applies a subscription change; see [`ReconnectingMarketChannelHandle::update_subscription`](marcasite::ws::ReconnectingMarketChannelHandle::update_subscription).",
+      "docs": "Applies a subscription change; see\n[`ReconnectingMarketChannelHandle::update_subscription`](marcasite::ws::ReconnectingMarketChannelHandle::update_subscription).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if the update has no asset ids, or [`Error::WebSocket`](marcasite::Error::WebSocket)\nif the channel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::ws::ReconnectingMarketChannelHandle::update_subscription",
+        "marcasite::Result",
+        "marcasite::ws::MarketSubscriptionUpdate"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelBuilder",
+      "name": "ReconnectingMarketChannelBuilder",
+      "kind": "struct",
+      "module": "marcasite::ws",
+      "parent": null,
+      "signature": "#[must_use]\npub struct ReconnectingMarketChannelBuilder { /* private fields */ }",
+      "summary": "Builder for [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), from [`MarketChannelBuilder::reconnecting`](marcasite::ws::MarketChannelBuilder::reconnecting) (which carries over the URL, buffer, timeouts and heartbeat interval set on it).",
+      "docs": "Builder for [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), from [`MarketChannelBuilder::reconnecting`](marcasite::ws::MarketChannelBuilder::reconnecting)\n(which carries over the URL, buffer, timeouts and heartbeat interval set on it).",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug"
+      ],
+      "members": [
+        "marcasite::ws::ReconnectingMarketChannelBuilder::policy",
+        "marcasite::ws::ReconnectingMarketChannelBuilder::build"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::MarketChannelBuilder::reconnecting",
+        "marcasite::ws::ReconnectingMarketChannel"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelBuilder::build",
+      "name": "build",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelBuilder",
+      "signature": "pub fn build(self, subscription: MarketSubscription) -> Result<ReconnectingMarketChannel>",
+      "summary": "Creates the channel with `subscription` as the initial tracked subscription. It connects when first polled.",
+      "docs": "Creates the channel with `subscription` as the initial tracked subscription. It\nconnects when first polled.\n\n# Errors\n\nReturns [`Error::Config`](marcasite::Error::Config) if the URL is invalid or the heartbeat interval or idle\ntimeout is zero, and [`Error::Validation`](marcasite::Error::Validation) if the initial subscription cannot be\nencoded, so that these fail here rather than as a first stream item.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Config",
+        "marcasite::Error::Validation",
+        "marcasite::Result",
+        "marcasite::ws::ReconnectingMarketChannel",
+        "marcasite::ws::MarketSubscription"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelBuilder::policy",
+      "name": "policy",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelBuilder",
+      "signature": "pub fn policy(self, policy: ReconnectPolicy) -> Self",
+      "summary": "Sets the [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy) (default: `ReconnectPolicy::default`).",
+      "docs": "Sets the [`ReconnectPolicy`](marcasite::ws::ReconnectPolicy) (default: `ReconnectPolicy::default`).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectPolicy"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "name": "ReconnectingMarketChannelHandle",
+      "kind": "struct",
+      "module": "marcasite::ws",
+      "parent": null,
+      "signature": "pub struct ReconnectingMarketChannelHandle { /* private fields */ }",
+      "summary": "A cloneable handle to a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), from [`ReconnectingMarketChannel::handle`](marcasite::ws::ReconnectingMarketChannel::handle): changes the subscription or closes the channel from any task while the channel is consumed as a stream.",
+      "docs": "A cloneable handle to a [`ReconnectingMarketChannel`](marcasite::ws::ReconnectingMarketChannel), from\n[`ReconnectingMarketChannel::handle`](marcasite::ws::ReconnectingMarketChannel::handle): changes the subscription or closes the channel\nfrom any task while the channel is consumed as a stream.\n\nChanges are recorded in the tracked subscription, sent on the live connection if there\nis one, and otherwise applied when the channel reconnects. The handle does not keep the\nchannel alive: once the channel is closed or dropped its methods fail with an\n[`Error::WebSocket`](marcasite::Error::WebSocket) of kind [`Closed`](marcasite::WebSocketErrorKind::Closed).",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Debug"
+      ],
+      "members": [
+        "marcasite::ws::ReconnectingMarketChannelHandle::subscribe",
+        "marcasite::ws::ReconnectingMarketChannelHandle::unsubscribe",
+        "marcasite::ws::ReconnectingMarketChannelHandle::update_subscription",
+        "marcasite::ws::ReconnectingMarketChannelHandle::asset_ids",
+        "marcasite::ws::ReconnectingMarketChannelHandle::close"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::WebSocket",
+        "marcasite::WebSocketErrorKind::Closed",
+        "marcasite::ws::ReconnectingMarketChannel",
+        "marcasite::ws::ReconnectingMarketChannel::handle"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle::asset_ids",
+      "name": "asset_ids",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "signature": "#[must_use]\npub fn asset_ids(&self) -> Vec<TokenId>",
+      "summary": "The asset ids currently tracked (sorted): what the channel is subscribed to, or will be after the next reconnection.",
+      "docs": "The asset ids currently tracked (sorted): what the channel is subscribed to, or will\nbe after the next reconnection.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::types::TokenId"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle::close",
+      "name": "close",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "signature": "pub fn close(&self)",
+      "summary": "Closes the channel for good: the live connection is closed gracefully, the stream ends after the events already received (without a [`Disconnected`](marcasite::ws::ReconnectEvent::Disconnected)), and it never reconnects. Also ends a stream that is waiting to reconnect.",
+      "docs": "Closes the channel for good: the live connection is closed gracefully, the stream\nends after the events already received (without a\n[`Disconnected`](marcasite::ws::ReconnectEvent::Disconnected)), and it never reconnects. Also ends\na stream that is waiting to reconnect.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ws::ReconnectEvent::Disconnected"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle::subscribe",
+      "name": "subscribe",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "signature": "pub fn subscribe<I>(&self, asset_ids: I) -> Result<()>\nwhere\n    I: IntoIterator,\n    <I as >::Item: Into<TokenId>,",
+      "summary": "Starts following more asset ids (on the live connection now, or after reconnecting).",
+      "docs": "Starts following more asset ids (on the live connection now, or after reconnecting).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite::Error::WebSocket) if the\nchannel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle::unsubscribe",
+      "name": "unsubscribe",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "signature": "pub fn unsubscribe<I>(&self, asset_ids: I) -> Result<()>\nwhere\n    I: IntoIterator,\n    <I as >::Item: Into<TokenId>,",
+      "summary": "Stops following some asset ids (on the live connection now, or after reconnecting).",
+      "docs": "Stops following some asset ids (on the live connection now, or after reconnecting).\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite::Error::WebSocket) if the\nchannel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::ws::ReconnectingMarketChannelHandle::update_subscription",
+      "name": "update_subscription",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::ReconnectingMarketChannelHandle",
+      "signature": "pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()>",
+      "summary": "Applies a subscription change to the tracked subscription and sends it on the live connection, if any. A `level` or `custom_feature_enabled` set on the update is kept for reconnections too.",
+      "docs": "Applies a subscription change to the tracked subscription and sends it on the live\nconnection, if any. A `level` or `custom_feature_enabled` set on the update is kept\nfor reconnections too.\n\nChanges are never lost to a connection that fails while the update is sent: they\nare in the tracked subscription that the next connection starts from.\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if the update has no asset ids, or [`Error::WebSocket`](marcasite::Error::WebSocket)\nif the channel is closed.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::Error::WebSocket",
+        "marcasite::Result",
+        "marcasite::ws::MarketSubscriptionUpdate"
+      ]
     },
     {
       "path": "marcasite::ws::SportResult",
@@ -28083,6 +29458,25 @@
       ]
     },
     {
+      "service": "Geoblock",
+      "module": "marcasite::geoblock",
+      "status": "implemented",
+      "method": "GET",
+      "path": "/api/geoblock",
+      "channel": null,
+      "doc_urls": [
+        "https://docs.polymarket.com/api-reference/geoblock"
+      ],
+      "local_docs": [
+        "docs/polymarket/api-reference/geoblock.md"
+      ],
+      "operation_id": null,
+      "rust": "`GeoblockClient::get_status`",
+      "items": [
+        "marcasite::geoblock::GeoblockClient::get_status"
+      ]
+    },
+    {
       "service": "WebSocket channels (public)",
       "module": "marcasite::ws",
       "status": "implemented",
@@ -28096,9 +29490,12 @@
         "docs/polymarket/api-reference/wss/market.md"
       ],
       "operation_id": null,
-      "rust": "`MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)`, also on the cloneable `MarketChannelHandle` from `handle()`",
+      "rust": "`MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)`, also on the cloneable `MarketChannelHandle` from `handle()`; opt-in auto-reconnect with `ReconnectingMarketChannel::new` / `ReconnectingMarketChannelBuilder::build` → `Stream<Item = Result<ReconnectEvent>>` (`Connected` / `Disconnected` with the asset ids, backoff `ReconnectPolicy`), handle `ReconnectingMarketChannelHandle` from `ReconnectingMarketChannel::handle`",
       "items": [
-        "marcasite::ws::MarketChannel::connect"
+        "marcasite::ws::MarketChannel::connect",
+        "marcasite::ws::ReconnectingMarketChannel::new",
+        "marcasite::ws::ReconnectingMarketChannelBuilder::build",
+        "marcasite::ws::ReconnectingMarketChannel::handle"
       ]
     },
     {

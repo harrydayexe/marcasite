@@ -142,10 +142,27 @@
 //!
 //! # Reconnecting
 //!
-//! Connections are not re-established automatically. When a stream ends (with or without a
-//! final error), connect again and re-send the subscriptions. Subscription state and
-//! sequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from
+//! Connections are not re-established automatically, except by the opt-in
+//! [`ReconnectingMarketChannel`] for the market channel (below). When a stream ends (with or
+//! without a final error), connect again and re-send the subscriptions. Subscription state
+//! and sequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from
 //! the new snapshots.
+//!
+//! ## Market channel: `ReconnectingMarketChannel`
+//!
+//! [`ReconnectingMarketChannel`] (from `MarketChannel::builder().reconnecting()`) wraps the
+//! market channel: when the connection is lost it waits (deterministic exponential backoff,
+//! see [`ReconnectPolicy`]), connects again and re-sends the tracked subscription, including
+//! `level`, `initial_dump` and `custom_feature_enabled`. Its items are [`ReconnectEvent`]s:
+//! `Connected` and `Disconnected` carry the asset ids concerned, so a consumer that keeps
+//! local order books can mark exactly those untrusted on `Disconnected` and trust each again
+//! at its first `book` after `Connected`. A handshake refused with `Retry-After` is honoured
+//! (up to an hour), a decode error is passed through without reconnecting, and
+//! [`ReconnectingMarketChannelHandle::close`] ends the stream for good.
+//!
+//! The sports and PolyBolt channels have no such wrapper yet.
+//!
+//! ## Documented reconnection policies
 //!
 //! The PolyBolt documentation specifies a policy per close code (see
 //! [`PolyBoltCloseCode`]): `4003` (draining) reconnect after a random 0 to 10 s delay;
@@ -154,7 +171,10 @@
 //! handshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay
 //! ([`Error::retry_after`](crate::Error::retry_after)).
 //! The market and sports channel documentation specifies no reconnection policy;
-//! exponential backoff with jitter is a reasonable default.
+//! exponential backoff is a reasonable default, ideally with random jitter. The
+//! reconnecting market channel uses a deterministic backoff without jitter.
+//!
+//! The same loop by hand, for PolyBolt:
 //!
 //! ```no_run
 //! # async fn run() -> marcasite::Result<()> {
@@ -226,6 +246,7 @@
 mod frame;
 mod market;
 mod polybolt;
+mod reconnect;
 mod sports;
 
 pub use marcasite_core::ws::{DEFAULT_BUFFER, DEFAULT_CONNECT_TIMEOUT};
@@ -240,6 +261,10 @@ pub use polybolt::{
     BestBidAsk, ChannelAck, ErrorAck, PolyBoltChannel, PolyBoltChannelBuilder,
     PolyBoltChannelHandle, PolyBoltChannelName, PolyBoltCloseCode, PolyBoltErrorCode,
     PolyBoltEvent, PolyBoltSubscription, PongAck, PricePolymarketEnvelope, PriceProvider,
+};
+pub use reconnect::{
+    ReconnectEvent, ReconnectPolicy, ReconnectingMarketChannel, ReconnectingMarketChannelBuilder,
+    ReconnectingMarketChannelHandle,
 };
 pub use sports::{SportResult, SportsChannel, SportsChannelBuilder, SportsEvent};
 

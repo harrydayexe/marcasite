@@ -41,6 +41,10 @@ pub fn polymarket(server: &MockServer) -> marcasite::Polymarket {
     {
         builder = builder.combos_base_url(&uri);
     }
+    #[cfg(feature = "geoblock")]
+    {
+        builder = builder.geoblock_base_url(&uri);
+    }
     let _ = &uri;
     builder.build().expect("client builds")
 }

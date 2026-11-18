@@ -166,6 +166,14 @@ Base URL `https://combos-rfq-api.polymarket.com`, spec [`docs/polymarket/specs/c
 |---|---|---|---|---|
 | [x] | `GET` | `/v1/rfq/combo-markets` | [local](docs/polymarket/api-reference/combo-markets/get-combo-markets.md) / [online](https://docs.polymarket.com/api-reference/combo-markets/get-combo-markets) | `CombosClient::list_combo_markets` (page size differs from the spec: see `SPEC_DEVIATIONS.md`) |
 
+## Geoblock
+
+Base URL `https://polymarket.com` (not an API server), docs [`docs/polymarket/api-reference/geoblock.md`](docs/polymarket/api-reference/geoblock.md), feature `geoblock`, module `marcasite::geoblock`. Check only: the SDK never offers a way to bypass a geoblock.
+
+| Status | Method | Path | Docs | Rust |
+|---|---|---|---|---|
+| [x] | `GET` | `/api/geoblock` | [local](docs/polymarket/api-reference/geoblock.md) / [online](https://docs.polymarket.com/api-reference/geoblock) | `GeoblockClient::get_status` |
+
 ## WebSocket channels (public)
 
 Feature `ws`, module `marcasite::ws`. Each channel type is a `Stream` of typed events; URLs are
@@ -173,7 +181,7 @@ defaults (override with `*ChannelBuilder::url`).
 
 | Status | Channel | URL | Docs | Rust |
 |---|---|---|---|---|
-| [x] | Market channel | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | [local](docs/polymarket/api-reference/wss/market.md) / [online](https://docs.polymarket.com/api-reference/wss/market), spec `docs/polymarket/specs/asyncapi.json` | `MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)`, also on the cloneable `MarketChannelHandle` from `handle()` |
+| [x] | Market channel | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | [local](docs/polymarket/api-reference/wss/market.md) / [online](https://docs.polymarket.com/api-reference/wss/market), spec `docs/polymarket/specs/asyncapi.json` | `MarketChannel::connect(MarketSubscription)` → `Stream<Item = Result<MarketEvent>>`; `subscribe` / `unsubscribe` / `update_subscription(MarketSubscriptionUpdate)`, also on the cloneable `MarketChannelHandle` from `handle()`; opt-in auto-reconnect with `ReconnectingMarketChannel::new` / `ReconnectingMarketChannelBuilder::build` → `Stream<Item = Result<ReconnectEvent>>` (`Connected` / `Disconnected` with the asset ids, backoff `ReconnectPolicy`), handle `ReconnectingMarketChannelHandle` from `ReconnectingMarketChannel::handle` |
 | [x] | Sports channel | `wss://sports-api.polymarket.com/ws` | [local](docs/polymarket/api-reference/wss/sports.md) / [online](https://docs.polymarket.com/api-reference/wss/sports), spec `docs/polymarket/specs/asyncapi-sports.json` | `SportsChannel::connect()` → `Stream<Item = Result<SportsEvent>>` (live shape and heartbeat differ from the spec: see `SPEC_DEVIATIONS.md`) |
 | [x] | PolyBolt `price.polymarket` (public channel only) | `wss://ws-live-v2.polymarket.com/ws` | [local](docs/polymarket/api-reference/wss/polybolt.md) / [online](https://docs.polymarket.com/api-reference/wss/polybolt), spec `docs/polymarket/specs/polybolt-asyncapi.json` | `PolyBoltChannel::connect()` → `Stream<Item = Result<PolyBoltEvent>>`; `subscribe` / `unsubscribe(PolyBoltSubscription::price_polymarket(..))`, `ping`, also on the cloneable `PolyBoltChannelHandle` from `handle()` |
 

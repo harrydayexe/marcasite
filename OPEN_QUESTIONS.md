@@ -70,3 +70,47 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
 19. Market-channel `new_market` `fee_schedule`: every field is `Option` because few frames were
     seen. Tighten?
 20. PolyBolt: is "64 KB" 64,000 or 65,536 bytes (64,000 used)? Reconnection policy for all channels.
+
+## Geoblock
+
+21. Is `region` always present in `GET /api/geoblock`? The docs list `region` as a plain string and
+    live always sent it (`US`/`OH`, 2026-11-17), but a country without sub-national regions was
+    not observable. *Current:* `GeoblockStatus::region` is a required `String`, so a missing
+    region is a decode error (fails closed). Likewise `ip` is parsed as `std::net::IpAddr`, so
+    an unparseable `ip` fails the whole call.
+22. Does `blocked` report `true` for close-only jurisdictions? The docs define `blocked` as
+    "blocked from placing orders" and separately list close-only jurisdictions (close existing
+    positions, no new ones). *Current:* the rustdoc tells callers to treat `true` as "do not open
+    new positions" and not to read `false` as proof that every action is allowed.
+
+## Dependencies
+
+23. chrono is unmaintained (RUSTSEC-2026-0543, 2026; no fixed version). *Current:* ignored in
+    `deny.toml` with a reason; it is not a known vulnerability. Migrating the public API from
+    `chrono::DateTime<Utc>` to `jiff` or `time` is a breaking change to plan before v1.
+    `marcasite-mcp` would still pull chrono through `rmcp`/`schemars` until they move.
+
+## Fees
+
+24. Which rounding mode do taker fees use? `trading/fees` says "Fees are rounded to 5 decimal
+    places. The smallest fee charged is 0.00001 USDC. Anything smaller rounds to zero" but names no
+    mode (half-up, half-even, truncation?). *Current:* `marcasite::fees::taker_fee` and the
+    `taker_fee` methods of the fee types return the unrounded value
+    (`shares x rate x (price x (1 - price)) ^ exponent`, computed in `Decimal`, accurate to about
+    28 significant digits); `fees::FEE_DECIMALS` (5) is exposed so
+    callers can round. The docs' worked tables (rounded to cents) are reproduced.
+
+25. How does the fee exponent enter the formula? `market-details` calls it the "exponent
+    applied to the price component", but every documented formula is
+    `shares x rate x price x (1 - price)` (exponent 1), and the CLOB spec's `FeeDetails` example
+    has `e: 2`. *Current:* `taker_fee` raises the whole `price x (1 - price)` term to the
+    exponent, documented as unverified for exponents other than 1. Live (2026-11-18, about
+    1,600 Gamma markets and CLOB `fd`) only ever sends exponent 1.
+
+26. Are the market channel's `level` and `custom_feature_enabled` per asset or per
+    connection? The docs and AsyncAPI spec accept them on the initial message and on subscribe
+    updates but do not say what an update does to assets subscribed earlier. Also undocumented:
+    whether a subscribe update sends `book` snapshots for the added assets. *Current:*
+    `ReconnectingMarketChannel` tracks one value per channel (the last set by the initial
+    subscription or a subscribe update; unsubscribe updates do not change it) and sends it for
+    every asset on reconnection, as documented on the type.

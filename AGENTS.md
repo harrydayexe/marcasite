@@ -27,6 +27,10 @@ follows the live API.
   The exception is `docs/polymarket/AGENTS.md`, this project's navigation guide to the copy.
   `docs/sdk/` is not Polymarket's documentation: it is this SDK's API, generated from rustdoc
   (see [Generated SDK docs](#generated-sdk-docs)).
+- **Every page you fetch from `docs.polymarket.com` gets committed to `docs/polymarket/`**, whether it
+  is new or a newer version of a copied page: save it verbatim at its URL path
+  (`https://docs.polymarket.com/<path>.md` → `docs/polymarket/<path>.md`), add or update its line in
+  `docs/polymarket/INDEX.md` with the fetch date, and commit it with the change that relied on it.
 - **Verify against the live API** (`just test-live`, or `curl` for a quick look) before relying on a
   documented shape. Live tests live in `crates/marcasite/tests/live/`; they are `#[ignore]`d and
   read-only, and report keys the models drop and enum values that fall into `Unknown(..)`.

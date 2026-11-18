@@ -1,6 +1,6 @@
 # Module `marcasite::ws`
 
-> Generated from marcasite 0.2.0 (all features) by `just docs-md`. Do not edit.
+> Generated from marcasite 0.3.0 (all features) by `just docs-md`. Do not edit.
 
 Public (unauthenticated) WebSocket channels.
 
@@ -140,10 +140,27 @@ while let Some(item) = channel.next().await {
 
 ## Reconnecting
 
-Connections are not re-established automatically. When a stream ends (with or without a
-final error), connect again and re-send the subscriptions. Subscription state and
-sequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from
+Connections are not re-established automatically, except by the opt-in
+[`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel) for the market channel (below). When a stream ends (with or
+without a final error), connect again and re-send the subscriptions. Subscription state
+and sequence numbers (PolyBolt `seq`) do not survive a reconnect; re-seed local state from
 the new snapshots.
+
+### Market channel: `ReconnectingMarketChannel`
+
+[`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel) (from `MarketChannel::builder().reconnecting()`) wraps the
+market channel: when the connection is lost it waits (deterministic exponential backoff,
+see [`ReconnectPolicy`](ws.md#struct.ReconnectPolicy)), connects again and re-sends the tracked subscription, including
+`level`, `initial_dump` and `custom_feature_enabled`. Its items are [`ReconnectEvent`](ws.md#enum.ReconnectEvent)s:
+`Connected` and `Disconnected` carry the asset ids concerned, so a consumer that keeps
+local order books can mark exactly those untrusted on `Disconnected` and trust each again
+at its first `book` after `Connected`. A handshake refused with `Retry-After` is honoured
+(up to an hour), a decode error is passed through without reconnecting, and
+[`ReconnectingMarketChannelHandle::close`](ws.md#ReconnectingMarketChannelHandle.fn.close) ends the stream for good.
+
+The sports and PolyBolt channels have no such wrapper yet.
+
+### Documented reconnection policies
 
 The PolyBolt documentation specifies a policy per close code (see
 [`PolyBoltCloseCode`](ws.md#enum.PolyBoltCloseCode)): `4003` (draining) reconnect after a random 0 to 10 s delay;
@@ -152,7 +169,10 @@ jitter (1 s up to 30 s); `4001` and `4008` need a client fix before reconnecting
 handshake is refused with HTTP `429` or `503`, wait at least the `Retry-After` delay
 ([`Error::retry_after`](marcasite.md#Error.fn.retry_after)).
 The market and sports channel documentation specifies no reconnection policy;
-exponential backoff with jitter is a reasonable default.
+exponential backoff is a reasonable default, ideally with random jitter. The
+reconnecting market channel uses a deterministic backoff without jitter.
+
+The same loop by hand, for PolyBolt:
 
 ```rust
 use std::time::Duration;
@@ -211,8 +231,8 @@ the gated PolyBolt channels (`price.crypto`, `price.equity`, `price.crypto.twap`
 ## Index
 
 - **Re-exports:** `EventId`, `MarketId`
-- **Structs:** [`BestBidAsk`](#struct.BestBidAsk), [`BestBidAskEvent`](#struct.BestBidAskEvent), [`BookEvent`](#struct.BookEvent), [`ChannelAck`](#struct.ChannelAck), [`ErrorAck`](#struct.ErrorAck), [`EventMessage`](#struct.EventMessage), [`FeeSchedule`](#struct.FeeSchedule), [`LastTradePriceEvent`](#struct.LastTradePriceEvent), [`MarketChannel`](#struct.MarketChannel), [`MarketChannelBuilder`](#struct.MarketChannelBuilder), [`MarketChannelHandle`](#struct.MarketChannelHandle), [`MarketResolvedEvent`](#struct.MarketResolvedEvent), [`MarketSubscription`](#struct.MarketSubscription), [`MarketSubscriptionUpdate`](#struct.MarketSubscriptionUpdate), [`NewMarketEvent`](#struct.NewMarketEvent), [`OrderSummary`](#struct.OrderSummary), [`PolyBoltChannel`](#struct.PolyBoltChannel), [`PolyBoltChannelBuilder`](#struct.PolyBoltChannelBuilder), [`PolyBoltChannelHandle`](#struct.PolyBoltChannelHandle), [`PolyBoltSubscription`](#struct.PolyBoltSubscription), [`PongAck`](#struct.PongAck), [`PriceChange`](#struct.PriceChange), [`PriceChangeEvent`](#struct.PriceChangeEvent), [`PricePolymarketEnvelope`](#struct.PricePolymarketEnvelope), [`SportResult`](#struct.SportResult), [`SportsChannel`](#struct.SportsChannel), [`SportsChannelBuilder`](#struct.SportsChannelBuilder), [`TickSizeChangeEvent`](#struct.TickSizeChangeEvent)
-- **Enums:** [`MarketEvent`](#enum.MarketEvent), [`PolyBoltChannelName`](#enum.PolyBoltChannelName), [`PolyBoltCloseCode`](#enum.PolyBoltCloseCode), [`PolyBoltErrorCode`](#enum.PolyBoltErrorCode), [`PolyBoltEvent`](#enum.PolyBoltEvent), [`PriceProvider`](#enum.PriceProvider), [`SportsEvent`](#enum.SportsEvent), [`SubscriptionLevel`](#enum.SubscriptionLevel)
+- **Structs:** [`BestBidAsk`](#struct.BestBidAsk), [`BestBidAskEvent`](#struct.BestBidAskEvent), [`BookEvent`](#struct.BookEvent), [`ChannelAck`](#struct.ChannelAck), [`ErrorAck`](#struct.ErrorAck), [`EventMessage`](#struct.EventMessage), [`FeeSchedule`](#struct.FeeSchedule), [`LastTradePriceEvent`](#struct.LastTradePriceEvent), [`MarketChannel`](#struct.MarketChannel), [`MarketChannelBuilder`](#struct.MarketChannelBuilder), [`MarketChannelHandle`](#struct.MarketChannelHandle), [`MarketResolvedEvent`](#struct.MarketResolvedEvent), [`MarketSubscription`](#struct.MarketSubscription), [`MarketSubscriptionUpdate`](#struct.MarketSubscriptionUpdate), [`NewMarketEvent`](#struct.NewMarketEvent), [`OrderSummary`](#struct.OrderSummary), [`PolyBoltChannel`](#struct.PolyBoltChannel), [`PolyBoltChannelBuilder`](#struct.PolyBoltChannelBuilder), [`PolyBoltChannelHandle`](#struct.PolyBoltChannelHandle), [`PolyBoltSubscription`](#struct.PolyBoltSubscription), [`PongAck`](#struct.PongAck), [`PriceChange`](#struct.PriceChange), [`PriceChangeEvent`](#struct.PriceChangeEvent), [`PricePolymarketEnvelope`](#struct.PricePolymarketEnvelope), [`ReconnectPolicy`](#struct.ReconnectPolicy), [`ReconnectingMarketChannel`](#struct.ReconnectingMarketChannel), [`ReconnectingMarketChannelBuilder`](#struct.ReconnectingMarketChannelBuilder), [`ReconnectingMarketChannelHandle`](#struct.ReconnectingMarketChannelHandle), [`SportResult`](#struct.SportResult), [`SportsChannel`](#struct.SportsChannel), [`SportsChannelBuilder`](#struct.SportsChannelBuilder), [`TickSizeChangeEvent`](#struct.TickSizeChangeEvent)
+- **Enums:** [`MarketEvent`](#enum.MarketEvent), [`PolyBoltChannelName`](#enum.PolyBoltChannelName), [`PolyBoltCloseCode`](#enum.PolyBoltCloseCode), [`PolyBoltErrorCode`](#enum.PolyBoltErrorCode), [`PolyBoltEvent`](#enum.PolyBoltEvent), [`PriceProvider`](#enum.PriceProvider), [`ReconnectEvent`](#enum.ReconnectEvent), [`SportsEvent`](#enum.SportsEvent), [`SubscriptionLevel`](#enum.SubscriptionLevel)
 - **Constants:** [`DEFAULT_BUFFER`](#constant.DEFAULT_BUFFER), [`DEFAULT_CONNECT_TIMEOUT`](#constant.DEFAULT_CONNECT_TIMEOUT)
 
 ## Re-exports
@@ -420,6 +440,25 @@ Undocumented; observed live (2026-10-02) as
 types were observed (decimal strings and one boolean), so every field is optional.
 
 **Implements:** `Clone`, `Debug`, `Deserialize<'de>`, `Eq`, `PartialEq`, `Serialize`
+
+#### Methods
+
+##### <a id="FeeSchedule.fn.taker_fee"></a>`taker_fee`
+
+```rust
+pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>
+```
+
+Computes the taker fee in USDC for trading `shares` at `price`, from this market's
+rate and exponent.
+
+This always computes the taker fee (makers pay none) and is unrounded. See the
+[`fees`](fees.md) module for the formula, rounding and rate changes.
+
+###### Errors
+
+Returns a validation error if the rate or exponent is missing or invalid, or `price`
+or `shares` is out of range.
 
 ### <a id="struct.LastTradePriceEvent"></a>`struct LastTradePriceEvent`
 
@@ -727,6 +766,15 @@ Connects and sends `subscription`.
 
 Returns [`Error::Config`](marcasite.md#enum.Error) if the URL is invalid or the heartbeat interval or idle
 timeout is zero, or [`Error::WebSocket`](marcasite.md#enum.Error) if the connection cannot be established.
+
+##### <a id="MarketChannelBuilder.fn.reconnecting"></a>`reconnecting`
+
+```rust
+pub fn reconnecting(self) -> ReconnectingMarketChannelBuilder
+```
+
+Turns this builder into one for a [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel), with the default
+[`ReconnectPolicy`](ws.md#struct.ReconnectPolicy). The settings of this builder apply to every connection.
 
 ### <a id="struct.MarketChannelHandle"></a>`struct MarketChannelHandle`
 
@@ -1668,6 +1716,536 @@ pub fn is_snapshot(&self) -> bool
 
 `true` for the snapshot frame that follows a new subscription.
 
+### <a id="struct.ReconnectPolicy"></a>`struct ReconnectPolicy`
+
+```rust
+#[must_use]
+pub struct ReconnectPolicy { /* private fields */ }
+```
+
+How a [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel) waits between connection attempts.
+
+The delay before each attempt grows exponentially (doubling) from
+[`initial_backoff`](ws.md#ReconnectPolicy.fn.initial_backoff) up to [`max_backoff`](ws.md#ReconnectPolicy.fn.max_backoff). It is
+deterministic: there is no jitter.
+
+#### Attempts and stability
+
+The policy counts connection *attempts* since the last *stable* connection. A connection
+is stable if it stayed up for at least [`stable_after`](ws.md#ReconnectPolicy.fn.stable_after)
+(default [`DEFAULT_STABLE_AFTER`](ws.md#ReconnectPolicy.constant.DEFAULT_STABLE_AFTER)); when a stable connection is
+lost the count and the backoff start over. A connection that is lost sooner (a server that
+accepts and immediately drops, for example) does **not** reset them, so a flapping
+server is backed off from like an unreachable one. Receiving messages does not make a
+connection stable: the server sends the initial snapshots right away. Stability is
+measured up to the moment the loss is *observed* (the stream is polled and sees the
+connection end). A connection ended by a `Timeout` (the idle timeout: nothing, not even a
+heartbeat reply, arrived for that long) is only credited with the time up to the start of
+that silence, so a server that accepts connections and then goes silent is backed off from
+and counts against [`max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts).
+
+[`max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts), if set, bounds the number of attempts without a
+stable connection in between; by default the channel retries forever.
+
+#### Refused handshakes
+
+If the server refuses the handshake with a `Retry-After` delay (HTTP `429` or `503`, see
+[`Error::retry_after`](marcasite.md#Error.fn.retry_after)), the next attempt waits for the longer of the backoff and that delay,
+but never more than [`MAX_RETRY_AFTER`](ws.md#ReconnectPolicy.constant.MAX_RETRY_AFTER) (one hour), so that a
+bogus header cannot park the channel indefinitely.
+
+```rust
+use std::{num::NonZeroU32, time::Duration};
+
+use marcasite::ws::ReconnectPolicy;
+
+let policy = ReconnectPolicy::new(Duration::from_millis(500), Duration::from_secs(20))?
+    .max_attempts(NonZeroU32::MIN.saturating_add(9));
+assert_eq!(policy.max_backoff(), Duration::from_secs(20));
+```
+
+**Implements:** `Clone`, `Copy`, `Debug`, `Default`, `Eq`, `PartialEq`
+
+#### Associated items
+
+##### <a id="ReconnectPolicy.constant.DEFAULT_INITIAL_BACKOFF"></a>`DEFAULT_INITIAL_BACKOFF`
+
+```rust
+pub const DEFAULT_INITIAL_BACKOFF: Duration = _;
+```
+
+The default delay before the first reconnection attempt: 1 second.
+
+##### <a id="ReconnectPolicy.constant.DEFAULT_MAX_BACKOFF"></a>`DEFAULT_MAX_BACKOFF`
+
+```rust
+pub const DEFAULT_MAX_BACKOFF: Duration = _;
+```
+
+The default upper bound of the delay: 30 seconds.
+
+##### <a id="ReconnectPolicy.constant.DEFAULT_STABLE_AFTER"></a>`DEFAULT_STABLE_AFTER`
+
+```rust
+pub const DEFAULT_STABLE_AFTER: Duration = _;
+```
+
+The default time a connection must stay up to count as stable: 30 seconds (the
+default [idle timeout](ws.md#MarketChannel.constant.DEFAULT_IDLE_TIMEOUT) of the market channel).
+
+##### <a id="ReconnectPolicy.constant.MAX_RETRY_AFTER"></a>`MAX_RETRY_AFTER`
+
+```rust
+pub const MAX_RETRY_AFTER: Duration = _;
+```
+
+The longest `Retry-After` delay that is honoured: one hour.
+
+##### <a id="ReconnectPolicy.fn.new"></a>`new`
+
+```rust
+pub fn new(initial_backoff: Duration, max_backoff: Duration) -> Result<Self>
+```
+
+A policy with the given initial and maximum backoff, retrying forever, with the
+default [`stable_after`](ws.md#ReconnectPolicy.fn.stable_after).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if `initial_backoff` is zero or `max_backoff` is
+shorter than `initial_backoff`.
+
+##### <a id="ReconnectPolicy.fn.max_attempts"></a>`max_attempts`
+
+```rust
+pub fn max_attempts(self, max_attempts: NonZeroU32) -> Self
+```
+
+Gives up after this many connection attempts without a stable connection in
+between (default: retry forever). See [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel) for what the
+stream yields then.
+
+##### <a id="ReconnectPolicy.fn.unlimited_attempts"></a>`unlimited_attempts`
+
+```rust
+pub fn unlimited_attempts(self) -> Self
+```
+
+Retries forever (the default).
+
+##### <a id="ReconnectPolicy.fn.stable_after"></a>`stable_after`
+
+```rust
+pub fn stable_after(self, stable_after: Duration) -> Self
+```
+
+How long a connection must stay up to count as stable, which resets the attempt count
+and the backoff when it is lost (default
+[`DEFAULT_STABLE_AFTER`](ws.md#ReconnectPolicy.constant.DEFAULT_STABLE_AFTER)). Zero makes every connection
+stable.
+
+##### <a id="ReconnectPolicy.fn.retry_client_errors"></a>`retry_client_errors`
+
+```rust
+pub fn retry_client_errors(self, retry: bool) -> Self
+```
+
+Whether to keep retrying when the server refuses the handshake with an HTTP `4xx`
+status other than `408` and `429` (default `false`).
+
+Such a refusal (`401`, `403` for a geoblock, `404`, ...) is not fixed by trying again,
+so by default the stream yields the error and ends. `408`, `429` and every `5xx` are
+always retried. Set this to `true` to retry regardless, e.g. behind a flaky proxy.
+
+##### <a id="ReconnectPolicy.fn.initial_backoff"></a>`initial_backoff`
+
+```rust
+#[must_use]
+pub fn initial_backoff(&self) -> Duration
+```
+
+The delay before the first reconnection attempt.
+
+##### <a id="ReconnectPolicy.fn.max_backoff"></a>`max_backoff`
+
+```rust
+#[must_use]
+pub fn max_backoff(&self) -> Duration
+```
+
+The upper bound of the delay between attempts.
+
+##### <a id="ReconnectPolicy.fn.attempt_limit"></a>`attempt_limit`
+
+```rust
+#[must_use]
+pub fn attempt_limit(&self) -> Option<NonZeroU32>
+```
+
+The attempt limit, if any.
+
+##### <a id="ReconnectPolicy.fn.retries_client_errors"></a>`retries_client_errors`
+
+```rust
+#[must_use]
+pub fn retries_client_errors(&self) -> bool
+```
+
+Whether handshakes refused with a `4xx` status are retried.
+
+##### <a id="ReconnectPolicy.fn.stable_period"></a>`stable_period`
+
+```rust
+#[must_use]
+pub fn stable_period(&self) -> Duration
+```
+
+How long a connection must stay up to count as stable.
+
+### <a id="struct.ReconnectingMarketChannel"></a>`struct ReconnectingMarketChannel`
+
+```rust
+#[must_use = "streams do nothing unless polled"]
+pub struct ReconnectingMarketChannel { /* private fields */ }
+```
+
+A [`MarketChannel`](ws.md#struct.MarketChannel) that reconnects by itself, with explicit connection lifecycle events.
+
+The channel is a `Stream` of [`ReconnectEvent`](ws.md#enum.ReconnectEvent)s. It connects when first polled and,
+whenever the connection is lost, waits per its [`ReconnectPolicy`](ws.md#struct.ReconnectPolicy), connects again and
+re-sends the subscription: the tracked asset ids (the initial ones, changed by the
+[handle](ws.md#struct.ReconnectingMarketChannelHandle)), `level`, `initial_dump` and
+`custom_feature_enabled`. If you set `initial_dump(false)`, the server does not send
+`book` snapshots after a reconnection either.
+
+`level` and `custom_feature_enabled` are tracked per channel, not per asset: the last
+value set by the initial subscription or a *subscribe* update is sent for **every** tracked
+asset on reconnection (the initial message carries one value for all of them). If you
+subscribe assets with different settings, they converge on the latest after a reconnect.
+Whether the server applies these settings per asset or per connection is undocumented
+(see `OPEN_QUESTIONS.md`).
+
+Created with [`new`](ws.md#ReconnectingMarketChannel.fn.new) or [`MarketChannelBuilder::reconnecting`](ws.md#MarketChannelBuilder.fn.reconnecting); it does not
+connect before it is polled, so nothing blocks and a Tokio runtime is only needed from the
+first poll on.
+
+#### Stream items
+
+- `Ok(`[`ReconnectEvent::Connected`](ws.md#enum.ReconnectEvent)`)`: connected and subscribed (first connection and
+  every reconnection).
+- `Ok(`[`ReconnectEvent::Market`](ws.md#enum.ReconnectEvent)`)`: an event of the live connection.
+- `Ok(`[`ReconnectEvent::Disconnected`](ws.md#enum.ReconnectEvent)`)`: the connection was lost, exactly once per lost
+  connection, with the assets that were subscribed. Every message that arrived before the
+  loss is yielded before it. A connection counts as lost when the stream of the inner
+  [`MarketChannel`](ws.md#struct.MarketChannel) ends for any reason: an error (kinds `Closed`, `Protocol`, `Send` or
+  `Timeout`, including the idle timeout) or a close the server finished **normally**, which is
+  also followed by a reconnection (a market channel has no reason to end on purpose).
+- `Ok(`[`ReconnectEvent::ConnectFailed`](ws.md#enum.ReconnectEvent)`)`: an attempt to (re)connect failed (any error of
+  kind `Connect`, including a handshake refused with `408`, `429` or a `5xx` status).
+  A refusal with another `4xx` status (`401`, `403` for a geoblock, `404`) is **not**
+  retried unless [`ReconnectPolicy::retry_client_errors`](ws.md#ReconnectPolicy.fn.retry_client_errors) is set: it ends the stream as an
+  `Err`. Use [`ReconnectPolicy::max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts) or
+  [`close`](ws.md#ReconnectingMarketChannelHandle.fn.close) to stop earlier.
+- `Err(`[`Error::WebSocket`](marcasite.md#enum.Error)`)` of kind
+  [`Decode`](marcasite.md#enum.WebSocketErrorKind): one message did not decode. Not fatal,
+  exactly as on [`MarketChannel`](ws.md#struct.MarketChannel): the connection stays up and nothing is reconnected.
+- Any other `Err` is the last item: the policy ran out of attempts (the last connection
+  error; if the last attempt was a connection that was then lost, an error of kind
+  `Closed` after its `Disconnected`), or a connection error that retrying cannot fix
+  ([`Error::Config`](marcasite.md#enum.Error), e.g. TLS could not be set up, or polling outside a Tokio runtime;
+  or a refused handshake with a permanent `4xx` status). The stream then ends and the
+  handles fail with `Closed`.
+
+#### Tracking books
+
+A consumer that keeps local order books should mark the assets of every `Disconnected`
+untrusted and trust an asset again at its first `book` after the following `Connected`.
+
+A message that fails to decode may be a lost delta, and it does not end the connection,
+so no `Disconnected` or fresh `book` follows on its own. Mark every tracked asset
+untrusted on a decode error until its next `book`. A reconnection sends fresh snapshots
+(unless `initial_dump(false)`); whether a subscribe update through the handle does is
+undocumented.
+
+```rust
+use std::{collections::HashSet, time::Duration};
+
+use futures_util::StreamExt as _;
+use marcasite::{
+    Error, WebSocketErrorKind,
+    ws::{MarketChannel, MarketEvent, MarketSubscription, ReconnectEvent, ReconnectPolicy},
+};
+
+let policy = ReconnectPolicy::new(Duration::from_millis(500), Duration::from_secs(30))?;
+let mut channel = MarketChannel::builder()
+    .reconnecting()
+    .policy(policy)
+    .build(MarketSubscription::new([
+        "65818619657568813474341868652308942079804919287380422192892211131408793125422",
+    ]))?;
+let handle = channel.handle(); // e.g. for `handle.subscribe(..)` from other tasks
+
+let mut untrusted = HashSet::new();
+while let Some(item) = channel.next().await {
+    let event = match item {
+        Ok(event) => event,
+        // One message did not decode: not fatal, the stream continues, but it may have
+        // been a lost delta. Distrust every book until its next snapshot.
+        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {
+            untrusted.extend(handle.asset_ids());
+            continue;
+        }
+        // The policy gave up, or the error cannot be fixed by retrying.
+        Err(err) => return Err(err),
+    };
+    match event {
+        ReconnectEvent::Connected { asset_ids, attempt } => {
+            println!("connected (attempt {attempt}); waiting for books of {asset_ids:?}");
+            untrusted.extend(asset_ids);
+        }
+        ReconnectEvent::Disconnected { asset_ids, error } => {
+            eprintln!("lost the connection: {error:?}");
+            untrusted.extend(asset_ids);
+        }
+        ReconnectEvent::ConnectFailed { attempt, error, retry_in } => {
+            eprintln!("attempt {attempt} failed ({error}); retrying in {retry_in:?}");
+        }
+        ReconnectEvent::Market(MarketEvent::Book(book)) => {
+            untrusted.remove(&book.asset_id); // a fresh snapshot: trust the book again
+            // ... replace the local book ...
+        }
+        ReconnectEvent::Market(_) => { /* apply deltas to books that are not untrusted */ }
+        _ => {}
+    }
+}
+```
+
+#### Ending
+
+[`ReconnectingMarketChannelHandle::close`](ws.md#ReconnectingMarketChannelHandle.fn.close) ends the stream for good (after the events
+already received, without a `Disconnected`); dropping the stream closes the connection and
+makes the handles fail. No background task is spawned by this type itself (the live
+connection has its own driver task, which ends with it), and all buffers are bounded: the
+receive buffer of the underlying channel is the only queue fed by the network.
+
+See <https://docs.polymarket.com/api-reference/wss/market>.
+
+**Implements:** `Debug`, `Drop`, `FusedStream`, `Stream<Item = Result<ReconnectEvent, Error>>`
+
+#### Methods
+
+##### <a id="ReconnectingMarketChannel.fn.new"></a>`new`
+
+```rust
+pub fn new(subscription: MarketSubscription) -> Result<Self>
+```
+
+A channel with the default endpoint, options and [`ReconnectPolicy`](ws.md#struct.ReconnectPolicy); it connects when
+first polled.
+
+###### Errors
+
+Never fails for the default settings; the signature matches
+[`ReconnectingMarketChannelBuilder::build`](ws.md#ReconnectingMarketChannelBuilder.fn.build).
+
+##### <a id="ReconnectingMarketChannel.fn.builder"></a>`builder`
+
+```rust
+pub fn builder() -> ReconnectingMarketChannelBuilder
+```
+
+Returns a builder for a custom URL, timeouts or policy; same as
+`MarketChannel::builder().reconnecting()`.
+
+##### <a id="ReconnectingMarketChannel.fn.handle"></a>`handle`
+
+```rust
+pub fn handle(&self) -> ReconnectingMarketChannelHandle
+```
+
+A cloneable handle to change the subscription or close the channel from other tasks.
+
+##### <a id="ReconnectingMarketChannel.fn.subscribe"></a>`subscribe`
+
+```rust
+pub fn subscribe<I>(&self, asset_ids: I) -> Result<()>
+where
+    I: IntoIterator,
+    <I as >::Item: Into<TokenId>,
+```
+
+Starts following more asset ids; see [`ReconnectingMarketChannelHandle::subscribe`](ws.md#ReconnectingMarketChannelHandle.fn.subscribe).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite.md#enum.Error) if the
+channel is closed.
+
+##### <a id="ReconnectingMarketChannel.fn.unsubscribe"></a>`unsubscribe`
+
+```rust
+pub fn unsubscribe<I>(&self, asset_ids: I) -> Result<()>
+where
+    I: IntoIterator,
+    <I as >::Item: Into<TokenId>,
+```
+
+Stops following some asset ids; see [`ReconnectingMarketChannelHandle::unsubscribe`](ws.md#ReconnectingMarketChannelHandle.fn.unsubscribe).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite.md#enum.Error) if the
+channel is closed.
+
+##### <a id="ReconnectingMarketChannel.fn.update_subscription"></a>`update_subscription`
+
+```rust
+pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()>
+```
+
+Applies a subscription change; see
+[`ReconnectingMarketChannelHandle::update_subscription`](ws.md#ReconnectingMarketChannelHandle.fn.update_subscription).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if the update has no asset ids, or [`Error::WebSocket`](marcasite.md#enum.Error)
+if the channel is closed.
+
+##### <a id="ReconnectingMarketChannel.fn.close"></a>`close`
+
+```rust
+pub fn close(&self)
+```
+
+Closes the channel for good; see [`ReconnectingMarketChannelHandle::close`](ws.md#ReconnectingMarketChannelHandle.fn.close).
+
+### <a id="struct.ReconnectingMarketChannelBuilder"></a>`struct ReconnectingMarketChannelBuilder`
+
+```rust
+#[must_use]
+pub struct ReconnectingMarketChannelBuilder { /* private fields */ }
+```
+
+Builder for [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel), from [`MarketChannelBuilder::reconnecting`](ws.md#MarketChannelBuilder.fn.reconnecting)
+(which carries over the URL, buffer, timeouts and heartbeat interval set on it).
+
+**Implements:** `Clone`, `Debug`
+
+#### Methods
+
+##### <a id="ReconnectingMarketChannelBuilder.fn.policy"></a>`policy`
+
+```rust
+pub fn policy(self, policy: ReconnectPolicy) -> Self
+```
+
+Sets the [`ReconnectPolicy`](ws.md#struct.ReconnectPolicy) (default: `ReconnectPolicy::default`).
+
+##### <a id="ReconnectingMarketChannelBuilder.fn.build"></a>`build`
+
+```rust
+pub fn build(self, subscription: MarketSubscription) -> Result<ReconnectingMarketChannel>
+```
+
+Creates the channel with `subscription` as the initial tracked subscription. It
+connects when first polled.
+
+###### Errors
+
+Returns [`Error::Config`](marcasite.md#enum.Error) if the URL is invalid or the heartbeat interval or idle
+timeout is zero, and [`Error::Validation`](marcasite.md#enum.Error) if the initial subscription cannot be
+encoded, so that these fail here rather than as a first stream item.
+
+### <a id="struct.ReconnectingMarketChannelHandle"></a>`struct ReconnectingMarketChannelHandle`
+
+```rust
+pub struct ReconnectingMarketChannelHandle { /* private fields */ }
+```
+
+A cloneable handle to a [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel), from
+[`ReconnectingMarketChannel::handle`](ws.md#ReconnectingMarketChannel.fn.handle): changes the subscription or closes the channel
+from any task while the channel is consumed as a stream.
+
+Changes are recorded in the tracked subscription, sent on the live connection if there
+is one, and otherwise applied when the channel reconnects. The handle does not keep the
+channel alive: once the channel is closed or dropped its methods fail with an
+[`Error::WebSocket`](marcasite.md#enum.Error) of kind [`Closed`](marcasite.md#enum.WebSocketErrorKind).
+
+**Implements:** `Clone`, `Debug`
+
+#### Methods
+
+##### <a id="ReconnectingMarketChannelHandle.fn.subscribe"></a>`subscribe`
+
+```rust
+pub fn subscribe<I>(&self, asset_ids: I) -> Result<()>
+where
+    I: IntoIterator,
+    <I as >::Item: Into<TokenId>,
+```
+
+Starts following more asset ids (on the live connection now, or after reconnecting).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite.md#enum.Error) if the
+channel is closed.
+
+##### <a id="ReconnectingMarketChannelHandle.fn.unsubscribe"></a>`unsubscribe`
+
+```rust
+pub fn unsubscribe<I>(&self, asset_ids: I) -> Result<()>
+where
+    I: IntoIterator,
+    <I as >::Item: Into<TokenId>,
+```
+
+Stops following some asset ids (on the live connection now, or after reconnecting).
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if `asset_ids` is empty, or [`Error::WebSocket`](marcasite.md#enum.Error) if the
+channel is closed.
+
+##### <a id="ReconnectingMarketChannelHandle.fn.update_subscription"></a>`update_subscription`
+
+```rust
+pub fn update_subscription(&self, update: MarketSubscriptionUpdate) -> Result<()>
+```
+
+Applies a subscription change to the tracked subscription and sends it on the live
+connection, if any. A `level` or `custom_feature_enabled` set on the update is kept
+for reconnections too.
+
+Changes are never lost to a connection that fails while the update is sent: they
+are in the tracked subscription that the next connection starts from.
+
+###### Errors
+
+Returns [`Error::Validation`](marcasite.md#enum.Error) if the update has no asset ids, or [`Error::WebSocket`](marcasite.md#enum.Error)
+if the channel is closed.
+
+##### <a id="ReconnectingMarketChannelHandle.fn.asset_ids"></a>`asset_ids`
+
+```rust
+#[must_use]
+pub fn asset_ids(&self) -> Vec<TokenId>
+```
+
+The asset ids currently tracked (sorted): what the channel is subscribed to, or will
+be after the next reconnection.
+
+##### <a id="ReconnectingMarketChannelHandle.fn.close"></a>`close`
+
+```rust
+pub fn close(&self)
+```
+
+Closes the channel for good: the live connection is closed gracefully, the stream
+ends after the events already received (without a
+[`Disconnected`](ws.md#enum.ReconnectEvent)), and it never reconnects. Also ends
+a stream that is waiting to reconnect.
+
 ### <a id="struct.SportResult"></a>`struct SportResult`
 
 ```rust
@@ -2041,6 +2619,41 @@ See <https://docs.polymarket.com/api-reference/wss/market>.
 
 **Implements:** `Clone`, `Debug`, `Deserialize<'de>`, `Eq`, `PartialEq`, `Serialize`
 
+#### Methods
+
+##### <a id="MarketEvent.fn.timestamp"></a>`timestamp`
+
+```rust
+#[must_use]
+pub fn timestamp(&self) -> Option<DateTime<Utc>>
+```
+
+The exchange timestamp of the event, for every variant.
+
+This is the time the exchange stamped on the message, **not** the time it was
+received. `None` when the event carries no timestamp ([`MarketEvent::Unknown`](ws.md#enum.MarketEvent)) or
+when a string timestamp is not an integer number of Unix milliseconds or is out of
+the range `DateTime` can represent (see
+[`NewMarketEvent::timestamp_millis`](ws.md#NewMarketEvent.fn.timestamp_millis) and friends).
+
+```rust
+use marcasite::ws::MarketEvent;
+
+fn age_millis(event: &MarketEvent, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+    Some((now - event.timestamp()?).num_milliseconds())
+}
+```
+
+##### <a id="MarketEvent.fn.market"></a>`market`
+
+```rust
+#[must_use]
+pub fn market(&self) -> Option<&ConditionId>
+```
+
+The condition id of the market the event is about, for every recognised variant;
+`None` for [`MarketEvent::Unknown`](ws.md#enum.MarketEvent).
+
 ### <a id="enum.PolyBoltChannelName"></a>`enum PolyBoltChannelName`
 
 ```rust
@@ -2304,6 +2917,56 @@ pub fn is_unknown(&self) -> bool
 ```
 
 `true` if this is the `Unknown` catch-all variant.
+
+### <a id="enum.ReconnectEvent"></a>`enum ReconnectEvent`
+
+```rust
+#[non_exhaustive]
+pub enum ReconnectEvent {
+    /// The channel is connected and subscribed: on the first connection and after every
+    /// reconnection. The server sends a fresh `book` snapshot per asset next (unless
+    /// [`MarketSubscription::initial_dump`](ws.md#MarketSubscription.fn.initial_dump) was set to `false`).
+    Connected {
+        /// The assets subscribed on the new connection.
+        asset_ids: Vec<TokenId>,
+        /// Which connection attempt since the last stable connection this was (`1` for the
+        /// first connection; see [`ReconnectPolicy`](ws.md#struct.ReconnectPolicy)).
+        attempt: u32,
+    },
+    /// The connection was lost: the stream ended, with the error that ended it (or `None`
+    /// for a close the server finished normally). Emitted exactly once per lost connection,
+    /// after every message received before the loss and before any reconnection attempt.
+    /// Nothing is received for these assets until the next [`Connected`](ws.md#enum.ReconnectEvent).
+    Disconnected {
+        /// The tracked subscription when the loss was observed.
+        asset_ids: Vec<TokenId>,
+        /// Why the connection ended, if it ended with an error.
+        error: Option<Error>,
+    },
+    /// A connection attempt failed; the channel waits `retry_in` and tries again. Not
+    /// emitted for the last attempt when [`ReconnectPolicy::max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts) is exhausted: the
+    /// stream yields that error as an `Err` item instead.
+    ConnectFailed {
+        /// The failed attempt, counted as in [`Connected`](ws.md#enum.ReconnectEvent).
+        attempt: u32,
+        /// Why it failed.
+        error: Error,
+        /// How long the channel waits before the next attempt.
+        retry_in: Duration,
+    },
+    /// An event of the market channel.
+    Market(MarketEvent),
+}
+```
+
+An item of a [`ReconnectingMarketChannel`](ws.md#struct.ReconnectingMarketChannel): a connection lifecycle signal or a market
+event.
+
+The `asset_ids` of the lifecycle events are the subscription the channel tracks at that
+moment (sorted), including changes made through the
+[handle](ws.md#struct.ReconnectingMarketChannelHandle) while disconnected.
+
+**Implements:** `Debug`
 
 ### <a id="enum.SportsEvent"></a>`enum SportsEvent`
 

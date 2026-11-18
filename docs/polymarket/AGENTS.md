@@ -31,6 +31,7 @@ relevant section rather than loading whole files.
 | `api-reference/bridge/` | Bridge API (`bridge.polymarket.com`) | `specs/bridge-openapi.yaml` |
 | `api-reference/wss/` | WebSocket channels: `market`, `user`, `sports`, `rfq` (Quoter Gateway), `polybolt` | `specs/asyncapi*.json`, `specs/polybolt-asyncapi.json` |
 | `api-reference/live-data/`, `websockets/` | PolyBolt (live data) WebSocket pages | `specs/polybolt-asyncapi.json` |
+| `trading/`, `programs/`, `market-data/` | Guides fetched later (2026-11-17): fees, fee changes, market details. See the "Guides" section of `INDEX.md` | - |
 
 Some endpoints appear in more than one group (e.g. open interest under `markets/`); the Data API v2
 pages live in `wallet/`, `feeds/` and `boards/`, not only `data-api/`.
@@ -44,6 +45,11 @@ pages live in `wallet/`, `feeds/` and `boards/`, not only `data-api/`.
 
 ## Scope and known gaps
 
-- Predictions only. Perps docs, Chinese docs and general guides (concepts, trading, programs) are not included.
+- Predictions only. Perps docs and Chinese docs are not included. General guides (concepts, trading,
+  programs) are included only where the SDK needed them; those pages keep their URL path and have
+  their own fetch date in `INDEX.md`.
+- Any page fetched from `docs.polymarket.com` (new or a newer version of a copied page) is saved here
+  verbatim at its URL path (`https://docs.polymarket.com/<path>.md` → `<path>.md`), listed in
+  `INDEX.md` with its fetch date, and committed.
 - Data API **v1 (legacy)** pages are intentionally excluded; v1 is being replaced by v2.
 - Pages are not versioned; check the fetch date above before trusting them for recent API changes.

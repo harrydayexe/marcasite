@@ -35,7 +35,8 @@ Not affiliated with or endorsed by Polymarket.
 | Relayer API: transaction status, nonces, wallet deployment | `marcasite::relayer::RelayerClient` | `relayer` |
 | Bridge API: supported assets, quotes, deposit/withdrawal addresses, status | `marcasite::bridge::BridgeClient` | `bridge` |
 | Combos / RFQ: combo-eligible markets | `marcasite::combos::CombosClient` | `combos` |
-| WebSockets: market channel, sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
+| Geoblock check: is the requesting IP address blocked from trading | `marcasite::geoblock::GeoblockClient` | `geoblock` |
+| WebSockets: market channel (optionally auto-reconnecting), sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
 
 ## Quick start
 
@@ -47,7 +48,7 @@ All features are on by default. To compile only what you use:
 
 ```toml
 [dependencies]
-marcasite = { version = "0.2", default-features = false, features = ["gamma", "clob"] }
+marcasite = { version = "0.3", default-features = false, features = ["gamma", "clob"] }
 ```
 
 The examples use [`tokio`](https://docs.rs/tokio) (with the `macros` and `rt-multi-thread`
@@ -55,7 +56,7 @@ features) and [`futures-util`](https://docs.rs/futures-util) for stream combinat
 
 ```toml
 [dependencies]
-marcasite = "0.2"
+marcasite = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 futures-util = "0.3"
 ```
@@ -95,8 +96,8 @@ async fn main() -> marcasite::Result<()> {
   trace id), rate limiting (`Retry-After`), timeouts, transport failures, decode failures (with the
   JSON path of the offending field), client-side validation (e.g. batch limits) and configuration
   errors. No panics on network input.
-- **Configurable.** Timeouts, user agent, opt-in automatic retries (`RetryPolicy`) and base URLs
-  (e.g. for a mock server) via `Polymarket::builder()` or each client's builder.
+- **Configurable.** Timeouts, user agent, opt-in automatic retries (`RetryPolicy`), an opt-in
+  client-side rate limit (`RateLimit`) and base URLs (e.g. for a mock server) via `Polymarket::builder()` or each client's builder.
 - **Observable.** Diagnostics via `tracing` (requests at `DEBUG`, bodies at `TRACE`); no subscriber
   is installed by the library.
 

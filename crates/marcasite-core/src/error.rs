@@ -49,6 +49,8 @@ pub enum Service {
     Bridge,
     /// Combos / RFQ REST API (`combos-rfq-api.polymarket.com`).
     Combos,
+    /// Geoblock check (`polymarket.com/api/geoblock`).
+    Geoblock,
     /// CLOB market WebSocket channel (`ws-subscriptions-clob.polymarket.com/ws/market`).
     MarketChannel,
     /// Sports results WebSocket channel (`sports-api.polymarket.com/ws`).
@@ -68,6 +70,7 @@ impl Service {
             Self::Relayer => "relayer",
             Self::Bridge => "bridge",
             Self::Combos => "combos",
+            Self::Geoblock => "geoblock",
             Self::MarketChannel => "market-channel",
             Self::SportsChannel => "sports-channel",
             Self::PolyBolt => "polybolt",

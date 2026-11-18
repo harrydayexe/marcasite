@@ -375,6 +375,10 @@ async fn execute(
     let mut attempt: u32 = 0;
     let first_started = Instant::now();
     loop {
+        // Every attempt, retries included, takes a slot of the client-side budget.
+        if let Some(limiter) = &transport.http.limiter {
+            limiter.acquire().await;
+        }
         let started = Instant::now();
         let mut builder = transport
             .http

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use marcasite_core::{HttpClient, HttpClientBuilder, Result, RetryPolicy};
+use marcasite_core::{HttpClient, HttpClientBuilder, RateLimit, Result, RetryPolicy};
 
 /// One handle to every enabled Polymarket service, sharing a single HTTP connection pool.
 ///
@@ -38,6 +38,8 @@ pub struct Polymarket {
     bridge: crate::bridge::BridgeClient,
     #[cfg(feature = "combos")]
     combos: crate::combos::CombosClient,
+    #[cfg(feature = "geoblock")]
+    geoblock: crate::geoblock::GeoblockClient,
     http: HttpClient,
 }
 
@@ -110,6 +112,14 @@ impl Polymarket {
     pub fn combos(&self) -> &crate::combos::CombosClient {
         &self.combos
     }
+
+    /// The geoblock check client (`polymarket.com/api/geoblock`).
+    #[cfg(feature = "geoblock")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+    #[must_use]
+    pub fn geoblock(&self) -> &crate::geoblock::GeoblockClient {
+        &self.geoblock
+    }
 }
 
 /// Builder for [`Polymarket`].
@@ -130,11 +140,13 @@ pub struct PolymarketBuilder {
     bridge_base_url: Option<String>,
     #[cfg(feature = "combos")]
     combos_base_url: Option<String>,
+    #[cfg(feature = "geoblock")]
+    geoblock_base_url: Option<String>,
 }
 
 impl PolymarketBuilder {
-    /// Uses an existing [`HttpClient`]; the timeout, user agent, retry and response size
-    /// settings of this builder are then ignored.
+    /// Uses an existing [`HttpClient`]; the timeout, user agent, retry, rate limit and
+    /// response size settings of this builder are then ignored.
     pub fn http_client(mut self, http: HttpClient) -> Self {
         self.http = Some(http);
         self
@@ -161,6 +173,13 @@ impl PolymarketBuilder {
     /// Sets the automatic retry policy (default: no retries).
     pub fn retry_policy(mut self, retry: RetryPolicy) -> Self {
         self.http_builder = self.http_builder.retry_policy(retry);
+        self
+    }
+
+    /// Sets a client-side request budget shared by every service of this client (default:
+    /// none); see [`HttpClientBuilder::rate_limit`].
+    pub fn rate_limit(mut self, limit: RateLimit) -> Self {
+        self.http_builder = self.http_builder.rate_limit(limit);
         self
     }
 
@@ -219,6 +238,14 @@ impl PolymarketBuilder {
         self
     }
 
+    /// Overrides the geoblock check base URL.
+    #[cfg(feature = "geoblock")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "geoblock")))]
+    pub fn geoblock_base_url(mut self, url: impl Into<String>) -> Self {
+        self.geoblock_base_url = Some(url.into());
+        self
+    }
+
     /// Builds the client.
     ///
     /// # Errors
@@ -271,6 +298,13 @@ impl PolymarketBuilder {
                 crate::combos::CombosClient::builder().http_client(http.clone()),
                 self.combos_base_url,
                 crate::combos::CombosClientBuilder::base_url,
+            )
+            .build()?,
+            #[cfg(feature = "geoblock")]
+            geoblock: with_base_url(
+                crate::geoblock::GeoblockClient::builder().http_client(http.clone()),
+                self.geoblock_base_url,
+                crate::geoblock::GeoblockClientBuilder::base_url,
             )
             .build()?,
             http,
