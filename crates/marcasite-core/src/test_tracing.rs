@@ -135,6 +135,9 @@ pub(crate) fn capture() -> (Arc<Mutex<Captured>>, CaptureGuard) {
         let _ =
             tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Capture));
     });
+    // A callsite another thread registered while the subscriber was being installed can keep a
+    // stale "never" interest; recompute every callsite's interest so none is missed.
+    tracing::callsite::rebuild_interest_cache();
     let captured = Arc::new(Mutex::new(Captured::default()));
     CURRENT.with(|c| *c.borrow_mut() = Some(captured.clone()));
     (captured, CaptureGuard(()))

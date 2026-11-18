@@ -3,9 +3,14 @@
 //! [`RateLimit`] is the public configuration; the limiter that enforces it is internal and
 //! owned by the [`HttpClient`](crate::HttpClient).
 
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    collections::BTreeSet,
+    num::NonZeroU32,
+    sync::{Mutex as StdMutex, MutexGuard, PoisonError},
+    time::Duration,
+};
 
-use tokio::{sync::Mutex, time::Instant};
+use tokio::time::Instant;
 
 use crate::error::ValidationError;
 
@@ -19,7 +24,9 @@ const MAX_PERIOD: Duration = Duration::from_secs(24 * 60 * 60);
 /// Install it with [`HttpClientBuilder::rate_limit`](crate::HttpClientBuilder::rate_limit).
 /// Every HTTP attempt, **including automatic retries**, takes one slot before it is sent;
 /// when the budget is exhausted the request waits (asynchronously, on [`tokio::time`]) for
-/// its turn instead of failing. Waiting callers are served in the order they arrived.
+/// its turn instead of failing. Waiting callers are served in the order they arrived, and a
+/// caller that stops polling its request (for example a pagination stream left unpolled)
+/// does not hold up the others.
 ///
 /// The limiter is a token bucket in its GCRA form: requests are spaced `per / requests`
 /// apart, and up to `burst` requests may be sent back to back after an idle period. The
@@ -33,7 +40,8 @@ const MAX_PERIOD: Duration = Duration::from_secs(24 * 60 * 60);
 /// budgets. It covers REST requests only; WebSocket connections do not go through it.
 ///
 /// Cancellation is free: a request that is dropped while waiting for its turn (for example
-/// by a caller's own timeout) takes no slot, and the next waiter proceeds immediately.
+/// by a caller's own timeout) gives its slot to the next new request, so no capacity is
+/// lost. Requests already waiting keep their own turns.
 ///
 /// Spacing is `per / requests` rounded down to whole nanoseconds (at least 1 ns), so at odd
 /// rates it can be marginally faster than configured, and rates above one request per
@@ -133,18 +141,28 @@ impl RateLimit {
     }
 }
 
-/// The shared limiter state (GCRA): `tat` is the theoretical arrival time of the next
-/// request under a perfectly smooth stream.
+/// The shared limiter (GCRA): `tat` is the theoretical arrival time of the next request under
+/// a perfectly smooth stream.
 ///
-/// The (fair, FIFO) async mutex is held while the head waiter sleeps and `tat` is only
-/// advanced once the wait completes, so a dropped waiter changes nothing.
+/// A caller reserves its slot under a short, synchronous critical section and then sleeps
+/// without holding any lock, so a waiter that stops being polled never blocks the others. A
+/// waiter dropped before its slot opens returns the slot as a hole, which the next caller
+/// takes instead of extending the schedule; the set of send times therefore never changes,
+/// and cancellation stays free without ever exceeding the rate.
 #[derive(Debug)]
 pub(crate) struct Limiter {
     /// Spacing between requests (at least 1 ns).
     interval: Duration,
     /// How far ahead of `tat` a request may be sent: `(burst - 1) * interval`.
     tolerance: Duration,
-    tat: Mutex<Option<Instant>>,
+    state: StdMutex<State>,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    tat: Option<Instant>,
+    /// Open times of reserved slots whose waiter was dropped before they opened.
+    holes: BTreeSet<Instant>,
 }
 
 impl Limiter {
@@ -156,36 +174,68 @@ impl Limiter {
         Self {
             interval,
             tolerance,
-            tat: Mutex::new(None),
+            state: StdMutex::new(State::default()),
         }
     }
 
-    /// Waits until a slot is available and takes it.
-    ///
-    /// Cancel safe: if the future is dropped before it completes, no slot is consumed.
-    pub(crate) async fn acquire(&self) {
-        let mut tat = self.tat.lock().await;
-        let now = Instant::now();
-        let base = match *tat {
-            Some(t) if t > now => t,
-            _ => now,
-        };
-        let open_at = base.checked_sub(self.tolerance).unwrap_or(now);
-        if open_at > now {
-            tracing::debug!(
-                wait_ms =
-                    u64::try_from(open_at.duration_since(now).as_millis()).unwrap_or(u64::MAX),
-                "waiting on the client-side rate limit"
-            );
-            tokio::time::sleep_until(open_at).await;
+    fn state(&self) -> MutexGuard<'_, State> {
+        // The critical sections cannot panic, but never propagate poisoning regardless.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Reserves the next slot and returns the instant it opens (possibly in the past).
+    fn reserve(&self, now: Instant) -> Instant {
+        let mut state = self.state();
+        // Holes whose time has passed can no longer be used without bunching requests.
+        state.holes = state.holes.split_off(&now);
+        if let Some(open_at) = state.holes.pop_first() {
+            return open_at;
         }
-        let now = Instant::now();
-        let base = match *tat {
+        let base = match state.tat {
             Some(t) if t > now => t,
             _ => now,
         };
         // Saturate on (absurd) overflow: leave the state unchanged.
-        *tat = Some(base.checked_add(self.interval).unwrap_or(base));
+        state.tat = Some(base.checked_add(self.interval).unwrap_or(base));
+        base.checked_sub(self.tolerance).unwrap_or(now)
+    }
+
+    /// Waits until a slot is available and takes it.
+    ///
+    /// Cancel safe: if the future is dropped before its slot opens, the slot goes to the next
+    /// caller.
+    pub(crate) async fn acquire(&self) {
+        let now = Instant::now();
+        let open_at = self.reserve(now);
+        if open_at <= now {
+            return;
+        }
+        tracing::debug!(
+            wait_ms = u64::try_from(open_at.duration_since(now).as_millis()).unwrap_or(u64::MAX),
+            "waiting on the client-side rate limit"
+        );
+        let mut guard = Reservation {
+            limiter: self,
+            open_at,
+            used: false,
+        };
+        tokio::time::sleep_until(open_at).await;
+        guard.used = true;
+    }
+}
+
+/// Returns an unused slot to the limiter when a waiter is dropped before its slot opens.
+struct Reservation<'a> {
+    limiter: &'a Limiter,
+    open_at: Instant,
+    used: bool,
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if !self.used && self.open_at > Instant::now() {
+            self.limiter.state().holes.insert(self.open_at);
+        }
     }
 }
 
@@ -362,5 +412,55 @@ mod tests {
             h.await.unwrap();
         }
         assert_eq!(*order.lock().unwrap(), (0..10).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unpolled_waiter_does_not_block_others() {
+        let l = limiter(10, 1);
+        l.acquire().await;
+        // Start a waiter, poll it once, then keep it alive without polling it.
+        let mut held = Box::pin(l.acquire());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), &mut held)
+                .await
+                .is_err()
+        );
+        let start = Instant::now();
+        tokio::time::timeout(Duration::from_secs(1), l.acquire())
+            .await
+            .expect("a second waiter must not be blocked by an unpolled one");
+        assert!(start.elapsed() >= Duration::from_millis(150));
+        drop(held);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn holes_are_reused_without_exceeding_the_rate() {
+        let l = limiter(10, 1);
+        l.acquire().await;
+        // Reserve slots at 100 ms and 200 ms; cancel the first.
+        let mut first = Box::pin(l.acquire());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), &mut first)
+                .await
+                .is_err()
+        );
+        let second = tokio::spawn({
+            let l = Arc::clone(&l);
+            async move {
+                l.acquire().await;
+                Instant::now()
+            }
+        });
+        tokio::task::yield_now().await;
+        drop(first);
+        let start = Instant::now();
+        l.acquire().await; // takes the freed 100 ms slot
+        let third = Instant::now();
+        let second = second.await.unwrap();
+        assert!(third - start < Duration::from_millis(100));
+        assert!(second - third >= Duration::from_millis(100));
+        // The schedule continues after the last reservation.
+        l.acquire().await;
+        assert!(Instant::now() - second >= Duration::from_millis(100));
     }
 }
