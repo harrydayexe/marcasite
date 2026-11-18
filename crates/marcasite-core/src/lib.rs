@@ -43,6 +43,7 @@
 
 pub mod config;
 pub mod error;
+pub mod fees;
 pub mod pagination;
 pub mod query;
 pub mod rate_limit;

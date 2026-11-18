@@ -494,6 +494,22 @@ pub struct FeeSchedule {
     pub rebate_rate: Option<Decimal>,
 }
 
+impl FeeSchedule {
+    /// Computes the taker fee in USDC for trading `shares` at `price`, from this market's
+    /// rate and exponent.
+    ///
+    /// This always computes the taker fee (makers pay none) and is unrounded. See the
+    /// [`fees`](marcasite_core::fees) module for the formula, rounding and rate changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error if the rate or exponent is missing or invalid, or `price`
+    /// or `shares` is out of range.
+    pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> marcasite_core::Result<Decimal> {
+        marcasite_core::fees::taker_fee_from_parameters(shares, price, self.rate, self.exponent)
+    }
+}
+
 /// A market's description (`components/schemas/MarketDescription`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1405,6 +1421,19 @@ impl GetMarketsInformation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fee_schedule_taker_fee() {
+        let schedule: FeeSchedule =
+            serde_json::from_str(r#"{"exponent":1,"rate":0.07,"takerOnly":true,"rebateRate":0.2}"#)
+                .unwrap();
+        let fee = schedule
+            .taker_fee(Decimal::from(100), "0.50".parse().unwrap())
+            .unwrap();
+        assert_eq!(fee, "1.75".parse().unwrap());
+        let empty: FeeSchedule = serde_json::from_str("{}").unwrap();
+        assert!(empty.taker_fee(Decimal::ONE, Decimal::ONE).is_err());
+    }
 
     /// Field names and types from `components/schemas/Market` in
     /// `docs/polymarket/specs/gamma-openapi.yaml` (the docs publish no example body): `liquidity`,

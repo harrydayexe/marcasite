@@ -441,6 +441,25 @@ types were observed (decimal strings and one boolean), so every field is optiona
 
 **Implements:** `Clone`, `Debug`, `Deserialize<'de>`, `Eq`, `PartialEq`, `Serialize`
 
+#### Methods
+
+##### <a id="FeeSchedule.fn.taker_fee"></a>`taker_fee`
+
+```rust
+pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>
+```
+
+Computes the taker fee in USDC for trading `shares` at `price`, from this market's
+rate and exponent.
+
+This always computes the taker fee (makers pay none) and is unrounded. See the
+[`fees`](fees.md) module for the formula, rounding and rate changes.
+
+###### Errors
+
+Returns a validation error if the rate or exponent is missing or invalid, or `price`
+or `shares` is out of range.
+
 ### <a id="struct.LastTradePriceEvent"></a>`struct LastTradePriceEvent`
 
 ```rust

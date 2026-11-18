@@ -11,6 +11,7 @@
         "marcasite::clob",
         "marcasite::combos",
         "marcasite::data",
+        "marcasite::fees",
         "marcasite::gamma",
         "marcasite::geoblock",
         "marcasite::relayer",
@@ -378,6 +379,19 @@
           "external": null
         }
       ]
+    },
+    {
+      "path": "marcasite::fees",
+      "summary": "Taker fee computation.",
+      "docs": "Taker fee computation.\n\nPolymarket charges a fee to the taker of a trade, on markets that have fees enabled:\n\n```text\nfee = shares × rate × (price × (1 − price)) ^ exponent\n```\n\n`shares` is the number of shares traded, `price` the fill price (`0..=1`), and `rate` and\n`exponent` are the market's fee parameters (CLOB `fd.r` / `fd.e`, Gamma\n`feeSchedule.rate` / `feeSchedule.exponent`). The fee is in USDC, and makers pay no fee.\nSee <https://docs.polymarket.com/trading/fees> and\n<https://docs.polymarket.com/market-data/market-details#trading-fees>; the latter documents\nthe exponent as \"exponent applied to the price component\". Observed live\n(2026-11-17, 200 top markets): the exponent is always `1`.\n\n**Rates change.** Category rates change on 2026-11-20 (see\n<https://docs.polymarket.com/programs/fee-and-rebate-changes-november-2026>). Read\nthe rate and exponent from the market being traded, not from a hard-coded table.\n\n# Rounding\n\nThe documentation says \"Fees are rounded to 5 decimal places. The smallest fee charged is\n0.00001 USDC. Anything smaller rounds to zero\" ([`FEE_DECIMALS`](marcasite::fees::FEE_DECIMALS)) but does not say which\nrounding mode is used. [`taker_fee`](marcasite::fees::taker_fee) therefore returns the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) value; it is\nan estimate of the charged fee to within [`FEE_DECIMALS`](marcasite::fees::FEE_DECIMALS) decimal places. See\n`OPEN_QUESTIONS.md`.\n\n```rust\nuse marcasite_core::fees::taker_fee;\nuse rust_decimal::Decimal;\n\n// 100 shares at 0.50 with rate 0.07 and exponent 1: $1.75 (docs, trading/fees).\nlet fee = taker_fee(Decimal::from(100), \"0.50\".parse()?, \"0.07\".parse()?, 1)?;\nassert_eq!(fee, \"1.75\".parse()?);\n```",
+      "submodules": [],
+      "items": [
+        "marcasite::fees::FEE_DECIMALS",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::fees::exponent_from_decimal",
+        "marcasite::fees::taker_fee"
+      ],
+      "reexports": []
     },
     {
       "path": "marcasite::gamma",
@@ -5379,10 +5393,31 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::clob::FeeDetails::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::clob::FeeDetails::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::clob",
+      "parent": "marcasite::clob::FeeDetails",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
+      ]
     },
     {
       "path": "marcasite::clob::FeeRate",
@@ -14557,6 +14592,82 @@
       "related": []
     },
     {
+      "path": "marcasite::fees::FEE_DECIMALS",
+      "name": "FEE_DECIMALS",
+      "kind": "constant",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub const FEE_DECIMALS: u32 = 5;",
+      "summary": "Number of decimal places the documentation says fees are rounded to (5, so the smallest fee charged is 0.00001 USDC). The rounding mode is not documented.",
+      "docs": "Number of decimal places the documentation says fees are rounded to (5, so the smallest\nfee charged is 0.00001 USDC). The rounding mode is not documented.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::fees::MAX_EXPONENT",
+      "name": "MAX_EXPONENT",
+      "kind": "constant",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub const MAX_EXPONENT: u32 = 8;",
+      "summary": "Largest exponent [`taker_fee`](marcasite::fees::taker_fee) accepts. Live markets use `1`; the cap only bounds the work and rejects nonsense values.",
+      "docs": "Largest exponent [`taker_fee`](marcasite::fees::taker_fee) accepts. Live markets use `1`; the cap only bounds the\nwork and rejects nonsense values.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees::taker_fee"
+      ]
+    },
+    {
+      "path": "marcasite::fees::exponent_from_decimal",
+      "name": "exponent_from_decimal",
+      "kind": "fn",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub fn exponent_from_decimal(exponent: Decimal) -> Result<u32>",
+      "summary": "Converts a wire exponent (a JSON number, read as `Decimal`) into the integer [`taker_fee`](marcasite::fees::taker_fee) takes.",
+      "docs": "Converts a wire exponent (a JSON number, read as `Decimal`) into the integer\n[`taker_fee`](marcasite::fees::taker_fee) takes.\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `exponent` is negative, not an\ninteger, or above [`MAX_EXPONENT`](marcasite::fees::MAX_EXPONENT).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::fees::taker_fee",
+        "marcasite::Result"
+      ]
+    },
+    {
+      "path": "marcasite::fees::taker_fee",
+      "name": "taker_fee",
+      "kind": "fn",
+      "module": "marcasite::fees",
+      "parent": null,
+      "signature": "pub fn taker_fee(shares: Decimal, price: Decimal, rate: Decimal, exponent: u32) -> Result<Decimal>",
+      "summary": "Computes the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) taker fee in USDC: `shares × rate × (price × (1 − price)) ^ exponent`.",
+      "docs": "Computes the unrounded (computed in `Decimal`, accurate to about 28 significant digits; `Decimal` rounds beyond that) taker fee in USDC:\n`shares × rate × (price × (1 − price)) ^ exponent`.\n\nSee the [module documentation](marcasite::fees) for the sources, rounding and rate changes.\n\n# Errors\n\nReturns [`Error::Validation`](marcasite::Error::Validation) if `price` is outside `0..=1`,\n`shares` or `rate` is negative, `exponent` exceeds [`MAX_EXPONENT`](marcasite::fees::MAX_EXPONENT), or an intermediate\nproduct overflows `Decimal`.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::Error::Validation",
+        "marcasite::fees",
+        "marcasite::fees::MAX_EXPONENT",
+        "marcasite::Result"
+      ]
+    },
+    {
       "path": "marcasite::gamma::Category",
       "name": "Category",
       "kind": "struct",
@@ -15269,10 +15380,31 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::gamma::FeeSchedule::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::gamma::FeeSchedule::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::gamma",
+      "parent": "marcasite::gamma::FeeSchedule",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
+      ]
     },
     {
       "path": "marcasite::gamma::GammaClient",
@@ -24209,11 +24341,32 @@
         "PartialEq",
         "Serialize"
       ],
-      "members": [],
+      "members": [
+        "marcasite::ws::FeeSchedule::taker_fee"
+      ],
       "reexported_as": [],
       "doc_urls": [],
       "related": [
         "marcasite::ws::NewMarketEvent::fee_schedule"
+      ]
+    },
+    {
+      "path": "marcasite::ws::FeeSchedule::taker_fee",
+      "name": "taker_fee",
+      "kind": "method",
+      "module": "marcasite::ws",
+      "parent": "marcasite::ws::FeeSchedule",
+      "signature": "pub fn taker_fee(&self, shares: Decimal, price: Decimal) -> Result<Decimal>",
+      "summary": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's rate and exponent.",
+      "docs": "Computes the taker fee in USDC for trading `shares` at `price`, from this market's\nrate and exponent.\n\nThis always computes the taker fee (makers pay none) and is unrounded. See the\n[`fees`](marcasite::fees) module for the formula, rounding and rate changes.\n\n# Errors\n\nReturns a validation error if the rate or exponent is missing or invalid, or `price`\nor `shares` is out of range.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::fees",
+        "marcasite::Result"
       ]
     },
     {

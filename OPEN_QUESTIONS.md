@@ -89,3 +89,13 @@ the answer is recorded in `SPEC_DEVIATIONS.md` instead.
     `deny.toml` with a reason; it is not a known vulnerability. Migrating the public API from
     `chrono::DateTime<Utc>` to `jiff` or `time` is a breaking change to plan before v1.
     `marcasite-mcp` would still pull chrono through `rmcp`/`schemars` until they move.
+
+## Fees
+
+24. Which rounding mode do taker fees use? `trading/fees` says "Fees are rounded to 5 decimal
+    places. The smallest fee charged is 0.00001 USDC. Anything smaller rounds to zero" but names no
+    mode (half-up, half-even, truncation?). *Current:* `marcasite::fees::taker_fee` and the
+    `taker_fee` methods of the fee types return the unrounded value
+    (`shares x rate x (price x (1 - price)) ^ exponent`, computed in `Decimal`, accurate to about
+    28 significant digits); `fees::FEE_DECIMALS` (5) is exposed so
+    callers can round. The docs' worked tables (rounded to cents) are reproduced.

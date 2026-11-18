@@ -144,6 +144,8 @@
 
 mod client;
 
+pub use marcasite_core::fees;
+
 #[cfg(feature = "bridge")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bridge")))]
 pub mod bridge;

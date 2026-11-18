@@ -14,6 +14,7 @@ For the Polymarket APIs themselves see [`../polymarket/`](../polymarket/).
 | [`clob.md`](clob.md) | `marcasite::clob` | CLOB API client (`https://clob.polymarket.com`), public (unauthenticated) endpoints. |
 | [`combos.md`](combos.md) | `marcasite::combos` | Combos / RFQ REST API client (`https://combos-rfq-api.polymarket.com`). |
 | [`data.md`](data.md) | `marcasite::data` | Data API v2 client (`https://data-api.polymarket.com`, routes under `/v2`). |
+| [`fees.md`](fees.md) | `marcasite::fees` | Taker fee computation. |
 | [`gamma.md`](gamma.md) | `marcasite::gamma` | Gamma API client (`https://gamma-api.polymarket.com`). |
 | [`geoblock.md`](geoblock.md) | `marcasite::geoblock` | Geoblock check (`https://polymarket.com/api/geoblock`). |
 | [`relayer.md`](relayer.md) | `marcasite::relayer` | Relayer API client (`https://relayer-v2.polymarket.com`). |

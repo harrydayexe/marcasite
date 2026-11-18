@@ -133,7 +133,7 @@ is opened, so they nest under your application's own spans.
 
 ## Index
 
-- **Modules:** [`bridge`](bridge.md), [`clob`](clob.md), [`combos`](combos.md), [`data`](data.md), [`gamma`](gamma.md), [`geoblock`](geoblock.md), [`relayer`](relayer.md), [`types`](types.md), [`ws`](ws.md)
+- **Modules:** [`bridge`](bridge.md), [`clob`](clob.md), [`combos`](combos.md), [`data`](data.md), [`fees`](fees.md), [`gamma`](gamma.md), [`geoblock`](geoblock.md), [`relayer`](relayer.md), [`types`](types.md), [`ws`](ws.md)
 - **Re-exports:** `Decimal`, `Method`, `StatusCode`, `Url`, `chrono`, `serde_json`
 - **Structs:** [`ApiError`](#struct.ApiError), [`ConfigError`](#struct.ConfigError), [`DecodeError`](#struct.DecodeError), [`HttpClient`](#struct.HttpClient), [`HttpClientBuilder`](#struct.HttpClientBuilder), [`Paginated`](#struct.Paginated), [`Polymarket`](#struct.Polymarket), [`PolymarketBuilder`](#struct.PolymarketBuilder), [`RateLimit`](#struct.RateLimit), [`RetryPolicy`](#struct.RetryPolicy), [`TransportError`](#struct.TransportError), [`ValidationError`](#struct.ValidationError), [`WebSocketError`](#struct.WebSocketError)
 - **Enums:** [`Error`](#enum.Error), [`Service`](#enum.Service), [`WebSocketErrorKind`](#enum.WebSocketErrorKind)
@@ -145,6 +145,7 @@ is opened, so they nest under your application's own spans.
 - [`clob`](clob.md): CLOB API client (`https://clob.polymarket.com`), public (unauthenticated) endpoints.
 - [`combos`](combos.md): Combos / RFQ REST API client (`https://combos-rfq-api.polymarket.com`).
 - [`data`](data.md): Data API v2 client (`https://data-api.polymarket.com`, routes under `/v2`).
+- [`fees`](fees.md): Taker fee computation.
 - [`gamma`](gamma.md): Gamma API client (`https://gamma-api.polymarket.com`).
 - [`geoblock`](geoblock.md): Geoblock check (`https://polymarket.com/api/geoblock`).
 - [`relayer`](relayer.md): Relayer API client (`https://relayer-v2.polymarket.com`).
