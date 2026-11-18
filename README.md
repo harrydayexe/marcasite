@@ -36,7 +36,7 @@ Not affiliated with or endorsed by Polymarket.
 | Bridge API: supported assets, quotes, deposit/withdrawal addresses, status | `marcasite::bridge::BridgeClient` | `bridge` |
 | Combos / RFQ: combo-eligible markets | `marcasite::combos::CombosClient` | `combos` |
 | Geoblock check: is the requesting IP address blocked from trading | `marcasite::geoblock::GeoblockClient` | `geoblock` |
-| WebSockets: market channel, sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
+| WebSockets: market channel (optionally auto-reconnecting), sports results, PolyBolt public prices | `marcasite::ws` | `ws` |
 
 ## Quick start
 

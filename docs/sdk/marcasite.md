@@ -18,7 +18,7 @@ Predictions APIs:
 | Bridge API: supported assets, quotes, deposit/withdrawal addresses | [`bridge::BridgeClient`](bridge.md#struct.BridgeClient) | `bridge` |
 | Combos / RFQ API: combo-eligible markets | [`combos::CombosClient`](combos.md#struct.CombosClient) | `combos` |
 | Geoblock check: is the requesting IP address blocked from trading | [`geoblock::GeoblockClient`](geoblock.md#struct.GeoblockClient) | `geoblock` |
-| WebSockets: market channel, sports results, PolyBolt public prices | [`ws`](ws.md) | `ws` |
+| WebSockets: market channel (optionally auto-reconnecting), sports results, PolyBolt public prices | [`ws`](ws.md) | `ws` |
 
 All features are enabled by default; disable default features and pick the ones you need
 to reduce compile time. [`ENDPOINTS.md`] lists every endpoint and its implementation status.

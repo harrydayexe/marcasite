@@ -3,4 +3,5 @@
 mod market;
 mod mock;
 mod polybolt;
+mod reconnect;
 mod sports;

@@ -85,10 +85,10 @@ impl Serialize for SubscriptionLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct MarketSubscription {
-    asset_ids: Vec<TokenId>,
-    initial_dump: Option<bool>,
-    level: Option<SubscriptionLevel>,
-    custom_feature_enabled: Option<bool>,
+    pub(super) asset_ids: Vec<TokenId>,
+    pub(super) initial_dump: Option<bool>,
+    pub(super) level: Option<SubscriptionLevel>,
+    pub(super) custom_feature_enabled: Option<bool>,
 }
 
 impl MarketSubscription {
@@ -137,7 +137,7 @@ impl MarketSubscription {
         &self.asset_ids
     }
 
-    fn to_json(&self) -> Result<String> {
+    pub(super) fn to_json(&self) -> Result<String> {
         #[derive(Serialize)]
         struct Wire<'a> {
             assets_ids: &'a [TokenId],
@@ -162,7 +162,7 @@ impl MarketSubscription {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum Operation {
+pub(super) enum Operation {
     Subscribe,
     Unsubscribe,
 }
@@ -182,10 +182,10 @@ enum Operation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct MarketSubscriptionUpdate {
-    operation: Operation,
-    asset_ids: Vec<TokenId>,
-    level: Option<SubscriptionLevel>,
-    custom_feature_enabled: Option<bool>,
+    pub(super) operation: Operation,
+    pub(super) asset_ids: Vec<TokenId>,
+    pub(super) level: Option<SubscriptionLevel>,
+    pub(super) custom_feature_enabled: Option<bool>,
 }
 
 impl MarketSubscriptionUpdate {
@@ -585,8 +585,25 @@ impl MarketChannelBuilder {
     /// Returns [`Error::Config`] if the URL is invalid or the heartbeat interval or idle
     /// timeout is zero, or [`Error::WebSocket`] if the connection cannot be established.
     pub async fn connect(self, subscription: MarketSubscription) -> Result<MarketChannel> {
+        let config = self.config()?.initial_message(subscription.to_json()?);
+        let conn = WsConnection::connect(config).await?;
+        let handle = MarketChannelHandle {
+            sender: conn.sender(),
+        };
+        Ok(MarketChannel {
+            events: EventStream::new(conn),
+            handle,
+        })
+    }
+}
+
+impl MarketChannelBuilder {
+    /// The driver configuration for this builder, without the initial message. Fails like
+    /// [`connect`](Self::connect) does for invalid settings, so it also validates a builder
+    /// before any connection is attempted.
+    pub(super) fn config(&self) -> Result<marcasite_core::ws::WsConfig> {
         check_interval(self.heartbeat_interval)?;
-        let config = self
+        Ok(self
             .options
             .config(
                 Service::MarketChannel,
@@ -596,16 +613,7 @@ impl MarketChannelBuilder {
                     .max(MarketChannel::DEFAULT_IDLE_TIMEOUT),
             )?
             .heartbeat(self.heartbeat_interval, PING)
-            .ignore(PONG)
-            .initial_message(subscription.to_json()?);
-        let conn = WsConnection::connect(config).await?;
-        let handle = MarketChannelHandle {
-            sender: conn.sender(),
-        };
-        Ok(MarketChannel {
-            events: EventStream::new(conn),
-            handle,
-        })
+            .ignore(PONG))
     }
 }
 
