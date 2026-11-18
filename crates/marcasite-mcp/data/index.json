@@ -27,6 +27,7 @@
         "marcasite::Paginated",
         "marcasite::Polymarket",
         "marcasite::PolymarketBuilder",
+        "marcasite::RateLimit",
         "marcasite::Result",
         "marcasite::RetryPolicy",
         "marcasite::Service",
@@ -1181,6 +1182,7 @@
         "marcasite::HttpClient::new",
         "marcasite::HttpClient::builder",
         "marcasite::HttpClient::retry_policy",
+        "marcasite::HttpClient::has_rate_limit",
         "marcasite::HttpClient::max_response_size"
       ],
       "reexported_as": [],
@@ -1203,6 +1205,24 @@
       "doc_urls": [],
       "related": [
         "marcasite::HttpClientBuilder"
+      ]
+    },
+    {
+      "path": "marcasite::HttpClient::has_rate_limit",
+      "name": "has_rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::HttpClient",
+      "signature": "#[must_use]\npub fn has_rate_limit(&self) -> bool",
+      "summary": "Whether a client-side [`RateLimit`](marcasite::RateLimit) is in effect.",
+      "docs": "Whether a client-side [`RateLimit`](marcasite::RateLimit) is in effect.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::RateLimit"
       ]
     },
     {
@@ -1281,6 +1301,7 @@
         "marcasite::HttpClientBuilder::connect_timeout",
         "marcasite::HttpClientBuilder::user_agent",
         "marcasite::HttpClientBuilder::retry_policy",
+        "marcasite::HttpClientBuilder::rate_limit",
         "marcasite::HttpClientBuilder::max_response_size",
         "marcasite::HttpClientBuilder::build"
       ],
@@ -1359,6 +1380,26 @@
       "reexported_as": [],
       "doc_urls": [],
       "related": []
+    },
+    {
+      "path": "marcasite::HttpClientBuilder::rate_limit",
+      "name": "rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::HttpClientBuilder",
+      "signature": "pub fn rate_limit(self, limit: RateLimit) -> Self",
+      "summary": "Sets a client-side request budget (default: none).",
+      "docs": "Sets a client-side request budget (default: none).\n\nEvery HTTP attempt, retries included, waits for its turn under the limit; see\n[`RateLimit`](marcasite::RateLimit). The budget is shared by all clones of the built [`HttpClient`](marcasite::HttpClient), so one\nlimit spans every service client created from it; separate `HttpClient`s have\nseparate budgets. REST requests only: WebSocket connections are not limited.\n\nTimeouts: the wait for the limiter does not count against the per-request\n[`timeout`](marcasite::HttpClientBuilder::timeout), but a timeout the caller wraps around a request does\ninclude it. A `429` / `Retry-After` is not fed back into the limiter: a retry sleeps\nfor its backoff first and then waits for a slot, so the two delays add up.\n\n```rust\nuse std::num::NonZeroU32;\nuse marcasite_core::{HttpClient, RateLimit};\n\nlet http = HttpClient::builder()\n    .rate_limit(RateLimit::per_second(NonZeroU32::new(10).unwrap()))\n    .build()?;\n```",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient",
+        "marcasite::HttpClientBuilder::timeout",
+        "marcasite::RateLimit"
+      ]
     },
     {
       "path": "marcasite::HttpClientBuilder::retry_policy",
@@ -1683,6 +1724,7 @@
         "marcasite::PolymarketBuilder::connect_timeout",
         "marcasite::PolymarketBuilder::user_agent",
         "marcasite::PolymarketBuilder::retry_policy",
+        "marcasite::PolymarketBuilder::rate_limit",
         "marcasite::PolymarketBuilder::max_response_size",
         "marcasite::PolymarketBuilder::gamma_base_url",
         "marcasite::PolymarketBuilder::clob_base_url",
@@ -1838,8 +1880,8 @@
       "module": "marcasite",
       "parent": "marcasite::PolymarketBuilder",
       "signature": "pub fn http_client(self, http: HttpClient) -> Self",
-      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry and response size settings of this builder are then ignored.",
-      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry and response size\nsettings of this builder are then ignored.",
+      "summary": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry, rate limit and response size settings of this builder are then ignored.",
+      "docs": "Uses an existing [`HttpClient`](marcasite::HttpClient); the timeout, user agent, retry, rate limit and\nresponse size settings of this builder are then ignored.",
       "deprecated": null,
       "implements": [],
       "members": [],
@@ -1865,6 +1907,25 @@
       "doc_urls": [],
       "related": [
         "marcasite::HttpClientBuilder::max_response_size"
+      ]
+    },
+    {
+      "path": "marcasite::PolymarketBuilder::rate_limit",
+      "name": "rate_limit",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::PolymarketBuilder",
+      "signature": "pub fn rate_limit(self, limit: RateLimit) -> Self",
+      "summary": "Sets a client-side request budget shared by every service of this client (default: none); see [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).",
+      "docs": "Sets a client-side request budget shared by every service of this client (default:\nnone); see [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClientBuilder::rate_limit",
+        "marcasite::RateLimit"
       ]
     },
     {
@@ -1926,6 +1987,141 @@
       "signature": "pub fn user_agent(self, user_agent: impl Into<String>) -> Self",
       "summary": "Sets the `User-Agent` header (default `marcasite/<version>`).",
       "docs": "Sets the `User-Agent` header (default `marcasite/<version>`).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit",
+      "name": "RateLimit",
+      "kind": "struct",
+      "module": "marcasite",
+      "parent": null,
+      "signature": "pub struct RateLimit { /* private fields */ }",
+      "summary": "A client-side request budget: at most `requests` HTTP requests per period, with an optional burst allowance.",
+      "docs": "A client-side request budget: at most `requests` HTTP requests per period, with an\noptional burst allowance.\n\nInstall it with [`HttpClientBuilder::rate_limit`](marcasite::HttpClientBuilder::rate_limit).\nEvery HTTP attempt, **including automatic retries**, takes one slot before it is sent;\nwhen the budget is exhausted the request waits (asynchronously, on `tokio::time`) for\nits turn instead of failing. Waiting callers are served in the order they arrived.\n\nThe limiter is a token bucket in its GCRA form: requests are spaced `per / requests`\napart, and up to `burst` requests may be sent back to back after an idle period. The\ndefault burst is `1`, which spaces requests evenly and never sends two at once; raise it\nwith [`with_burst`](marcasite::RateLimit::with_burst) to allow short spikes while keeping the same\naverage rate.\n\nThe budget is shared by every clone of the [`HttpClient`](marcasite::HttpClient) it was\nconfigured on, so one limit spans all service clients built from that client. Separate\n`HttpClient`s (including those a service client builds for itself) have separate\nbudgets. It covers REST requests only; WebSocket connections do not go through it.\n\nCancellation is free: a request that is dropped while waiting for its turn (for example\nby a caller's own timeout) takes no slot, and the next waiter proceeds immediately.\n\nSpacing is `per / requests` rounded down to whole nanoseconds (at least 1 ns), so at odd\nrates it can be marginally faster than configured, and rates above one request per\nnanosecond are capped at that rate.\n\n# Timeouts\n\n- The wait for the limiter does **not** count against the per-request\n  [`timeout`](marcasite::HttpClientBuilder::timeout), which starts when the request is sent.\n- A timeout the caller wraps around a request (e.g. `tokio::time::timeout`) **does**\n  include the wait.\n- A `429` / `Retry-After` is not fed back into the limiter: a retry first sleeps for the\n  backoff and then waits for a slot, so the two delays add up.\n\n```rust\nuse std::num::NonZeroU32;\nuse marcasite_core::{HttpClient, RateLimit};\n\n// 10 requests per second, bursts of up to 5, shared by every service client built\n// from `http` (in the `marcasite` crate, pass it to `Polymarket::builder().http_client`).\nlet limit = RateLimit::per_second(NonZeroU32::new(10).unwrap())\n    .with_burst(NonZeroU32::new(5).unwrap());\nlet http = HttpClient::builder().rate_limit(limit).build()?;\nassert!(http.has_rate_limit());\n```",
+      "deprecated": null,
+      "implements": [
+        "Clone",
+        "Copy",
+        "Debug",
+        "Eq",
+        "Hash",
+        "PartialEq"
+      ],
+      "members": [
+        "marcasite::RateLimit::per_second",
+        "marcasite::RateLimit::new",
+        "marcasite::RateLimit::with_burst",
+        "marcasite::RateLimit::requests",
+        "marcasite::RateLimit::per",
+        "marcasite::RateLimit::burst"
+      ],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::HttpClient",
+        "marcasite::HttpClientBuilder::rate_limit",
+        "marcasite::HttpClientBuilder::timeout",
+        "marcasite::RateLimit::with_burst"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::burst",
+      "name": "burst",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn burst(&self) -> NonZeroU32",
+      "summary": "The number of requests that may be sent back to back.",
+      "docs": "The number of requests that may be sent back to back.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::new",
+      "name": "new",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "pub fn new(requests: NonZeroU32, per: Duration) -> Result<Self, ValidationError>",
+      "summary": "At most `requests` requests per `per`, with a burst of one.",
+      "docs": "At most `requests` requests per `per`, with a burst of one.\n\n# Errors\n\nReturns a [`ValidationError`](marcasite::ValidationError) if `per` is zero or longer than 24 hours.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::ValidationError"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::per",
+      "name": "per",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn per(&self) -> Duration",
+      "summary": "The period the request count refers to.",
+      "docs": "The period the request count refers to.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::per_second",
+      "name": "per_second",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn per_second(requests: NonZeroU32) -> Self",
+      "summary": "At most `requests` requests per second, with a burst of one.",
+      "docs": "At most `requests` requests per second, with a burst of one.",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": []
+    },
+    {
+      "path": "marcasite::RateLimit::requests",
+      "name": "requests",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn requests(&self) -> NonZeroU32",
+      "summary": "The number of requests allowed per [`per`](marcasite::RateLimit::per).",
+      "docs": "The number of requests allowed per [`per`](marcasite::RateLimit::per).",
+      "deprecated": null,
+      "implements": [],
+      "members": [],
+      "reexported_as": [],
+      "doc_urls": [],
+      "related": [
+        "marcasite::RateLimit::per"
+      ]
+    },
+    {
+      "path": "marcasite::RateLimit::with_burst",
+      "name": "with_burst",
+      "kind": "method",
+      "module": "marcasite",
+      "parent": "marcasite::RateLimit",
+      "signature": "#[must_use]\npub const fn with_burst(self, burst: NonZeroU32) -> Self",
+      "summary": "Allows up to `burst` requests to be sent back to back after an idle period (default 1). The average rate is unchanged. The effective burst is capped so that `(burst - 1) * interval` is at most 24 hours.",
+      "docs": "Allows up to `burst` requests to be sent back to back after an idle period (default\n1). The average rate is unchanged. The effective burst is capped so that\n`(burst - 1) * interval` is at most 24 hours.",
       "deprecated": null,
       "implements": [],
       "members": [],

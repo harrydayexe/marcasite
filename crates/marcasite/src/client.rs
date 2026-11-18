@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use marcasite_core::{HttpClient, HttpClientBuilder, Result, RetryPolicy};
+use marcasite_core::{HttpClient, HttpClientBuilder, RateLimit, Result, RetryPolicy};
 
 /// One handle to every enabled Polymarket service, sharing a single HTTP connection pool.
 ///
@@ -145,8 +145,8 @@ pub struct PolymarketBuilder {
 }
 
 impl PolymarketBuilder {
-    /// Uses an existing [`HttpClient`]; the timeout, user agent, retry and response size
-    /// settings of this builder are then ignored.
+    /// Uses an existing [`HttpClient`]; the timeout, user agent, retry, rate limit and
+    /// response size settings of this builder are then ignored.
     pub fn http_client(mut self, http: HttpClient) -> Self {
         self.http = Some(http);
         self
@@ -173,6 +173,13 @@ impl PolymarketBuilder {
     /// Sets the automatic retry policy (default: no retries).
     pub fn retry_policy(mut self, retry: RetryPolicy) -> Self {
         self.http_builder = self.http_builder.retry_policy(retry);
+        self
+    }
+
+    /// Sets a client-side request budget shared by every service of this client (default:
+    /// none); see [`HttpClientBuilder::rate_limit`].
+    pub fn rate_limit(mut self, limit: RateLimit) -> Self {
+        self.http_builder = self.http_builder.rate_limit(limit);
         self
     }
 

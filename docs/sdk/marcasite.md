@@ -135,7 +135,7 @@ is opened, so they nest under your application's own spans.
 
 - **Modules:** [`bridge`](bridge.md), [`clob`](clob.md), [`combos`](combos.md), [`data`](data.md), [`gamma`](gamma.md), [`geoblock`](geoblock.md), [`relayer`](relayer.md), [`types`](types.md), [`ws`](ws.md)
 - **Re-exports:** `Decimal`, `Method`, `StatusCode`, `Url`, `chrono`, `serde_json`
-- **Structs:** [`ApiError`](#struct.ApiError), [`ConfigError`](#struct.ConfigError), [`DecodeError`](#struct.DecodeError), [`HttpClient`](#struct.HttpClient), [`HttpClientBuilder`](#struct.HttpClientBuilder), [`Paginated`](#struct.Paginated), [`Polymarket`](#struct.Polymarket), [`PolymarketBuilder`](#struct.PolymarketBuilder), [`RetryPolicy`](#struct.RetryPolicy), [`TransportError`](#struct.TransportError), [`ValidationError`](#struct.ValidationError), [`WebSocketError`](#struct.WebSocketError)
+- **Structs:** [`ApiError`](#struct.ApiError), [`ConfigError`](#struct.ConfigError), [`DecodeError`](#struct.DecodeError), [`HttpClient`](#struct.HttpClient), [`HttpClientBuilder`](#struct.HttpClientBuilder), [`Paginated`](#struct.Paginated), [`Polymarket`](#struct.Polymarket), [`PolymarketBuilder`](#struct.PolymarketBuilder), [`RateLimit`](#struct.RateLimit), [`RetryPolicy`](#struct.RetryPolicy), [`TransportError`](#struct.TransportError), [`ValidationError`](#struct.ValidationError), [`WebSocketError`](#struct.WebSocketError)
 - **Enums:** [`Error`](#enum.Error), [`Service`](#enum.Service), [`WebSocketErrorKind`](#enum.WebSocketErrorKind)
 - **Type aliases:** [`Result`](#type.Result)
 
@@ -457,6 +457,15 @@ pub fn retry_policy(&self) -> RetryPolicy
 
 The retry policy in effect.
 
+##### <a id="HttpClient.fn.has_rate_limit"></a>`has_rate_limit`
+
+```rust
+#[must_use]
+pub fn has_rate_limit(&self) -> bool
+```
+
+Whether a client-side [`RateLimit`](marcasite.md#struct.RateLimit) is in effect.
+
 ##### <a id="HttpClient.fn.max_response_size"></a>`max_response_size`
 
 ```rust
@@ -530,6 +539,33 @@ pub fn retry_policy(self, retry: RetryPolicy) -> Self
 ```
 
 Sets the automatic retry policy (default: no retries).
+
+##### <a id="HttpClientBuilder.fn.rate_limit"></a>`rate_limit`
+
+```rust
+pub fn rate_limit(self, limit: RateLimit) -> Self
+```
+
+Sets a client-side request budget (default: none).
+
+Every HTTP attempt, retries included, waits for its turn under the limit; see
+[`RateLimit`](marcasite.md#struct.RateLimit). The budget is shared by all clones of the built [`HttpClient`](marcasite.md#struct.HttpClient), so one
+limit spans every service client created from it; separate `HttpClient`s have
+separate budgets. REST requests only: WebSocket connections are not limited.
+
+Timeouts: the wait for the limiter does not count against the per-request
+[`timeout`](marcasite.md#HttpClientBuilder.fn.timeout), but a timeout the caller wraps around a request does
+include it. A `429` / `Retry-After` is not fed back into the limiter: a retry sleeps
+for its backoff first and then waits for a slot, so the two delays add up.
+
+```rust
+use std::num::NonZeroU32;
+use marcasite_core::{HttpClient, RateLimit};
+
+let http = HttpClient::builder()
+    .rate_limit(RateLimit::per_second(NonZeroU32::new(10).unwrap()))
+    .build()?;
+```
 
 ##### <a id="HttpClientBuilder.fn.max_response_size"></a>`max_response_size`
 
@@ -744,8 +780,8 @@ Builder for [`Polymarket`](marcasite.md#struct.Polymarket).
 pub fn http_client(self, http: HttpClient) -> Self
 ```
 
-Uses an existing [`HttpClient`](marcasite.md#struct.HttpClient); the timeout, user agent, retry and response size
-settings of this builder are then ignored.
+Uses an existing [`HttpClient`](marcasite.md#struct.HttpClient); the timeout, user agent, retry, rate limit and
+response size settings of this builder are then ignored.
 
 ##### <a id="PolymarketBuilder.fn.timeout"></a>`timeout`
 
@@ -778,6 +814,15 @@ pub fn retry_policy(self, retry: RetryPolicy) -> Self
 ```
 
 Sets the automatic retry policy (default: no retries).
+
+##### <a id="PolymarketBuilder.fn.rate_limit"></a>`rate_limit`
+
+```rust
+pub fn rate_limit(self, limit: RateLimit) -> Self
+```
+
+Sets a client-side request budget shared by every service of this client (default:
+none); see [`HttpClientBuilder::rate_limit`](marcasite.md#HttpClientBuilder.fn.rate_limit).
 
 ##### <a id="PolymarketBuilder.fn.max_response_size"></a>`max_response_size`
 
@@ -856,6 +901,122 @@ Builds the client.
 
 Returns [`Error::Config`](marcasite.md#enum.Error) if a base URL is invalid or the HTTP
 client cannot be built.
+
+### <a id="struct.RateLimit"></a>`struct RateLimit`
+
+```rust
+pub struct RateLimit { /* private fields */ }
+```
+
+A client-side request budget: at most `requests` HTTP requests per period, with an
+optional burst allowance.
+
+Install it with [`HttpClientBuilder::rate_limit`](marcasite.md#HttpClientBuilder.fn.rate_limit).
+Every HTTP attempt, **including automatic retries**, takes one slot before it is sent;
+when the budget is exhausted the request waits (asynchronously, on `tokio::time`) for
+its turn instead of failing. Waiting callers are served in the order they arrived.
+
+The limiter is a token bucket in its GCRA form: requests are spaced `per / requests`
+apart, and up to `burst` requests may be sent back to back after an idle period. The
+default burst is `1`, which spaces requests evenly and never sends two at once; raise it
+with [`with_burst`](marcasite.md#RateLimit.fn.with_burst) to allow short spikes while keeping the same
+average rate.
+
+The budget is shared by every clone of the [`HttpClient`](marcasite.md#struct.HttpClient) it was
+configured on, so one limit spans all service clients built from that client. Separate
+`HttpClient`s (including those a service client builds for itself) have separate
+budgets. It covers REST requests only; WebSocket connections do not go through it.
+
+Cancellation is free: a request that is dropped while waiting for its turn (for example
+by a caller's own timeout) takes no slot, and the next waiter proceeds immediately.
+
+Spacing is `per / requests` rounded down to whole nanoseconds (at least 1 ns), so at odd
+rates it can be marginally faster than configured, and rates above one request per
+nanosecond are capped at that rate.
+
+#### Timeouts
+
+- The wait for the limiter does **not** count against the per-request
+  [`timeout`](marcasite.md#HttpClientBuilder.fn.timeout), which starts when the request is sent.
+- A timeout the caller wraps around a request (e.g. `tokio::time::timeout`) **does**
+  include the wait.
+- A `429` / `Retry-After` is not fed back into the limiter: a retry first sleeps for the
+  backoff and then waits for a slot, so the two delays add up.
+
+```rust
+use std::num::NonZeroU32;
+use marcasite_core::{HttpClient, RateLimit};
+
+// 10 requests per second, bursts of up to 5, shared by every service client built
+// from `http` (in the `marcasite` crate, pass it to `Polymarket::builder().http_client`).
+let limit = RateLimit::per_second(NonZeroU32::new(10).unwrap())
+    .with_burst(NonZeroU32::new(5).unwrap());
+let http = HttpClient::builder().rate_limit(limit).build()?;
+assert!(http.has_rate_limit());
+```
+
+**Implements:** `Clone`, `Copy`, `Debug`, `Eq`, `Hash`, `PartialEq`
+
+#### Methods
+
+##### <a id="RateLimit.fn.per_second"></a>`per_second`
+
+```rust
+#[must_use]
+pub const fn per_second(requests: NonZeroU32) -> Self
+```
+
+At most `requests` requests per second, with a burst of one.
+
+##### <a id="RateLimit.fn.new"></a>`new`
+
+```rust
+pub fn new(requests: NonZeroU32, per: Duration) -> Result<Self, ValidationError>
+```
+
+At most `requests` requests per `per`, with a burst of one.
+
+###### Errors
+
+Returns a [`ValidationError`](marcasite.md#struct.ValidationError) if `per` is zero or longer than 24 hours.
+
+##### <a id="RateLimit.fn.with_burst"></a>`with_burst`
+
+```rust
+#[must_use]
+pub const fn with_burst(self, burst: NonZeroU32) -> Self
+```
+
+Allows up to `burst` requests to be sent back to back after an idle period (default
+1). The average rate is unchanged. The effective burst is capped so that
+`(burst - 1) * interval` is at most 24 hours.
+
+##### <a id="RateLimit.fn.requests"></a>`requests`
+
+```rust
+#[must_use]
+pub const fn requests(&self) -> NonZeroU32
+```
+
+The number of requests allowed per [`per`](marcasite.md#RateLimit.fn.per).
+
+##### <a id="RateLimit.fn.per"></a>`per`
+
+```rust
+#[must_use]
+pub const fn per(&self) -> Duration
+```
+
+The period the request count refers to.
+
+##### <a id="RateLimit.fn.burst"></a>`burst`
+
+```rust
+#[must_use]
+pub const fn burst(&self) -> NonZeroU32
+```
+
+The number of requests that may be sent back to back.
 
 ### <a id="struct.RetryPolicy"></a>`struct RetryPolicy`
 

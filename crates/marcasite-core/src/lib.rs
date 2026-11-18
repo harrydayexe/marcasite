@@ -15,7 +15,7 @@
 //!
 //! - [`Error`] / [`Result`]: the single error type returned by every fallible operation.
 //! - [`HttpClient`] / [`HttpClientBuilder`]: the shared, connection-pooled HTTP client and its
-//!   settings (timeouts, user agent, [`RetryPolicy`]).
+//!   settings (timeouts, user agent, [`RetryPolicy`], [`RateLimit`]).
 //! - [`transport`]: per-service request execution, error-body parsing and response decoding.
 //! - [`Query`]: an ordered query-string builder supporting repeated and comma-separated keys.
 //! - [`pagination`]: helpers that turn cursor/offset pagination into a [`Stream`].
@@ -45,6 +45,7 @@ pub mod config;
 pub mod error;
 pub mod pagination;
 pub mod query;
+pub mod rate_limit;
 pub mod serde_util;
 pub mod transport;
 pub mod types;
@@ -64,6 +65,7 @@ pub use error::{
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
 pub use error::{WebSocketError, WebSocketErrorKind};
 pub use query::Query;
+pub use rate_limit::RateLimit;
 pub use transport::Transport;
 
 /// Re-export of [`http::Method`], used in error context.

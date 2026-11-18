@@ -172,8 +172,8 @@ pub mod ws;
 pub use client::{Polymarket, PolymarketBuilder};
 pub use marcasite_core::pagination::Paginated;
 pub use marcasite_core::{
-    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Method, Result,
-    RetryPolicy, Service, StatusCode, TransportError, Url, ValidationError,
+    ApiError, ConfigError, DecodeError, Error, HttpClient, HttpClientBuilder, Method, RateLimit,
+    Result, RetryPolicy, Service, StatusCode, TransportError, Url, ValidationError,
 };
 #[cfg(feature = "ws")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ws")))]

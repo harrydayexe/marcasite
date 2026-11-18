@@ -1,8 +1,11 @@
 //! HTTP client configuration shared by every service.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use crate::error::{ConfigError, Result};
+use crate::{
+    error::{ConfigError, Result},
+    rate_limit::{Limiter, RateLimit},
+};
 
 /// The default `User-Agent` header sent with every request.
 pub const DEFAULT_USER_AGENT: &str = concat!("marcasite/", env!("CARGO_PKG_VERSION"));
@@ -141,6 +144,7 @@ pub struct HttpClient {
     pub(crate) inner: reqwest::Client,
     pub(crate) retry: RetryPolicy,
     pub(crate) max_response_size: usize,
+    pub(crate) limiter: Option<Arc<Limiter>>,
 }
 
 impl HttpClient {
@@ -163,6 +167,12 @@ impl HttpClient {
     #[must_use]
     pub fn retry_policy(&self) -> RetryPolicy {
         self.retry
+    }
+
+    /// Whether a client-side [`RateLimit`] is in effect.
+    #[must_use]
+    pub fn has_rate_limit(&self) -> bool {
+        self.limiter.is_some()
     }
 
     /// The largest response body accepted, in bytes (see
@@ -197,6 +207,7 @@ pub struct HttpClientBuilder {
     user_agent: String,
     retry: RetryPolicy,
     max_response_size: usize,
+    rate_limit: Option<RateLimit>,
 }
 
 impl Default for HttpClientBuilder {
@@ -207,6 +218,7 @@ impl Default for HttpClientBuilder {
             user_agent: DEFAULT_USER_AGENT.to_owned(),
             retry: RetryPolicy::none(),
             max_response_size: DEFAULT_MAX_RESPONSE_SIZE,
+            rate_limit: None,
         }
     }
 }
@@ -239,6 +251,35 @@ impl HttpClientBuilder {
     /// Sets the automatic retry policy (default: no retries).
     pub fn retry_policy(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
+        self
+    }
+
+    /// Sets a client-side request budget (default: none).
+    ///
+    /// Every HTTP attempt, retries included, waits for its turn under the limit; see
+    /// [`RateLimit`]. The budget is shared by all clones of the built [`HttpClient`], so one
+    /// limit spans every service client created from it; separate `HttpClient`s have
+    /// separate budgets. REST requests only: WebSocket connections are not limited.
+    ///
+    /// Timeouts: the wait for the limiter does not count against the per-request
+    /// [`timeout`](Self::timeout), but a timeout the caller wraps around a request does
+    /// include it. A `429` / `Retry-After` is not fed back into the limiter: a retry sleeps
+    /// for its backoff first and then waits for a slot, so the two delays add up.
+    ///
+    /// ```no_run
+    /// use std::num::NonZeroU32;
+    /// use marcasite_core::{HttpClient, RateLimit};
+    ///
+    /// # fn main() -> marcasite_core::Result<()> {
+    /// let http = HttpClient::builder()
+    ///     .rate_limit(RateLimit::per_second(NonZeroU32::new(10).unwrap()))
+    ///     .build()?;
+    /// # let _ = http;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn rate_limit(mut self, limit: RateLimit) -> Self {
+        self.rate_limit = Some(limit);
         self
     }
 
@@ -279,6 +320,7 @@ impl HttpClientBuilder {
             inner,
             retry: self.retry,
             max_response_size: self.max_response_size,
+            limiter: self.rate_limit.map(|limit| Arc::new(Limiter::new(limit))),
         })
     }
 }

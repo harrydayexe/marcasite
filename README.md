@@ -96,8 +96,8 @@ async fn main() -> marcasite::Result<()> {
   trace id), rate limiting (`Retry-After`), timeouts, transport failures, decode failures (with the
   JSON path of the offending field), client-side validation (e.g. batch limits) and configuration
   errors. No panics on network input.
-- **Configurable.** Timeouts, user agent, opt-in automatic retries (`RetryPolicy`) and base URLs
-  (e.g. for a mock server) via `Polymarket::builder()` or each client's builder.
+- **Configurable.** Timeouts, user agent, opt-in automatic retries (`RetryPolicy`), an opt-in
+  client-side rate limit (`RateLimit`) and base URLs (e.g. for a mock server) via `Polymarket::builder()` or each client's builder.
 - **Observable.** Diagnostics via `tracing` (requests at `DEBUG`, bodies at `TRACE`); no subscriber
   is installed by the library.
 
