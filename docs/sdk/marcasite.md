@@ -915,7 +915,9 @@ optional burst allowance.
 Install it with [`HttpClientBuilder::rate_limit`](marcasite.md#HttpClientBuilder.fn.rate_limit).
 Every HTTP attempt, **including automatic retries**, takes one slot before it is sent;
 when the budget is exhausted the request waits (asynchronously, on `tokio::time`) for
-its turn instead of failing. Waiting callers are served in the order they arrived.
+its turn instead of failing. Waiting callers are served in the order they arrived, and a
+caller that stops polling its request (for example a pagination stream left unpolled)
+does not hold up the others.
 
 The limiter is a token bucket in its GCRA form: requests are spaced `per / requests`
 apart, and up to `burst` requests may be sent back to back after an idle period. The
@@ -929,7 +931,8 @@ configured on, so one limit spans all service clients built from that client. Se
 budgets. It covers REST requests only; WebSocket connections do not go through it.
 
 Cancellation is free: a request that is dropped while waiting for its turn (for example
-by a caller's own timeout) takes no slot, and the next waiter proceeds immediately.
+by a caller's own timeout) gives its slot to the next new request, so no capacity is
+lost. Requests already waiting keep their own turns.
 
 Spacing is `per / requests` rounded down to whole nanoseconds (at least 1 ns), so at odd
 rates it can be marginally faster than configured, and rates above one request per

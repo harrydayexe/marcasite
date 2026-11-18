@@ -1739,7 +1739,10 @@ accepts and immediately drops, for example) does **not** reset them, so a flappi
 server is backed off from like an unreachable one. Receiving messages does not make a
 connection stable: the server sends the initial snapshots right away. Stability is
 measured up to the moment the loss is *observed* (the stream is polled and sees the
-connection end), which for a connection that died silently is when the idle timeout fires.
+connection end). A connection ended by a `Timeout` (the idle timeout: nothing, not even a
+heartbeat reply, arrived for that long) is only credited with the time up to the start of
+that silence, so a server that accepts connections and then goes silent is backed off from
+and counts against [`max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts).
 
 [`max_attempts`](ws.md#ReconnectPolicy.fn.max_attempts), if set, bounds the number of attempts without a
 stable connection in between; by default the channel retries forever.
@@ -1915,6 +1918,13 @@ re-sends the subscription: the tracked asset ids (the initial ones, changed by t
 `custom_feature_enabled`. If you set `initial_dump(false)`, the server does not send
 `book` snapshots after a reconnection either.
 
+`level` and `custom_feature_enabled` are tracked per channel, not per asset: the last
+value set by the initial subscription or a *subscribe* update is sent for **every** tracked
+asset on reconnection (the initial message carries one value for all of them). If you
+subscribe assets with different settings, they converge on the latest after a reconnect.
+Whether the server applies these settings per asset or per connection is undocumented
+(see `OPEN_QUESTIONS.md`).
+
 Created with [`new`](ws.md#ReconnectingMarketChannel.fn.new) or [`MarketChannelBuilder::reconnecting`](ws.md#MarketChannelBuilder.fn.reconnecting); it does not
 connect before it is polled, so nothing blocks and a Tokio runtime is only needed from the
 first poll on.
@@ -1951,6 +1961,12 @@ first poll on.
 A consumer that keeps local order books should mark the assets of every `Disconnected`
 untrusted and trust an asset again at its first `book` after the following `Connected`.
 
+A message that fails to decode may be a lost delta, and it does not end the connection,
+so no `Disconnected` or fresh `book` follows on its own. Mark every tracked asset
+untrusted on a decode error until its next `book`. A reconnection sends fresh snapshots
+(unless `initial_dump(false)`); whether a subscribe update through the handle does is
+undocumented.
+
 ```rust
 use std::{collections::HashSet, time::Duration};
 
@@ -1973,8 +1989,12 @@ let mut untrusted = HashSet::new();
 while let Some(item) = channel.next().await {
     let event = match item {
         Ok(event) => event,
-        // One message did not decode: not fatal, the stream continues.
-        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => continue,
+        // One message did not decode: not fatal, the stream continues, but it may have
+        // been a lost delta. Distrust every book until its next snapshot.
+        Err(Error::WebSocket(err)) if err.kind() == WebSocketErrorKind::Decode => {
+            untrusted.extend(handle.asset_ids());
+            continue;
+        }
         // The policy gave up, or the error cannot be fixed by retrying.
         Err(err) => return Err(err),
     };
