@@ -54,22 +54,40 @@ impl Visit for Fields {
     }
 }
 
-struct Capture(Arc<Mutex<Captured>>);
+/// A layer installed once as the process-wide default subscriber. It records into the
+/// buffer of the current thread's [`capture`] call, if any.
+///
+/// A global subscriber, rather than one `set_default` per test, avoids a race in tracing's
+/// global callsite-interest cache: with per-thread subscribers, a callsite first hit on a
+/// thread without one could be cached as "never" and a capturing test would miss its span.
+struct Capture;
 
-/// Index of a span in `Captured::spans`, stored in the span's extensions.
-struct SpanIndex(usize);
+thread_local! {
+    static CURRENT: std::cell::RefCell<Option<Arc<Mutex<Captured>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn current() -> Option<Arc<Mutex<Captured>>> {
+    CURRENT.with(|c| c.borrow().clone())
+}
+
+/// Where a span's fields live: its capture buffer and index, stored in the span's extensions.
+struct SpanIndex(Arc<Mutex<Captured>>, usize);
 
 impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Capture {
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        let Some(buffer) = current() else { return };
         let mut fields = Fields::default();
         attrs.record(&mut fields);
-        let mut captured = self.0.lock().unwrap();
-        captured
-            .spans
-            .push((attrs.metadata().name().to_owned(), fields.0));
-        let index = captured.spans.len() - 1;
+        let index = {
+            let mut captured = buffer.lock().unwrap();
+            captured
+                .spans
+                .push((attrs.metadata().name().to_owned(), fields.0));
+            captured.spans.len() - 1
+        };
         if let Some(span) = ctx.span(id) {
-            span.extensions_mut().insert(SpanIndex(index));
+            span.extensions_mut().insert(SpanIndex(buffer, index));
         }
     }
 
@@ -78,13 +96,14 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Capture {
         values.record(&mut fields);
         let Some(span) = ctx.span(id) else { return };
         let extensions = span.extensions();
-        let Some(SpanIndex(index)) = extensions.get::<SpanIndex>() else {
+        let Some(SpanIndex(buffer, index)) = extensions.get::<SpanIndex>() else {
             return;
         };
-        self.0.lock().unwrap().spans[*index].1.extend(fields.0);
+        buffer.lock().unwrap().spans[*index].1.extend(fields.0);
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        let Some(buffer) = current() else { return };
         let mut fields = Fields::default();
         event.record(&mut fields);
         let message = fields.0.remove("message").unwrap_or_default();
@@ -92,17 +111,31 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Capture {
             .event_scope(event)
             .map(|scope| scope.map(|span| span.name().to_owned()).collect())
             .unwrap_or_default();
-        self.0.lock().unwrap().events.push((message, scope));
+        buffer.lock().unwrap().events.push((message, scope));
     }
 }
 
-/// Installs a capturing subscriber on the current thread until the guard is dropped.
+/// Clears the current thread's capture buffer when dropped.
+pub(crate) struct CaptureGuard(());
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        CURRENT.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+/// Captures spans and events created on the current thread until the guard is dropped.
 ///
 /// Use with a current-thread runtime (the `#[tokio::test]` default) so spawned tasks run on
-/// the thread that has the subscriber.
-pub(crate) fn capture() -> (Arc<Mutex<Captured>>, tracing::subscriber::DefaultGuard) {
+/// the thread that is capturing.
+pub(crate) fn capture() -> (Arc<Mutex<Captured>>, CaptureGuard) {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        // Fails only if another global subscriber was installed first; tests install none.
+        let _ =
+            tracing::subscriber::set_global_default(tracing_subscriber::registry().with(Capture));
+    });
     let captured = Arc::new(Mutex::new(Captured::default()));
-    let subscriber = tracing_subscriber::registry().with(Capture(captured.clone()));
-    let guard = tracing::subscriber::set_default(subscriber);
-    (captured, guard)
+    CURRENT.with(|c| *c.borrow_mut() = Some(captured.clone()));
+    (captured, CaptureGuard(()))
 }
